@@ -2,6 +2,14 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { GlassCard } from "@/components/GlassCard";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -10,12 +18,17 @@ import {
 } from "@/components/ui/select";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Users as UsersIcon, Shield, User } from "lucide-react";
-import { useEffect } from "react";
+import { Users as UsersIcon, Shield, User, UserPlus } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 export default function Users() {
   const { user, loading } = useAuth();
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [newUserName, setNewUserName] = useState("");
+  const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserRole, setNewUserRole] = useState<"user" | "admin">("user");
+  
   const { data: users, refetch } = trpc.usersAdmin.list.useQuery(undefined, {
     enabled: !!user && user.role === "admin",
   });
@@ -23,6 +36,20 @@ export default function Users() {
   const updateRole = trpc.usersAdmin.updateRole.useMutation({
     onSuccess: () => {
       toast.success("Rol actualizado correctamente");
+      refetch();
+    },
+    onError: (error) => {
+      toast.error(error.message);
+    },
+  });
+
+  const createUser = trpc.usersAdmin.create.useMutation({
+    onSuccess: () => {
+      toast.success("Usuario creado correctamente");
+      setShowAddDialog(false);
+      setNewUserName("");
+      setNewUserEmail("");
+      setNewUserRole("user");
       refetch();
     },
     onError: (error) => {
@@ -55,12 +82,30 @@ export default function Users() {
     updateRole.mutate({ userId, role: newRole });
   };
 
+  const handleCreateUser = () => {
+    if (!newUserName.trim() || !newUserEmail.trim()) {
+      toast.error("Por favor completa todos los campos");
+      return;
+    }
+    createUser.mutate({
+      name: newUserName,
+      email: newUserEmail,
+      role: newUserRole,
+    });
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
       <div className="container max-w-4xl">
-        <div className="mb-8">
-          <h1 className="mb-2 text-4xl font-bold text-green-900">Gestión de Usuarios</h1>
-          <p className="text-green-700">Administra los roles y permisos de los usuarios</p>
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <h1 className="mb-2 text-4xl font-bold text-green-900">Gestión de Usuarios</h1>
+            <p className="text-green-700">Administra los roles y permisos de los usuarios</p>
+          </div>
+          <Button onClick={() => setShowAddDialog(true)} className="flex items-center gap-2">
+            <UserPlus className="h-5 w-5" />
+            Agregar Usuario
+          </Button>
         </div>
 
         {users && users.length > 0 ? (
@@ -111,6 +156,56 @@ export default function Users() {
             <p className="text-green-600">Los usuarios aparecerán aquí cuando inicien sesión</p>
           </GlassCard>
         )}
+
+        {/* Dialog para agregar usuario */}
+        <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Agregar Nuevo Usuario</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="userName">Nombre</Label>
+                <Input
+                  id="userName"
+                  value={newUserName}
+                  onChange={(e) => setNewUserName(e.target.value)}
+                  placeholder="Nombre del usuario"
+                />
+              </div>
+              <div>
+                <Label htmlFor="userEmail">Email</Label>
+                <Input
+                  id="userEmail"
+                  type="email"
+                  value={newUserEmail}
+                  onChange={(e) => setNewUserEmail(e.target.value)}
+                  placeholder="email@ejemplo.com"
+                />
+              </div>
+              <div>
+                <Label htmlFor="userRole">Rol</Label>
+                <Select value={newUserRole} onValueChange={(value) => setNewUserRole(value as "user" | "admin")}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="user">Usuario</SelectItem>
+                    <SelectItem value="admin">Admin</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={handleCreateUser} disabled={createUser.isPending} className="flex-1">
+                  {createUser.isPending ? "Creando..." : "Crear Usuario"}
+                </Button>
+                <Button onClick={() => setShowAddDialog(false)} variant="outline" className="flex-1">
+                  Cancelar
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

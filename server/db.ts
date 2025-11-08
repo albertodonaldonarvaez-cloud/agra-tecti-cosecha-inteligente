@@ -184,3 +184,44 @@ export async function updateUserRole(userId: number, role: "user" | "admin") {
   if (!db) throw new Error("Database not available");
   await db.update(users).set({ role, updatedAt: new Date() }).where(eq(users.id, userId));
 }
+
+export async function createManualUser(data: { name: string; email: string; role?: "user" | "admin" }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  // Generar un openId único para usuario manual
+  const openId = `manual-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+  
+  await db.insert(users).values({
+    openId,
+    name: data.name,
+    email: data.email,
+    role: data.role || "user",
+    loginMethod: "manual",
+  });
+}
+
+export async function getBoxesWithFilters(startDate?: string, endDate?: string) {
+  const db = await getDb();
+  if (!db) return [];
+  
+  let query = db.select().from(boxes);
+  
+  if (startDate && endDate) {
+    const { and, gte, lte } = await import("drizzle-orm");
+    query = query.where(
+      and(
+        gte(boxes.submissionTime, new Date(startDate)),
+        lte(boxes.submissionTime, new Date(endDate))
+      )
+    ) as any;
+  } else if (startDate) {
+    const { gte } = await import("drizzle-orm");
+    query = query.where(gte(boxes.submissionTime, new Date(startDate))) as any;
+  } else if (endDate) {
+    const { lte } = await import("drizzle-orm");
+    query = query.where(lte(boxes.submissionTime, new Date(endDate))) as any;
+  }
+  
+  return await query.orderBy(boxes.submissionTime);
+}

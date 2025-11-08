@@ -213,6 +213,20 @@ export const appRouter = router({
       const { getAllUsers } = await import("./db");
       return await getAllUsers();
     }),
+    create: protectedProcedure
+      .input(z.object({
+        name: z.string(),
+        email: z.string().email(),
+        role: z.enum(["user", "admin"]).default("user"),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "admin") {
+          throw new Error("Solo administradores pueden crear usuarios");
+        }
+        const { createManualUser } = await import("./db");
+        await createManualUser(input);
+        return { success: true };
+      }),
     updateRole: protectedProcedure
       .input(z.object({
         userId: z.number(),
@@ -225,6 +239,76 @@ export const appRouter = router({
         const { updateUserRole } = await import("./db");
         await updateUserRole(input.userId, input.role);
         return { success: true };
+      }),
+  }),
+
+  // Routers de estadísticas y análisis
+  analytics: router({
+    getStats: protectedProcedure
+      .input(z.object({
+        startDate: z.string().optional(),
+        endDate: z.string().optional(),
+      }))
+      .query(async ({ input }) => {
+        const { getBoxesWithFilters } = await import("./db");
+        const boxes = await getBoxesWithFilters(input.startDate, input.endDate);
+        
+        const total = boxes.length;
+        const totalWeight = boxes.reduce((sum, box) => sum + box.weight, 0) / 1000;
+        
+        const firstQuality = boxes.filter(b => b.harvesterId !== 98 && b.harvesterId !== 99).length;
+        const secondQuality = boxes.filter(b => b.harvesterId === 98).length;
+        const waste = boxes.filter(b => b.harvesterId === 99).length;
+        
+        // Estadísticas por parcela
+        const parcelStats = boxes.reduce((acc, box) => {
+          const key = box.parcelCode;
+          if (!acc[key]) {
+            acc[key] = {
+              parcelCode: box.parcelCode,
+              parcelName: box.parcelName,
+              total: 0,
+              weight: 0,
+              firstQuality: 0,
+              secondQuality: 0,
+              waste: 0,
+            };
+          }
+          acc[key].total++;
+          acc[key].weight += box.weight;
+          if (box.harvesterId === 98) acc[key].secondQuality++;
+          else if (box.harvesterId === 99) acc[key].waste++;
+          else acc[key].firstQuality++;
+          return acc;
+        }, {} as Record<string, any>);
+        
+        // Estadísticas por cortadora
+        const harvesterStats = boxes.reduce((acc, box) => {
+          const key = box.harvesterId;
+          if (!acc[key]) {
+            acc[key] = {
+              harvesterId: box.harvesterId,
+              total: 0,
+              weight: 0,
+            };
+          }
+          acc[key].total++;
+          acc[key].weight += box.weight;
+          return acc;
+        }, {} as Record<number, any>);
+        
+        return {
+          total,
+          totalWeight,
+          firstQuality,
+          secondQuality,
+          waste,
+          firstQualityPercent: total > 0 ? (firstQuality / total * 100).toFixed(1) : "0",
+          secondQualityPercent: total > 0 ? (secondQuality / total * 100).toFixed(1) : "0",
+          wastePercent: total > 0 ? (waste / total * 100).toFixed(1) : "0",
+          parcelStats: Object.values(parcelStats),
+          harvesterStats: Object.values(harvesterStats),
+        };
       }),
   }),
 });

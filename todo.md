@@ -67,3 +67,12 @@
 
 ## Bugs
 - [x] Corregir error de query undefined en apiConfig.get cuando no hay configuración guardada
+
+## Nuevas Funcionalidades
+- [x] Agregar procedimiento backend para crear usuarios manualmente
+- [x] Agregar procedimiento backend para obtener estadísticas con filtros de fecha
+- [x] Crear página de Análisis de Datos con filtros
+- [x] Implementar botones de filtro rápido (15 días, último mes)
+- [x] Crear modal de detalle de caja con imagen en alta calidad
+- [x] Agregar botón de agregar usuarios en página de Usuarios
+- [x] Agregar botón de cerrar sesión en menú inferior

@@ -1,6 +1,8 @@
 import { cn } from "@/lib/utils";
-import { BarChart3, Box, Settings, Users, Scissors } from "lucide-react";
+import { BarChart3, Box, Settings, Users, Scissors, LogOut, TrendingUp } from "lucide-react";
 import { Link, useLocation } from "wouter";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 
 interface NavItem {
   to: string;
@@ -15,16 +17,30 @@ interface FloatingNavProps {
 
 export function FloatingNav({ isAdmin = false }: FloatingNavProps) {
   const [location] = useLocation();
+  
+  const logout = trpc.auth.logout.useMutation({
+    onSuccess: () => {
+      toast.success("Sesión cerrada correctamente");
+      window.location.href = "/";
+    },
+  });
 
   const navItems: NavItem[] = [
     { to: "/", icon: BarChart3, label: "Dashboard" },
     { to: "/boxes", icon: Box, label: "Cajas" },
+    { to: "/analytics", icon: TrendingUp, label: "Análisis" },
     { to: "/harvesters", icon: Scissors, label: "Cortadoras", adminOnly: true },
     { to: "/users", icon: Users, label: "Usuarios", adminOnly: true },
     { to: "/settings", icon: Settings, label: "Configuración", adminOnly: true },
   ];
 
   const filteredItems = navItems.filter(item => !item.adminOnly || isAdmin);
+
+  const handleLogout = () => {
+    if (confirm("¿Estás seguro de que deseas cerrar sesión?")) {
+      logout.mutate();
+    }
+  };
 
   return (
     <nav className="fixed bottom-4 left-0 right-0 z-50 px-4">
@@ -49,6 +65,19 @@ export function FloatingNav({ isAdmin = false }: FloatingNavProps) {
               </Link>
             );
           })}
+          
+          {/* Separador */}
+          <div className="h-6 w-px bg-green-300/30" />
+          
+          {/* Botón de cerrar sesión */}
+          <button
+            onClick={handleLogout}
+            disabled={logout.isPending}
+            className="flex items-center justify-center rounded-full p-3 text-red-600 transition-all duration-300 hover:bg-red-50/20 hover:text-red-700 disabled:opacity-50"
+            title="Cerrar Sesión"
+          >
+            <LogOut className="h-5 w-5" />
+          </button>
         </div>
       </div>
     </nav>
