@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { InsertUser, users, apiConfig, harvesters, boxes, InsertBox } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -89,4 +89,98 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+// Funciones para API Config
+export async function getApiConfig() {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(apiConfig).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function upsertApiConfig(config: { apiUrl: string; apiToken: string; assetId: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  const existing = await getApiConfig();
+  if (existing) {
+    await db.update(apiConfig).set({ ...config, updatedAt: new Date() }).where(eq(apiConfig.id, existing.id));
+  } else {
+    await db.insert(apiConfig).values(config);
+  }
+}
+
+export async function updateLastSync() {
+  const db = await getDb();
+  if (!db) return;
+  const existing = await getApiConfig();
+  if (existing) {
+    await db.update(apiConfig).set({ lastSync: new Date() }).where(eq(apiConfig.id, existing.id));
+  }
+}
+
+// Funciones para Harvesters
+export async function getAllHarvesters() {
+  const db = await getDb();
+  if (!db) return [];
+  return await db.select().from(harvesters).orderBy(harvesters.number);
+}
+
+export async function upsertHarvester(harvester: { number: number; customName?: string | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  await db.insert(harvesters).values(harvester).onDuplicateKeyUpdate({
+    set: { customName: harvester.customName, updatedAt: new Date() },
+  });
+}
+
+// Funciones para Boxes
+export async function upsertBox(box: InsertBox) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  await db.insert(boxes).values(box).onDuplicateKeyUpdate({
+    set: {
+      boxCode: box.boxCode,
+      harvesterId: box.harvesterId,
+      parcelCode: box.parcelCode,
+      parcelName: box.parcelName,
+      weight: box.weight,
+      photoFilename: box.photoFilename,
+      photoUrl: box.photoUrl,
+      photoLargeUrl: box.photoLargeUrl,
+      photoMediumUrl: box.photoMediumUrl,
+      photoSmallUrl: box.photoSmallUrl,
+      latitude: box.latitude,
+      longitude: box.longitude,
+      submissionTime: box.submissionTime,
+      updatedAt: new Date(),
+    },
+  });
+}
+
+export async function getAllBoxes() {
+  const db = await getDb();
+  if (!db) return [];
+  return await db.select().from(boxes).orderBy(boxes.submissionTime);
+}
+
+export async function getBoxById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(boxes).where(eq(boxes.id, id)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+// Funciones para Users (admin)
+export async function getAllUsers() {
+  const db = await getDb();
+  if (!db) return [];
+  return await db.select().from(users).orderBy(users.createdAt);
+}
+
+export async function updateUserRole(userId: number, role: "user" | "admin") {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(users).set({ role, updatedAt: new Date() }).where(eq(users.id, userId));
+}

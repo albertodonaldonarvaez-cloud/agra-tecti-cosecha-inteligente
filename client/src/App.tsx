@@ -5,16 +5,42 @@ import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
+import Boxes from "./pages/Boxes";
+import Settings from "./pages/Settings";
+import Users from "./pages/Users";
+import Harvesters from "./pages/Harvesters";
+import { FloatingNav } from "./components/FloatingNav";
+import { useAuth } from "./_core/hooks/useAuth";
 
 function Router() {
-  // make sure to consider if you need authentication for certain routes
+  const { user, loading } = useAuth();
+  const isAdmin = user?.role === "admin";
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-center">
+          <div className="mb-4 h-12 w-12 animate-spin rounded-full border-4 border-green-200 border-t-green-600 mx-auto" />
+          <p className="text-muted-foreground">Cargando...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <Switch>
-      <Route path={"/"} component={Home} />
-      <Route path={"/404"} component={NotFound} />
-      {/* Final fallback route */}
-      <Route component={NotFound} />
-    </Switch>
+    <>
+      <Switch>
+        <Route path={"/"} component={Home} />
+        <Route path={"/boxes"} component={Boxes} />
+        <Route path="/harvesters" component={Harvesters} />
+        <Route path="/users" component={Users} />
+        <Route path="/settings" component={Settings} />
+        <Route path={"/404"} component={NotFound} />
+        {/* Final fallback route */}
+        <Route component={NotFound} />
+      </Switch>
+      {user && <FloatingNav isAdmin={isAdmin} />}
+    </>
   );
 }
 
