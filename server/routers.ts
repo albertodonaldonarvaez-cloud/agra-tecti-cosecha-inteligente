@@ -22,7 +22,8 @@ export const appRouter = router({
   apiConfig: router({
     get: protectedProcedure.query(async () => {
       const { getApiConfig } = await import("./db");
-      return await getApiConfig();
+      const config = await getApiConfig();
+      return config || null;
     }),
     save: protectedProcedure
       .input(z.object({

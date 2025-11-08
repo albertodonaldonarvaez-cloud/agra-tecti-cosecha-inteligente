@@ -57,9 +57,9 @@ export default function Settings() {
 
   useEffect(() => {
     if (config) {
-      setApiUrl(config.apiUrl);
-      setApiToken(config.apiToken);
-      setAssetId(config.assetId);
+      setApiUrl(config.apiUrl || "");
+      setApiToken(config.apiToken || "");
+      setAssetId(config.assetId || "");
     }
   }, [config]);
 

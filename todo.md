@@ -64,3 +64,6 @@
 - [ ] Verificar permisos de admin vs usuario regular
 - [ ] Probar carga de imágenes desde API
 - [ ] Verificar responsividad del diseño
+
+## Bugs
+- [x] Corregir error de query undefined en apiConfig.get cuando no hay configuración guardada
