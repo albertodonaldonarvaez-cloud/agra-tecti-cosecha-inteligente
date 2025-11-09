@@ -1,6 +1,7 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { GlassCard } from "@/components/GlassCard";
 import { Button } from "@/components/ui/button";
+import { getProxiedImageUrl } from "@/lib/imageProxy";
 import {
   Dialog,
   DialogContent,
@@ -145,7 +146,7 @@ export default function Boxes() {
               {selectedBox.photoUrl && (
                 <div className="overflow-hidden rounded-lg border border-green-200">
                   <img
-                    src={selectedBox.photoUrl}
+                    src={getProxiedImageUrl(selectedBox.photoUrl)}
                     alt={`Caja ${selectedBox.boxCode}`}
                     className="h-auto w-full object-cover"
                   />

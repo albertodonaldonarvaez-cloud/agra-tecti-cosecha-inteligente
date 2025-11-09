@@ -35,6 +35,11 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   // Cookie parser for authentication
   app.use(cookieParser());
+  
+  // Image proxy for Kobo images
+  const { proxyKoboImage } = await import("../imageProxy");
+  app.get("/api/image-proxy", proxyKoboImage);
+  
   // tRPC API
   app.use(
     "/api/trpc",

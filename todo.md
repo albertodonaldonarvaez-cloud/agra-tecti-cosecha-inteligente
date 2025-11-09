@@ -92,3 +92,6 @@
 ## Nuevos Bugs Reportados
 - [x] Corregir cálculos de peso en Analytics (verificar conversión gramos a kg)
 - [x] Corregir visualización de fotografías (usar URLs del API en lugar de nombres de archivo)
+
+## Bug Crítico
+- [x] Corregir visualización de imágenes (implementado proxy con autenticación)

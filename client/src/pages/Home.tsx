@@ -1,6 +1,7 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { GlassCard } from "@/components/GlassCard";
 import { Button } from "@/components/ui/button";
+import { getProxiedImageUrl } from "@/lib/imageProxy";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
@@ -211,7 +212,7 @@ export default function Home() {
                       className="group relative cursor-pointer overflow-hidden rounded-lg border-2 border-green-200 transition-all hover:scale-105 hover:border-green-400 hover:shadow-lg"
                     >
                       <img
-                        src={box.photoSmallUrl || box.photoUrl || ""}
+                        src={getProxiedImageUrl(box.photoSmallUrl || box.photoUrl)}
                         alt={box.boxCode}
                         className="aspect-square w-full object-cover"
                       />
@@ -294,7 +295,7 @@ export default function Home() {
             <div className="space-y-4">
               <div className="overflow-hidden rounded-lg">
                 <img
-                  src={selectedBox.photoLargeUrl || selectedBox.photoUrl || ""}
+                  src={getProxiedImageUrl(selectedBox.photoLargeUrl || selectedBox.photoUrl)}
                   alt={selectedBox.boxCode}
                   className="w-full"
                 />
