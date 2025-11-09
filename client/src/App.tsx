@@ -10,22 +10,24 @@ import Analytics from "./pages/Analytics";
 import Settings from "./pages/Settings";
 import Users from "./pages/Users";
 import Harvesters from "./pages/Harvesters";
+import Login from "./pages/Login";
 import { FloatingNav } from "./components/FloatingNav";
 import { useAuth } from "./_core/hooks/useAuth";
 
 function Router() {
   const { user, loading } = useAuth();
-  const isAdmin = user?.role === "admin";
 
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <div className="text-center">
-          <div className="mb-4 h-12 w-12 animate-spin rounded-full border-4 border-green-200 border-t-green-600 mx-auto" />
-          <p className="text-muted-foreground">Cargando...</p>
-        </div>
+        <p className="text-green-600">Cargando...</p>
       </div>
     );
+  }
+
+  // Si no hay usuario, mostrar login
+  if (!user) {
+    return <Login />;
   }
 
   return (
@@ -41,23 +43,15 @@ function Router() {
         {/* Final fallback route */}
         <Route component={NotFound} />
       </Switch>
-      {user && <FloatingNav isAdmin={isAdmin} />}
+      <FloatingNav isAdmin={user.role === "admin"} />
     </>
   );
 }
 
-// NOTE: About Theme
-// - First choose a default theme according to your design style (dark or light bg), than change color palette in index.css
-//   to keep consistent foreground/background color across components
-// - If you want to make theme switchable, pass `switchable` ThemeProvider and use `useTheme` hook
-
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider
-        defaultTheme="light"
-        // switchable
-      >
+      <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
           <Router />

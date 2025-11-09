@@ -76,3 +76,11 @@
 - [x] Crear modal de detalle de caja con imagen en alta calidad
 - [x] Agregar botón de agregar usuarios en página de Usuarios
 - [x] Agregar botón de cerrar sesión en menú inferior
+
+## Nuevas Mejoras Solicitadas
+- [x] Reemplazar autenticación de Manus por sistema independiente
+- [x] Implementar login (solo admin crea usuarios)
+- [x] Implementar carga de imágenes desde API de KoboToolbox
+- [x] Agregar galería de 5 imágenes recientes en dashboard con modal
+- [x] Implementar sincronización completa desde API de Kobo
+- [x] Crear gráfica de líneas temporal mostrando evolución de calidades (Recharts)

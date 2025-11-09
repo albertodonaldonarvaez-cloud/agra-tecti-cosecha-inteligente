@@ -2,21 +2,11 @@ import { trpc } from "@/lib/trpc";
 
 export function useAuth() {
   const { data: user, isLoading: loading, error } = trpc.auth.me.useQuery();
-  const logoutMutation = trpc.auth.logout.useMutation({
-    onSuccess: () => {
-      window.location.href = "/";
-    },
-  });
-
-  const logout = () => {
-    logoutMutation.mutate();
-  };
 
   return {
     user: user || null,
     loading,
     error,
     isAuthenticated: !!user,
-    logout,
   };
 }

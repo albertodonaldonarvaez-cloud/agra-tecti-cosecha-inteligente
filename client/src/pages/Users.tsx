@@ -27,6 +27,7 @@ export default function Users() {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newUserName, setNewUserName] = useState("");
   const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
   const [newUserRole, setNewUserRole] = useState<"user" | "admin">("user");
   
   const { data: users, refetch } = trpc.usersAdmin.list.useQuery(undefined, {
@@ -49,6 +50,7 @@ export default function Users() {
       setShowAddDialog(false);
       setNewUserName("");
       setNewUserEmail("");
+      setNewUserPassword("");
       setNewUserRole("user");
       refetch();
     },
@@ -83,13 +85,18 @@ export default function Users() {
   };
 
   const handleCreateUser = () => {
-    if (!newUserName.trim() || !newUserEmail.trim()) {
+    if (!newUserName.trim() || !newUserEmail.trim() || !newUserPassword.trim()) {
       toast.error("Por favor completa todos los campos");
+      return;
+    }
+    if (newUserPassword.length < 6) {
+      toast.error("La contraseña debe tener al menos 6 caracteres");
       return;
     }
     createUser.mutate({
       name: newUserName,
       email: newUserEmail,
+      password: newUserPassword,
       role: newUserRole,
     });
   };
@@ -181,6 +188,16 @@ export default function Users() {
                   value={newUserEmail}
                   onChange={(e) => setNewUserEmail(e.target.value)}
                   placeholder="email@ejemplo.com"
+                />
+              </div>
+              <div>
+                <Label htmlFor="userPassword">Contraseña</Label>
+                <Input
+                  id="userPassword"
+                  type="password"
+                  value={newUserPassword}
+                  onChange={(e) => setNewUserPassword(e.target.value)}
+                  placeholder="Mínimo 6 caracteres"
                 />
               </div>
               <div>

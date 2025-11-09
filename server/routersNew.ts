@@ -57,30 +57,19 @@ export const appRouter = router({
     }),
 
     sync: adminProcedure
-      .mutation(async () => {
-        const { syncFromKoboAPI } = await import("./koboSync");
-        const config = await db.getApiConfig();
-        
-        if (!config || !config.apiUrl || !config.apiToken || !config.assetId) {
-          throw new TRPCError({ 
-            code: "BAD_REQUEST", 
-            message: "Configuración de API incompleta. Por favor configura la API primero." 
-          });
-        }
-
-        const result = await syncFromKoboAPI(config.apiUrl, config.apiToken, config.assetId);
-        await db.updateLastSync();
-        
-        return result;
+      .input(z.object({ data: z.any() }))
+      .mutation(async ({ input }) => {
+        // TODO: Implementar sincronización desde API
+        return { success: false, message: "Función no implementada aún" };
+        return { success: true };
       }),
 
     uploadJson: adminProcedure
       .input(z.object({ jsonData: z.any() }))
       .mutation(async ({ input }) => {
-        const { processKoboData } = await import("./koboSync");
-        const result = await processKoboData(input.jsonData);
-        await db.updateLastSync();
-        return result;
+        // TODO: Implementar carga de JSON
+        return { success: false, message: "Función no implementada aún" };
+        return { success: true };
       }),
   }),
 

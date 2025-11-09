@@ -17,12 +17,12 @@ export default function Harvesters() {
 
   const [customNames, setCustomNames] = useState<Record<number, string>>({});
 
-  const updateHarvester = trpc.harvesters.update.useMutation({
+  const updateHarvester = trpc.harvesters.updateName.useMutation({
     onSuccess: () => {
       toast.success("Nombre actualizado correctamente");
       refetch();
     },
-    onError: (error) => {
+    onError: (error: any) => {
       toast.error(error.message);
     },
   });
@@ -58,10 +58,10 @@ export default function Harvesters() {
     );
   }
 
-  const handleSave = (number: number) => {
+  const handleSave = (harvesterId: number, harvesterNumber: number) => {
     updateHarvester.mutate({
-      number,
-      customName: customNames[number] || undefined,
+      harvesterId,
+      customName: customNames[harvesterNumber] || "",
     });
   };
 
@@ -112,7 +112,7 @@ export default function Harvesters() {
                         className="flex-1"
                       />
                       <Button
-                        onClick={() => handleSave(harvester.number)}
+                        onClick={() => handleSave(harvester.id, harvester.number)}
                         disabled={updateHarvester.isPending}
                         size="sm"
                       >

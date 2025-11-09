@@ -30,21 +30,35 @@ export default function Settings() {
     },
   });
 
-  const syncFromKobo = trpc.boxes.syncFromKobo.useMutation({
-    onSuccess: (data) => {
-      toast.success(`${data.count} cajas sincronizadas correctamente`);
+  const syncFromKobo = trpc.boxes.sync.useMutation({
+    onSuccess: (data: any) => {
+      if (data.success) {
+        toast.success(`¡Sincronización exitosa! ${data.processedCount} de ${data.totalCount} cajas procesadas`);
+        if (data.errors && data.errors.length > 0) {
+          console.warn("Errores durante la sincronización:", data.errors);
+        }
+      } else {
+        toast.error(data.message || "Error en la sincronización");
+      }
     },
-    onError: (error) => {
+    onError: (error: any) => {
       toast.error(error.message);
     },
   });
 
   const uploadJson = trpc.boxes.uploadJson.useMutation({
-    onSuccess: (data) => {
-      toast.success(`${data.count} cajas cargadas correctamente`);
-      setJsonData("");
+    onSuccess: (data: any) => {
+      if (data.success) {
+        toast.success(`¡Carga exitosa! ${data.processedCount} de ${data.totalCount} cajas procesadas`);
+        setJsonData("");
+        if (data.errors && data.errors.length > 0) {
+          console.warn("Errores durante la carga:", data.errors);
+        }
+      } else {
+        toast.error(data.message || "Error en la carga");
+      }
     },
-    onError: (error) => {
+    onError: (error: any) => {
       toast.error(error.message);
     },
   });
@@ -91,7 +105,12 @@ export default function Settings() {
       toast.error("Por favor ingresa datos JSON válidos");
       return;
     }
-    uploadJson.mutate({ jsonData });
+    try {
+      const parsed = JSON.parse(jsonData);
+      uploadJson.mutate({ jsonData: parsed });
+    } catch (e) {
+      toast.error("JSON inválido");
+    }
   };
 
   return (

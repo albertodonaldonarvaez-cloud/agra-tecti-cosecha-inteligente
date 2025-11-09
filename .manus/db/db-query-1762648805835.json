@@ -1,0 +1,9 @@
+{
+  "query": "INSERT INTO users (email, password, name, role, createdAt, updatedAt, lastSignedIn)\nVALUES (\n  'admin@agratec.com',\n  '$2b$10$vexJKAKiHS5xjhyJsMugXO9z9EbIWY1Gk6locipdLPGag6V6KxAnS',\n  'Administrador',\n  'admin',\n  NOW(),\n  NOW(),\n  NOW()\n);",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2dXMzNE423GF752.93a763099bdb --database gm3GbAvYvduVcPFJeqhch2 --execute INSERT INTO users (email, password, name, role, createdAt, updatedAt, lastSignedIn)\nVALUES (\n  'admin@agratec.com',\n  '$2b$10$vexJKAKiHS5xjhyJsMugXO9z9EbIWY1Gk6locipdLPGag6V6KxAnS',\n  'Administrador',\n  'admin',\n  NOW(),\n  NOW(),\n  NOW()\n);",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 890
+}
