@@ -128,9 +128,9 @@ export default function Boxes() {
         )}
       </div>
 
-      {/* Modal de Detalle */}
+      {/* Modal de detalle */}
       <Dialog open={!!selectedBox} onOpenChange={() => setSelectedBox(null)}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center justify-between">
               <span>Detalle de Caja: {selectedBox?.boxCode}</span>
@@ -144,17 +144,17 @@ export default function Boxes() {
             <div className="space-y-4">
               {/* Imagen */}
               {selectedBox.photoUrl && (
-                <div className="overflow-hidden rounded-lg border border-green-200">
+                <div className="overflow-hidden rounded-lg border border-green-200 bg-gray-100">
                   <img
                     src={getProxiedImageUrl(selectedBox.photoUrl)}
                     alt={`Caja ${selectedBox.boxCode}`}
-                    className="h-auto w-full object-cover"
+                    className="w-full h-auto max-h-[50vh] object-contain"
                   />
                 </div>
               )}
 
               {/* Información */}
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="rounded-lg border border-green-200 bg-green-50/50 p-4">
                   <p className="text-sm text-green-600">Código de Caja</p>
                   <p className="text-xl font-bold text-green-900">{selectedBox.boxCode}</p>

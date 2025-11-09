@@ -95,3 +95,7 @@
 
 ## Bug Crítico
 - [x] Corregir visualización de imágenes (implementado proxy con autenticación)
+
+## Mejoras de UI
+- [x] Eliminar sección de "Últimas 5 Cajas Registradas" del dashboard
+- [x] Hacer modal de imagen completamente responsivo

@@ -197,37 +197,6 @@ export default function Home() {
               </div>
             </GlassCard>
 
-            {/* Galería de imágenes recientes */}
-            {recentBoxesWithImages.length > 0 && (
-              <GlassCard className="p-6">
-                <div className="mb-4 flex items-center gap-2">
-                  <ImageIcon className="h-6 w-6 text-green-600" />
-                  <h2 className="text-2xl font-semibold text-green-900">Últimas Cajas Registradas</h2>
-                </div>
-                <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
-                  {recentBoxesWithImages.map((box) => (
-                    <div
-                      key={box.id}
-                      onClick={() => handleImageClick(box)}
-                      className="group relative cursor-pointer overflow-hidden rounded-lg border-2 border-green-200 transition-all hover:scale-105 hover:border-green-400 hover:shadow-lg"
-                    >
-                      <img
-                        src={getProxiedImageUrl(box.photoSmallUrl || box.photoUrl)}
-                        alt={box.boxCode}
-                        className="aspect-square w-full object-cover"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent opacity-0 transition-opacity group-hover:opacity-100">
-                        <div className="absolute bottom-2 left-2 right-2 text-white">
-                          <p className="text-sm font-semibold">{box.boxCode}</p>
-                          <p className="text-xs">{(box.weight / 1000).toFixed(2)} kg</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </GlassCard>
-            )}
-
             {/* Gráfica de evolución temporal */}
             {chartData.length > 0 && (
               <GlassCard className="p-6">
@@ -285,22 +254,22 @@ export default function Home() {
 
       {/* Modal de detalle de imagen */}
       <Dialog open={showImageModal} onOpenChange={setShowImageModal}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-[95vw] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-2xl font-bold text-green-900">
+            <DialogTitle className="text-xl sm:text-2xl font-bold text-green-900">
               Detalle de Caja: {selectedBox?.boxCode}
             </DialogTitle>
           </DialogHeader>
           {selectedBox && (
             <div className="space-y-4">
-              <div className="overflow-hidden rounded-lg">
+              <div className="overflow-hidden rounded-lg bg-gray-100">
                 <img
                   src={getProxiedImageUrl(selectedBox.photoLargeUrl || selectedBox.photoUrl)}
                   alt={selectedBox.boxCode}
-                  className="w-full"
+                  className="w-full h-auto max-h-[50vh] object-contain"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <p className="text-sm text-green-600">Código de Caja</p>
                   <p className="font-semibold text-green-900">{selectedBox.boxCode}</p>
