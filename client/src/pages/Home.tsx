@@ -181,19 +181,6 @@ export default function Home() {
                     />
                   </div>
                 </div>
-
-                <div>
-                  <div className="mb-2 flex justify-between text-sm">
-                    <span className="text-green-700">Desperdicio</span>
-                    <span className="font-semibold text-green-900">{stats.wastePercent}%</span>
-                  </div>
-                  <div className="h-4 overflow-hidden rounded-full bg-red-100">
-                    <div 
-                      className="h-full bg-red-500 transition-all duration-500"
-                      style={{ width: `${stats.wastePercent}%` }}
-                    />
-                  </div>
-                </div>
               </div>
             </GlassCard>
 

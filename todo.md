@@ -102,3 +102,6 @@
 
 ## Mejora de Modal
 - [x] Rediseñar modal con layout de dos columnas (imagen | información) super responsivo
+
+## Ajuste de Dashboard
+- [x] Eliminar tarjeta de desperdicio del dashboard principal
