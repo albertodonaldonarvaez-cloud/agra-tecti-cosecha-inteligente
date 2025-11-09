@@ -118,6 +118,12 @@ export async function getAllBoxes() {
   return await db.select().from(boxes).orderBy(boxes.submissionTime);
 }
 
+export async function clearAllBoxes() {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(boxes);
+}
+
 export async function getBoxById(id: number) {
   const db = await getDb();
   if (!db) return undefined;

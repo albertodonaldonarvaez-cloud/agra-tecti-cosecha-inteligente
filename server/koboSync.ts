@@ -48,8 +48,9 @@ export async function processKoboData(data: KoboData) {
       const boxNumber = boxParts[1];
       const boxCode = result.escanea_la_caja;
 
-      // Parsear peso
-      const weight = parseFloat(result.peso_de_la_caja);
+      // Parsear peso (convertir de kg a gramos para almacenar como entero)
+      const weightKg = parseFloat(result.peso_de_la_caja);
+      const weight = Math.round(weightKg * 1000); // Convertir a gramos
 
       // Parsear ubicación
       const locationParts = result.tu_ubicacion.split(" ");

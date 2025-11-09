@@ -82,6 +82,12 @@ export const appRouter = router({
         await db.updateLastSync();
         return result;
       }),
+
+    clearAll: adminProcedure
+      .mutation(async () => {
+        await db.clearAllBoxes();
+        return { success: true, message: "Todas las cajas han sido eliminadas" };
+      }),
   }),
 
   harvesters: router({

@@ -27,7 +27,8 @@ export default function Home() {
     if (!boxes) return null;
 
     const total = boxes.length;
-    const totalWeight = boxes.reduce((sum, box) => sum + box.weight, 0);
+    // El peso está en gramos, convertir a kilogramos
+    const totalWeight = boxes.reduce((sum, box) => sum + box.weight, 0) / 1000;
     
     // Calcular calidades según los códigos especiales
     const firstQuality = boxes.filter(b => b.harvesterId !== 98 && b.harvesterId !== 99).length;
@@ -217,7 +218,7 @@ export default function Home() {
                       <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent opacity-0 transition-opacity group-hover:opacity-100">
                         <div className="absolute bottom-2 left-2 right-2 text-white">
                           <p className="text-sm font-semibold">{box.boxCode}</p>
-                          <p className="text-xs">{box.weight.toFixed(2)} kg</p>
+                          <p className="text-xs">{(box.weight / 1000).toFixed(2)} kg</p>
                         </div>
                       </div>
                     </div>
@@ -305,7 +306,7 @@ export default function Home() {
                 </div>
                 <div>
                   <p className="text-sm text-green-600">Peso</p>
-                  <p className="font-semibold text-green-900">{selectedBox.weight.toFixed(2)} kg</p>
+                  <p className="font-semibold text-green-900">{(selectedBox.weight / 1000).toFixed(2)} kg</p>
                 </div>
                 <div>
                   <p className="text-sm text-green-600">Parcela</p>

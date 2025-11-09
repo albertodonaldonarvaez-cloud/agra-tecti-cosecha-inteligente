@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Settings as SettingsIcon, Upload, RefreshCw } from "lucide-react";
+import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -57,6 +57,15 @@ export default function Settings() {
       } else {
         toast.error(data.message || "Error en la carga");
       }
+    },
+    onError: (error: any) => {
+      toast.error(error.message);
+    },
+  });
+
+  const clearAllBoxes = trpc.boxes.clearAll.useMutation({
+    onSuccess: () => {
+      toast.success("Todas las cajas han sido eliminadas. Puedes volver a sincronizar.");
     },
     onError: (error: any) => {
       toast.error(error.message);
@@ -219,6 +228,32 @@ export default function Settings() {
                 {uploadJson.isPending ? "Cargando..." : "Cargar JSON"}
               </Button>
             </div>
+          </GlassCard>
+
+          {/* Limpiar Base de Datos */}
+          <GlassCard className="p-6 border-2 border-red-200">
+            <div className="mb-4 flex items-center gap-2">
+              <AlertTriangle className="h-6 w-6 text-red-600" />
+              <h2 className="text-2xl font-semibold text-red-900">Zona de Peligro</h2>
+            </div>
+
+            <p className="mb-4 text-sm text-red-600">
+              <strong>Atención:</strong> Esta acción eliminará todas las cajas de la base de datos. 
+              Usa esto solo si necesitas volver a sincronizar desde cero.
+            </p>
+
+            <Button 
+              onClick={() => {
+                if (window.confirm("¿Estás seguro? Esta acción eliminará TODAS las cajas registradas.")) {
+                  clearAllBoxes.mutate();
+                }
+              }} 
+              disabled={clearAllBoxes.isPending}
+              variant="destructive"
+              className="w-full"
+            >
+              {clearAllBoxes.isPending ? "Eliminando..." : "Limpiar Todas las Cajas"}
+            </Button>
           </GlassCard>
         </div>
       </div>

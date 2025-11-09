@@ -84,3 +84,7 @@
 - [x] Agregar galería de 5 imágenes recientes en dashboard con modal
 - [x] Implementar sincronización completa desde API de Kobo
 - [x] Crear gráfica de líneas temporal mostrando evolución de calidades (Recharts)
+
+## Bugs Reportados
+- [x] Corregir cálculo de peso total (muestra millones de kilos incorrectamente)
+- [x] Verificar precisión de datos en gráficas
