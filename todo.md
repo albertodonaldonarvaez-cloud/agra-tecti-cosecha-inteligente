@@ -88,3 +88,7 @@
 ## Bugs Reportados
 - [x] Corregir cálculo de peso total (muestra millones de kilos incorrectamente)
 - [x] Verificar precisión de datos en gráficas
+
+## Nuevos Bugs Reportados
+- [x] Corregir cálculos de peso en Analytics (verificar conversión gramos a kg)
+- [x] Corregir visualización de fotografías (usar URLs del API en lugar de nombres de archivo)

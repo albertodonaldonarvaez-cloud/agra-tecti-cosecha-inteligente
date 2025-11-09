@@ -154,7 +154,8 @@ export const appRouter = router({
         }
 
         const total = boxes.length;
-        const totalWeight = boxes.reduce((sum, box) => sum + box.weight, 0);
+        // Convertir peso de gramos a kilogramos
+        const totalWeight = boxes.reduce((sum, box) => sum + box.weight, 0) / 1000;
         
         const firstQuality = boxes.filter(b => b.harvesterId !== 98 && b.harvesterId !== 99).length;
         const secondQuality = boxes.filter(b => b.harvesterId === 98).length;

@@ -57,7 +57,8 @@ export async function processKoboData(data: KoboData) {
       const latitude = locationParts[0] || null;
       const longitude = locationParts[1] || null;
 
-      // Obtener URLs de imágenes
+       // Extraer URLs de fotos
+      let photoFilename = result.foto_de_la_caja || null;
       let photoUrl = null;
       let photoLargeUrl = null;
       let photoMediumUrl = null;
@@ -65,6 +66,7 @@ export async function processKoboData(data: KoboData) {
 
       if (result._attachments && result._attachments.length > 0) {
         const attachment = result._attachments[0];
+        photoFilename = attachment.media_file_basename || photoFilename;
         photoUrl = attachment.download_url;
         photoLargeUrl = attachment.download_large_url || null;
         photoMediumUrl = attachment.download_medium_url || null;
@@ -97,7 +99,7 @@ export async function processKoboData(data: KoboData) {
         parcelCode,
         parcelName,
         weight,
-        photoFilename: result.foto_de_la_caja,
+        photoFilename,
         photoUrl,
         photoLargeUrl,
         photoMediumUrl,
@@ -111,7 +113,7 @@ export async function processKoboData(data: KoboData) {
           parcelCode,
           parcelName,
           weight,
-          photoFilename: result.foto_de_la_caja,
+          photoFilename,
           photoUrl,
           photoLargeUrl,
           photoMediumUrl,
