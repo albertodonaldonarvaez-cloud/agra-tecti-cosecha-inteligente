@@ -105,3 +105,7 @@
 
 ## Ajuste de Dashboard
 - [x] Eliminar tarjeta de desperdicio del dashboard principal
+
+## Corrección
+- [x] Restaurar barra de desperdicio en "Distribución de Calidad"
+- [x] Eliminar tarjeta individual grande de desperdicio (no la barra)

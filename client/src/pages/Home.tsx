@@ -107,7 +107,7 @@ export default function Home() {
         {stats ? (
           <div className="space-y-6">
             {/* Estadísticas principales */}
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               <GlassCard className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
@@ -140,16 +140,6 @@ export default function Home() {
                 </div>
               </GlassCard>
 
-              <GlassCard className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-green-600">Desperdicio</p>
-                    <p className="text-3xl font-bold text-green-900">{stats.waste}</p>
-                    <p className="text-xs text-green-500">{stats.wastePercent}%</p>
-                  </div>
-                  <AlertCircle className="h-12 w-12 text-red-400" />
-                </div>
-              </GlassCard>
             </div>
 
             {/* Distribución de calidad */}
@@ -178,6 +168,19 @@ export default function Home() {
                     <div 
                       className="h-full bg-yellow-500 transition-all duration-500"
                       style={{ width: `${stats.secondQualityPercent}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-2 flex justify-between text-sm">
+                    <span className="text-green-700">Desperdicio</span>
+                    <span className="font-semibold text-green-900">{stats.wastePercent}%</span>
+                  </div>
+                  <div className="h-4 overflow-hidden rounded-full bg-red-100">
+                    <div 
+                      className="h-full bg-red-500 transition-all duration-500"
+                      style={{ width: `${stats.wastePercent}%` }}
                     />
                   </div>
                 </div>
