@@ -99,3 +99,6 @@
 ## Mejoras de UI
 - [x] Eliminar sección de "Últimas 5 Cajas Registradas" del dashboard
 - [x] Hacer modal de imagen completamente responsivo
+
+## Mejora de Modal
+- [x] Rediseñar modal con layout de dos columnas (imagen | información) super responsivo

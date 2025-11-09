@@ -130,80 +130,71 @@ export default function Boxes() {
 
       {/* Modal de detalle */}
       <Dialog open={!!selectedBox} onOpenChange={() => setSelectedBox(null)}>
-        <DialogContent className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center justify-between">
-              <span>Detalle de Caja: {selectedBox?.boxCode}</span>
-              <Button variant="ghost" size="sm" onClick={() => setSelectedBox(null)}>
-                <X className="h-4 w-4" />
-              </Button>
-            </DialogTitle>
-          </DialogHeader>
-
+        <DialogContent className="max-w-[95vw] sm:max-w-4xl lg:max-w-5xl max-h-[90vh] overflow-hidden p-0">
           {selectedBox && (
-            <div className="space-y-4">
-              {/* Imagen */}
+            <div className="flex flex-col lg:flex-row max-h-[90vh]">
+              {/* Imagen - Lado izquierdo */}
               {selectedBox.photoUrl && (
-                <div className="overflow-hidden rounded-lg border border-green-200 bg-gray-100">
+                <div className="flex-1 bg-gray-100 flex items-center justify-center p-4 lg:p-6 min-h-[40vh] lg:min-h-[70vh]">
                   <img
                     src={getProxiedImageUrl(selectedBox.photoUrl)}
                     alt={`Caja ${selectedBox.boxCode}`}
-                    className="w-full h-auto max-h-[50vh] object-contain"
+                    className="w-full h-full object-contain max-h-[50vh] lg:max-h-[80vh]"
                   />
                 </div>
               )}
-
-              {/* Información */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="rounded-lg border border-green-200 bg-green-50/50 p-4">
-                  <p className="text-sm text-green-600">Código de Caja</p>
-                  <p className="text-xl font-bold text-green-900">{selectedBox.boxCode}</p>
-                </div>
-
-                <div className="rounded-lg border border-green-200 bg-green-50/50 p-4">
-                  <p className="text-sm text-green-600">Cortadora</p>
-                  <p className="text-xl font-bold text-green-900">#{selectedBox.harvesterId}</p>
-                  <p className="text-xs text-green-600">
-                    {selectedBox.harvesterId === 97
-                      ? "Recolecta (1ra Calidad)"
-                      : selectedBox.harvesterId === 98
-                      ? "Segunda Calidad"
-                      : selectedBox.harvesterId === 99
-                      ? "Desperdicio"
-                      : "Cortadora"}
-                  </p>
-                </div>
-
-                <div className="rounded-lg border border-green-200 bg-green-50/50 p-4">
-                  <p className="text-sm text-green-600">Parcela</p>
-                  <p className="text-lg font-bold text-green-900">{selectedBox.parcelName}</p>
-                  <p className="text-xs text-green-600">{selectedBox.parcelCode}</p>
-                </div>
-
-                <div className="rounded-lg border border-green-200 bg-green-50/50 p-4">
-                  <p className="text-sm text-green-600">Peso</p>
-                  <p className="text-xl font-bold text-green-900">
-                    {(selectedBox.weight / 1000).toFixed(2)} kg
-                  </p>
-                  <p className="text-xs text-green-600">{selectedBox.weight} gramos</p>
-                </div>
-
-                <div className="rounded-lg border border-green-200 bg-green-50/50 p-4">
-                  <p className="text-sm text-green-600">Fecha de Registro</p>
-                  <p className="text-lg font-bold text-green-900">
-                    {new Date(selectedBox.submissionTime).toLocaleDateString()}
-                  </p>
-                  <p className="text-xs text-green-600">
-                    {new Date(selectedBox.submissionTime).toLocaleTimeString()}
-                  </p>
-                </div>
-
-                {selectedBox.location && (
-                  <div className="rounded-lg border border-green-200 bg-green-50/50 p-4">
-                    <p className="text-sm text-green-600">Ubicación</p>
-                    <p className="text-sm font-semibold text-green-900">{selectedBox.location}</p>
+              
+              {/* Información - Lado derecho */}
+              <div className="flex-1 bg-white p-6 overflow-y-auto">
+                <DialogHeader className="mb-6">
+                  <DialogTitle className="text-2xl font-bold text-green-900">
+                    {selectedBox.boxCode}
+                  </DialogTitle>
+                </DialogHeader>
+                
+                <div className="space-y-6">
+                  <div className="border-b border-green-100 pb-4">
+                    <p className="text-sm text-green-600 mb-1">Peso</p>
+                    <p className="text-3xl font-bold text-green-900">{(selectedBox.weight / 1000).toFixed(2)} <span className="text-lg">kg</span></p>
+                    <p className="text-xs text-gray-500">{selectedBox.weight} gramos</p>
                   </div>
-                )}
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-sm text-green-600 mb-1">Parcela</p>
+                      <p className="text-lg font-semibold text-green-900">{selectedBox.parcelCode}</p>
+                      <p className="text-sm text-gray-600">{selectedBox.parcelName}</p>
+                    </div>
+                    
+                    <div>
+                      <p className="text-sm text-green-600 mb-1">Cortadora</p>
+                      <p className="text-lg font-semibold text-green-900">#{selectedBox.harvesterId}</p>
+                      <p className="text-sm text-gray-600">
+                        {selectedBox.harvesterId === 97
+                          ? "Recolecta (1ra Calidad)"
+                          : selectedBox.harvesterId === 98
+                          ? "Segunda Calidad"
+                          : selectedBox.harvesterId === 99
+                          ? "Desperdicio"
+                          : "Cortadora"}
+                      </p>
+                    </div>
+                    
+                    <div>
+                      <p className="text-sm text-green-600 mb-1">Fecha de Registro</p>
+                      <p className="text-lg font-semibold text-green-900">
+                        {new Date(selectedBox.submissionTime).toLocaleDateString('es-MX', { 
+                          year: 'numeric', 
+                          month: 'long', 
+                          day: 'numeric' 
+                        })}
+                      </p>
+                      <p className="text-sm text-gray-600">
+                        {new Date(selectedBox.submissionTime).toLocaleTimeString('es-MX')}
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}

@@ -254,47 +254,63 @@ export default function Home() {
 
       {/* Modal de detalle de imagen */}
       <Dialog open={showImageModal} onOpenChange={setShowImageModal}>
-        <DialogContent className="max-w-[95vw] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-xl sm:text-2xl font-bold text-green-900">
-              Detalle de Caja: {selectedBox?.boxCode}
-            </DialogTitle>
-          </DialogHeader>
+        <DialogContent className="max-w-[95vw] sm:max-w-4xl lg:max-w-5xl max-h-[90vh] overflow-hidden p-0">
           {selectedBox && (
-            <div className="space-y-4">
-              <div className="overflow-hidden rounded-lg bg-gray-100">
+            <div className="flex flex-col lg:flex-row max-h-[90vh]">
+              {/* Imagen - Lado izquierdo */}
+              <div className="flex-1 bg-gray-100 flex items-center justify-center p-4 lg:p-6 min-h-[40vh] lg:min-h-[70vh]">
                 <img
                   src={getProxiedImageUrl(selectedBox.photoLargeUrl || selectedBox.photoUrl)}
                   alt={selectedBox.boxCode}
-                  className="w-full h-auto max-h-[50vh] object-contain"
+                  className="w-full h-full object-contain max-h-[50vh] lg:max-h-[80vh]"
                 />
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-green-600">Código de Caja</p>
-                  <p className="font-semibold text-green-900">{selectedBox.boxCode}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-green-600">Peso</p>
-                  <p className="font-semibold text-green-900">{(selectedBox.weight / 1000).toFixed(2)} kg</p>
-                </div>
-                <div>
-                  <p className="text-sm text-green-600">Parcela</p>
-                  <p className="font-semibold text-green-900">{selectedBox.parcelCode} - {selectedBox.parcelName}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-green-600">Calidad</p>
-                  <p className="font-semibold text-green-900">{getQualityLabel(selectedBox.harvesterId)}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-green-600">Cortadora</p>
-                  <p className="font-semibold text-green-900">#{selectedBox.harvesterId}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-green-600">Fecha de Registro</p>
-                  <p className="font-semibold text-green-900">
-                    {new Date(selectedBox.submissionTime).toLocaleString('es-MX')}
-                  </p>
+              
+              {/* Información - Lado derecho */}
+              <div className="flex-1 bg-white p-6 overflow-y-auto">
+                <DialogHeader className="mb-6">
+                  <DialogTitle className="text-2xl font-bold text-green-900">
+                    {selectedBox.boxCode}
+                  </DialogTitle>
+                </DialogHeader>
+                
+                <div className="space-y-6">
+                  <div className="border-b border-green-100 pb-4">
+                    <p className="text-sm text-green-600 mb-1">Peso</p>
+                    <p className="text-3xl font-bold text-green-900">{(selectedBox.weight / 1000).toFixed(2)} <span className="text-lg">kg</span></p>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-sm text-green-600 mb-1">Parcela</p>
+                      <p className="text-lg font-semibold text-green-900">{selectedBox.parcelCode}</p>
+                      <p className="text-sm text-gray-600">{selectedBox.parcelName}</p>
+                    </div>
+                    
+                    <div>
+                      <p className="text-sm text-green-600 mb-1">Calidad</p>
+                      <p className="text-lg font-semibold text-green-900">{getQualityLabel(selectedBox.harvesterId)}</p>
+                    </div>
+                    
+                    <div>
+                      <p className="text-sm text-green-600 mb-1">Cortadora</p>
+                      <p className="text-lg font-semibold text-green-900">#{selectedBox.harvesterId}</p>
+                    </div>
+                    
+                    <div>
+                      <p className="text-sm text-green-600 mb-1">Fecha de Registro</p>
+                      <p className="text-lg font-semibold text-green-900">
+                        {new Date(selectedBox.submissionTime).toLocaleDateString('es-MX', { 
+                          year: 'numeric', 
+                          month: 'long', 
+                          day: 'numeric' 
+                        })}
+                      </p>
+                      <p className="text-sm text-gray-600">
+                        {new Date(selectedBox.submissionTime).toLocaleTimeString('es-MX')}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
