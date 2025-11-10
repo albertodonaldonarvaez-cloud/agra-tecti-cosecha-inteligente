@@ -58,8 +58,9 @@ async function loadFromExcel() {
         // Construir fecha desde año/mes/dia
         let submissionTime: Date;
         if (row['año'] && row['mes'] && row['dia']) {
-          // Usar las columnas de fecha del Excel
-          submissionTime = new Date(row['año'], row['mes'] - 1, row['dia']);
+          // Crear fecha a mediodía (12:00) para evitar problemas de zona horaria
+          // Esto asegura que la fecha sea correcta independientemente de la zona horaria
+          submissionTime = new Date(row['año'], row['mes'] - 1, row['dia'], 12, 0, 0);
         } else if (row['_submission_time'] && typeof row['_submission_time'] === 'number') {
           // Convertir fecha numérica de Excel a Date
           // Excel fecha base es 1900-01-01, pero JavaScript usa 1970-01-01

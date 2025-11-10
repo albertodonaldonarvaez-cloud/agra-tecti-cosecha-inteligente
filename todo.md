@@ -163,3 +163,6 @@
 
 ## Bug en Dashboard
 - [x] Corregir cálculo de kilos de primera calidad (muestra cero)
+
+## Problema de Zona Horaria
+- [x] Corregir fechas en base de datos (un día de diferencia por zona horaria UTC)
