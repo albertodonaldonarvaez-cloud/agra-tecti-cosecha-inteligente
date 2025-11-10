@@ -109,3 +109,6 @@
 ## Corrección
 - [x] Restaurar barra de desperdicio en "Distribución de Calidad"
 - [x] Eliminar tarjeta individual grande de desperdicio (no la barra)
+
+## Bug de UI
+- [x] Corregir desplazamiento de lista al pasar mouse sobre cajas (efecto hover)

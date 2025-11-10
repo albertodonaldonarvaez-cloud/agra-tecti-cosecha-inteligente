@@ -64,7 +64,7 @@ export default function Boxes() {
             <p className="text-green-600">Cargando cajas...</p>
           </GlassCard>
         ) : boxes && boxes.length > 0 ? (
-          <GlassCard className="overflow-hidden p-6">
+          <GlassCard className="overflow-hidden p-6" hover={false}>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
