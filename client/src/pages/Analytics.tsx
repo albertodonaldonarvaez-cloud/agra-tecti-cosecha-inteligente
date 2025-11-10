@@ -3,7 +3,7 @@ import { GlassCard } from "@/components/GlassCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getLoginUrl } from "@/const";
+import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { BarChart3, Calendar, TrendingUp, Package } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -76,9 +76,13 @@ export default function Analytics() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
       <div className="container">
-        <div className="mb-8">
-          <h1 className="mb-2 text-4xl font-bold text-green-900">Análisis de Datos</h1>
-          <p className="text-green-700">Visualiza estadísticas detalladas con filtros personalizados</p>
+        {/* Header */}
+        <div className="mb-8 flex items-center gap-4">
+          <img src={APP_LOGO} alt="Agratec" className="h-16 w-16" />
+          <div>
+            <h1 className="text-4xl font-bold text-green-900">Análisis de Datos</h1>
+            <p className="text-green-700">Visualiza estadísticas detalladas con filtros personalizados</p>
+          </div>
         </div>
 
         {/* Filtros */}
@@ -193,10 +197,10 @@ export default function Analytics() {
                       <tr className="border-b border-green-200">
                         <th className="pb-2 text-left text-sm font-semibold text-green-900">Parcela</th>
                         <th className="pb-2 text-right text-sm font-semibold text-green-900">Total Cajas</th>
-                        <th className="pb-2 text-right text-sm font-semibold text-green-900">Peso (kg)</th>
-                        <th className="pb-2 text-right text-sm font-semibold text-green-900">1ra Calidad</th>
-                        <th className="pb-2 text-right text-sm font-semibold text-green-900">2da Calidad</th>
-                        <th className="pb-2 text-right text-sm font-semibold text-green-900">Desperdicio</th>
+                        <th className="pb-2 text-right text-sm font-semibold text-green-900">Peso Total (kg)</th>
+                        <th className="pb-2 text-right text-sm font-semibold text-green-900">1ra Calidad (kg)</th>
+                        <th className="pb-2 text-right text-sm font-semibold text-green-900">2da Calidad (kg)</th>
+                        <th className="pb-2 text-right text-sm font-semibold text-green-900">Desperdicio (kg)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -209,21 +213,21 @@ export default function Analytics() {
                             </div>
                           </td>
                           <td className="py-3 text-right text-sm text-green-900">{parcel.total}</td>
-                          <td className="py-3 text-right text-sm text-green-900">{(parcel.weight / 1000).toFixed(2)}</td>
+                          <td className="py-3 text-right text-sm font-semibold text-green-900">{(parcel.weight / 1000).toFixed(2)}</td>
                           <td className="py-3 text-right text-sm text-green-900">
-                            {parcel.firstQuality}
+                            <span className="font-semibold">{(parcel.firstQualityWeight / 1000).toFixed(2)}</span>
                             <span className="ml-1 text-xs text-green-600">
                               ({((parcel.firstQuality / parcel.total) * 100).toFixed(1)}%)
                             </span>
                           </td>
                           <td className="py-3 text-right text-sm text-green-900">
-                            {parcel.secondQuality}
-                            <span className="ml-1 text-xs text-green-600">
+                            <span className="font-semibold">{(parcel.secondQualityWeight / 1000).toFixed(2)}</span>
+                            <span className="ml-1 text-xs text-yellow-600">
                               ({((parcel.secondQuality / parcel.total) * 100).toFixed(1)}%)
                             </span>
                           </td>
                           <td className="py-3 text-right text-sm text-green-900">
-                            {parcel.waste}
+                            <span className="font-semibold">{(parcel.wasteWeight / 1000).toFixed(2)}</span>
                             <span className="ml-1 text-xs text-red-600">
                               ({((parcel.waste / parcel.total) * 100).toFixed(1)}%)
                             </span>

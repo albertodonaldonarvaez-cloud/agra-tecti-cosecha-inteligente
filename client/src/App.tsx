@@ -7,6 +7,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Boxes from "./pages/Boxes";
 import Analytics from "./pages/Analytics";
+import DailyAnalysis from "./pages/DailyAnalysis";
 import Settings from "./pages/Settings";
 import Users from "./pages/Users";
 import Harvesters from "./pages/Harvesters";
@@ -36,6 +37,7 @@ function Router() {
         <Route path={"/"} component={Home} />
         <Route path={"/boxes"} component={Boxes} />
         <Route path="/analytics" component={Analytics} />
+        <Route path="/daily" component={DailyAnalysis} />
         <Route path="/harvesters" component={Harvesters} />
         <Route path="/users" component={Users} />
         <Route path="/settings" component={Settings} />

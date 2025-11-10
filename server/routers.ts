@@ -188,14 +188,24 @@ export const appRouter = router({
               firstQuality: 0,
               secondQuality: 0,
               waste: 0,
+              firstQualityWeight: 0,
+              secondQualityWeight: 0,
+              wasteWeight: 0,
             });
           }
           const parcel = parcelMap.get(box.parcelCode);
           parcel.total++;
           parcel.weight += box.weight;
-          if (box.harvesterId === 98) parcel.secondQuality++;
-          else if (box.harvesterId === 99) parcel.waste++;
-          else parcel.firstQuality++;
+          if (box.harvesterId === 98) {
+            parcel.secondQuality++;
+            parcel.secondQualityWeight += box.weight;
+          } else if (box.harvesterId === 99) {
+            parcel.waste++;
+            parcel.wasteWeight += box.weight;
+          } else {
+            parcel.firstQuality++;
+            parcel.firstQualityWeight += box.weight;
+          }
         });
 
         // Estadísticas por cortadora

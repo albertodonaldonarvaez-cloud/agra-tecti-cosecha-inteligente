@@ -140,3 +140,9 @@
 - [x] Agregar indicadores visuales en calendario para días con datos
 - [x] Ordenar tabla de cortadoras de 1 hacia abajo (ascendente)
 - [x] Agregar más espacio entre columnas en tabla de Cajas
+
+## Nuevas Solicitudes de Mejora
+- [x] Agregar logo de Agratec en página de Analytics (igual que Dashboard)
+- [x] Agregar logo de Agratec en página de Boxes (igual que Dashboard)
+- [x] Crear página de análisis diario de cosecha con datos exactos por día
+- [x] Modificar estadísticas por parcela para mostrar primera, segunda y desperdicio en kilogramos (no cajas)

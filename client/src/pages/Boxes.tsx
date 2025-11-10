@@ -8,7 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { getLoginUrl } from "@/const";
+import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { Package, X } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -52,11 +52,15 @@ export default function Boxes() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
       <div className="container">
-        <div className="mb-8">
-          <h1 className="mb-2 text-4xl font-bold text-green-900">Cajas Registradas</h1>
-          <p className="text-green-700">
-            {boxes ? `${boxes.length} cajas en total` : "Cargando..."}
-          </p>
+        {/* Header */}
+        <div className="mb-8 flex items-center gap-4">
+          <img src={APP_LOGO} alt="Agratec" className="h-16 w-16" />
+          <div>
+            <h1 className="text-4xl font-bold text-green-900">Cajas Registradas</h1>
+            <p className="text-green-700">
+              {boxes ? `${boxes.length} cajas en total` : "Cargando..."}
+            </p>
+          </div>
         </div>
 
         {isLoading ? (
