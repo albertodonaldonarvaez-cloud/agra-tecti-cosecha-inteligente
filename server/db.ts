@@ -178,7 +178,8 @@ export async function getBoxesWithFilters(startDate?: string, endDate?: string) 
     query = query.where(lte(boxes.submissionTime, new Date(endDate))) as any;
   }
   
-  return await query.orderBy(boxes.submissionTime);
+  const { desc } = await import("drizzle-orm");
+  return await query.orderBy(desc(boxes.submissionTime));
 }
 
 export async function getAvailableDates() {
