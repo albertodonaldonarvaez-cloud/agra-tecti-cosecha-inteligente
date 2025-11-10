@@ -146,3 +146,6 @@
 - [x] Agregar logo de Agratec en página de Boxes (igual que Dashboard)
 - [x] Crear página de análisis diario de cosecha con datos exactos por día
 - [x] Modificar estadísticas por parcela para mostrar primera, segunda y desperdicio en kilogramos (no cajas)
+
+## Bug Reportado
+- [x] Corregir duplicación de días en página de Análisis Diario

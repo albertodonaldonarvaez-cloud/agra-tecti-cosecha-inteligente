@@ -41,9 +41,13 @@ export default function DailyAnalysis() {
       const dateStr = new Date(box.submissionTime).toISOString().split('T')[0];
       
       if (!dateMap.has(dateStr)) {
+        // Crear fecha normalizada a medianoche UTC para evitar duplicados
+        const [year, month, day] = dateStr.split('-').map(Number);
+        const normalizedDate = new Date(Date.UTC(year, month - 1, day));
+        
         dateMap.set(dateStr, {
           date: dateStr,
-          dateObj: new Date(box.submissionTime),
+          dateObj: normalizedDate,
           totalBoxes: 0,
           totalWeight: 0,
           firstQuality: 0,
