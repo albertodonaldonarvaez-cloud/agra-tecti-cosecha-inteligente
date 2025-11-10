@@ -173,3 +173,13 @@
 
 ## Caja Faltante
 - [x] Agregar manualmente caja con código 15617848 que dio error en importación (agregada como 15-617848)
+
+## Preparación para GitHub
+- [x] Crear Dockerfile para containerizar la aplicación
+- [x] Crear docker-compose.yml para orquestar servicios
+- [x] Crear README.md con documentación completa
+- [x] Crear INSTALL.md con instrucciones detalladas
+- [x] Configurar .gitignore apropiado
+- [x] Crear .env.example con variables de entorno
+- [x] Inicializar repositorio Git
+- [x] Configurar remote de GitHub (agra-tecti-cosecha-inteligente)

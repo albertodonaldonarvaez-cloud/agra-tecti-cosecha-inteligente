@@ -105,3 +105,28 @@ temp/
 *.db
 *.sqlite
 *.sqlite3
+
+# Datos y archivos de desarrollo
+/data/
+/uploads/
+*.xlsx
+*.xls
+*.csv
+output.json
+
+# Scripts de desarrollo temporal
+load-data.ts
+load-data.mjs
+load-from-excel.ts
+add-missing-box.ts
+add-box-*.ts
+analyze-*.ts
+check-*.ts
+verify-*.ts
+clear-db.ts
+
+# Screenshots
+/screenshots/
+
+# Docker
+.dockerignore
