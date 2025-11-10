@@ -36,12 +36,26 @@ export default function Home() {
     const secondQuality = boxes.filter(b => b.harvesterId === 98).length;
     const waste = boxes.filter(b => b.harvesterId === 99).length;
 
+    // Calcular peso por calidad
+    const firstQualityWeight = boxes
+      .filter(b => b.harvesterId !== 98 && b.harvesterId !== 99)
+      .reduce((sum, box) => sum + box.weight, 0) / 1000;
+    const secondQualityWeight = boxes
+      .filter(b => b.harvesterId === 98)
+      .reduce((sum, box) => sum + box.weight, 0) / 1000;
+    const wasteWeight = boxes
+      .filter(b => b.harvesterId === 99)
+      .reduce((sum, box) => sum + box.weight, 0) / 1000;
+
     return {
       total,
       totalWeight,
       firstQuality,
       secondQuality,
       waste,
+      firstQualityWeight,
+      secondQualityWeight,
+      wasteWeight,
       firstQualityPercent: total > 0 ? (firstQuality / total * 100).toFixed(1) : 0,
       secondQualityPercent: total > 0 ? (secondQuality / total * 100).toFixed(1) : 0,
       wastePercent: total > 0 ? (waste / total * 100).toFixed(1) : 0,
@@ -142,7 +156,7 @@ export default function Home() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-green-600">Primera Calidad</p>
-                    <p className="text-3xl font-bold text-green-900">{(stats as any).firstQualityWeight?.toFixed(2) || '0.00'}</p>
+                    <p className="text-3xl font-bold text-green-900">{stats.firstQualityWeight.toFixed(2)}</p>
                     <p className="text-xs text-green-500">kilogramos ({stats.firstQualityPercent}%)</p>
                   </div>
                   <CheckCircle className="h-12 w-12 text-green-400" />

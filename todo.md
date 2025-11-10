@@ -160,3 +160,6 @@
 ## Problemas Reportados
 - [x] Corregir orden de cajas en frontend (actualmente muestra viejas arriba, nuevas abajo)
 - [x] Rectificar fechas de las cajas usando datos del Excel (fechas verificadas y correctas)
+
+## Bug en Dashboard
+- [x] Corregir cálculo de kilos de primera calidad (muestra cero)
