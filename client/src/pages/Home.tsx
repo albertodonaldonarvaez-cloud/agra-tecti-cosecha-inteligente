@@ -133,8 +133,8 @@ export default function Home() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-green-600">Primera Calidad</p>
-                    <p className="text-3xl font-bold text-green-900">{stats.firstQuality}</p>
-                    <p className="text-xs text-green-500">{stats.firstQualityPercent}%</p>
+                    <p className="text-3xl font-bold text-green-900">{(stats as any).firstQualityWeight?.toFixed(2) || '0.00'}</p>
+                    <p className="text-xs text-green-500">kilogramos ({stats.firstQualityPercent}%)</p>
                   </div>
                   <CheckCircle className="h-12 w-12 text-green-400" />
                 </div>

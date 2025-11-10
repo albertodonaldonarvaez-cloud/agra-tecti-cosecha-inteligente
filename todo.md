@@ -112,3 +112,6 @@
 
 ## Bug de UI
 - [x] Corregir desplazamiento de lista al pasar mouse sobre cajas (efecto hover)
+
+## Mejora de Dashboard
+- [x] Cambiar tarjeta de Primera Calidad para mostrar kilogramos en lugar de número de cajas

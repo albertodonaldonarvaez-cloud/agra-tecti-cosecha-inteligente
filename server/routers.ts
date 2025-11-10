@@ -161,6 +161,11 @@ export const appRouter = router({
         const secondQuality = boxes.filter(b => b.harvesterId === 98).length;
         const waste = boxes.filter(b => b.harvesterId === 99).length;
         
+        // Calcular peso de primera calidad en kg
+        const firstQualityWeight = boxes
+          .filter(b => b.harvesterId !== 98 && b.harvesterId !== 99)
+          .reduce((sum, box) => sum + box.weight, 0) / 1000;
+        
         const firstQualityPercent = ((firstQuality / total) * 100).toFixed(1);
         const secondQualityPercent = ((secondQuality / total) * 100).toFixed(1);
         const wastePercent = ((waste / total) * 100).toFixed(1);
@@ -206,6 +211,7 @@ export const appRouter = router({
           total,
           totalWeight,
           firstQuality,
+          firstQualityWeight,
           secondQuality,
           waste,
           firstQualityPercent,
@@ -228,3 +234,4 @@ export const appRouter = router({
 });
 
 export type AppRouter = typeof appRouter;
+
