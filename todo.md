@@ -152,3 +152,4 @@
 
 ## Carga de Datos
 - [x] Cargar datos desde output.json con fotos usando proxy de imágenes
+- [x] Corregir errores de fecha para cargar las 1152 cajas completas (1151 cargadas exitosamente)
