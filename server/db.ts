@@ -115,7 +115,8 @@ export async function upsertBox(box: InsertBox) {
 export async function getAllBoxes() {
   const db = await getDb();
   if (!db) return [];
-  return await db.select().from(boxes).orderBy(boxes.submissionTime);
+  const { desc } = await import("drizzle-orm");
+  return await db.select().from(boxes).orderBy(desc(boxes.submissionTime));
 }
 
 export async function clearAllBoxes() {

@@ -156,3 +156,7 @@
 
 ## Mejora de UX
 - [x] Invertir orden de lista de cajas (más recientes primero)
+
+## Problemas Reportados
+- [x] Corregir orden de cajas en frontend (actualmente muestra viejas arriba, nuevas abajo)
+- [x] Rectificar fechas de las cajas usando datos del Excel (fechas verificadas y correctas)
