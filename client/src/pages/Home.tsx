@@ -48,7 +48,7 @@ export default function Home() {
     };
   }, [boxes]);
 
-  // Preparar datos para la gráfica de líneas
+  // Preparar datos para la gráfica de líneas (en kilogramos)
   const chartData = useMemo(() => {
     if (!boxes || boxes.length === 0) return [];
     
@@ -62,12 +62,21 @@ export default function Home() {
       }
       
       const entry = dateMap.get(date)!;
-      if (box.harvesterId === 99) entry.desperdicio++;
-      else if (box.harvesterId === 98) entry.segunda++;
-      else entry.primera++;
+      const weightKg = box.weight / 1000; // Convertir gramos a kilogramos
+      if (box.harvesterId === 99) entry.desperdicio += weightKg;
+      else if (box.harvesterId === 98) entry.segunda += weightKg;
+      else entry.primera += weightKg;
     });
     
-    return Array.from(dateMap.values()).slice(-10); // Últimos 10 días
+    // Redondear a 2 decimales
+    const result = Array.from(dateMap.values()).map(entry => ({
+      date: entry.date,
+      primera: Number(entry.primera.toFixed(2)),
+      segunda: Number(entry.segunda.toFixed(2)),
+      desperdicio: Number(entry.desperdicio.toFixed(2))
+    }));
+    
+    return result.slice(-10); // Últimos 10 días
   }, [boxes]);
 
   // Obtener últimas 5 cajas con imágenes
@@ -189,13 +198,13 @@ export default function Home() {
 
             {/* Gráfica de evolución temporal */}
             {chartData.length > 0 && (
-              <GlassCard className="p-6">
-                <h2 className="mb-4 text-2xl font-semibold text-green-900">Evolución de Calidades</h2>
+               <GlassCard className="p-6">
+                <h3 className="mb-4 text-lg font-semibold text-green-900">Evolución de Calidad (Kilogramos)</h3>
                 <ResponsiveContainer width="100%" height={300}>
                   <LineChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#d1fae5" />
                     <XAxis dataKey="date" stroke="#059669" />
-                    <YAxis stroke="#059669" />
+                    <YAxis label={{ value: 'Kilogramos', angle: -90, position: 'insideLeft' }} stroke="#059669" />
                     <Tooltip 
                       contentStyle={{ 
                         backgroundColor: 'rgba(255, 255, 255, 0.95)', 

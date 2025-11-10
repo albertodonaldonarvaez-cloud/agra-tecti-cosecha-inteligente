@@ -29,9 +29,11 @@ export default function Analytics() {
   }
 
   const handleApplyFilter = () => {
+    // Si solo hay fecha de inicio, usar la misma como fecha fin para permitir filtro de un día
+    const finalEndDate = endDate || startDate;
     setFilterDates({
       startDate: startDate || undefined,
-      endDate: endDate || undefined,
+      endDate: finalEndDate || undefined,
     });
   };
 
@@ -133,7 +135,7 @@ export default function Analytics() {
         ) : stats ? (
           <div className="space-y-6">
             {/* Estadísticas Generales */}
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-6 md:grid-cols-3">
               <GlassCard className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
@@ -159,21 +161,10 @@ export default function Analytics() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-green-600">Primera Calidad</p>
-                    <p className="text-3xl font-bold text-green-900">{stats.firstQuality}</p>
-                    <p className="text-xs text-green-500">{stats.firstQualityPercent}%</p>
+                    <p className="text-3xl font-bold text-green-900">{(stats as any).firstQualityWeight?.toFixed(2) || '0.00'}</p>
+                    <p className="text-xs text-green-500">kilogramos ({stats.firstQualityPercent}%)</p>
                   </div>
                   <BarChart3 className="h-12 w-12 text-green-400" />
-                </div>
-              </GlassCard>
-
-              <GlassCard className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-green-600">Desperdicio</p>
-                    <p className="text-3xl font-bold text-green-900">{stats.waste}</p>
-                    <p className="text-xs text-green-500">{stats.wastePercent}%</p>
-                  </div>
-                  <BarChart3 className="h-12 w-12 text-red-400" />
                 </div>
               </GlassCard>
             </div>
@@ -238,41 +229,35 @@ export default function Analytics() {
             <GlassCard className="p-6">
               <h2 className="mb-4 text-2xl font-semibold text-green-900">Estadísticas por Cortadora</h2>
               
-              {stats.harvesterStats && stats.harvesterStats.length > 0 ? (
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  {stats.harvesterStats.map((harvester: any) => (
-                    <div
-                      key={harvester.harvesterId}
-                      className="rounded-lg border border-green-200 bg-white/50 p-4"
-                    >
-                      <div className="mb-2 flex items-center justify-between">
-                        <span className="text-lg font-semibold text-green-900">
-                          #{harvester.harvesterId}
-                        </span>
-                        <span className="text-sm text-green-600">
-                          {harvester.harvesterId === 97
-                            ? "Recolecta"
-                            : harvester.harvesterId === 98
-                            ? "2da Calidad"
-                            : harvester.harvesterId === 99
-                            ? "Desperdicio"
-                            : "Cortadora"}
-                        </span>
-                      </div>
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-green-600">Cajas:</span>
-                          <span className="font-semibold text-green-900">{harvester.total}</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-green-600">Peso:</span>
-                          <span className="font-semibold text-green-900">
-                            {(harvester.weight / 1000).toFixed(2)} kg
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+              {stats.harvesterStats && stats.harvesterStats.filter((h: any) => h.harvesterId !== 97 && h.harvesterId !== 98 && h.harvesterId !== 99).length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-green-200">
+                        <th className="pb-2 text-left text-sm font-semibold text-green-900">Cortadora</th>
+                        <th className="pb-2 text-right text-sm font-semibold text-green-900">Total Cajas</th>
+                        <th className="pb-2 text-right text-sm font-semibold text-green-900">Peso (kg)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stats.harvesterStats
+                        .filter((h: any) => h.harvesterId !== 97 && h.harvesterId !== 98 && h.harvesterId !== 99)
+                        .map((harvester: any) => (
+                        <tr key={harvester.harvesterId} className="border-b border-green-100">
+                          <td className="py-3 text-left">
+                            <span className="font-semibold text-green-900">#{harvester.harvesterId}</span>
+                            {harvester.harvesterName && (
+                              <span className="ml-2 text-sm text-green-600">({harvester.harvesterName})</span>
+                            )}
+                          </td>
+                          <td className="py-3 text-right text-green-900">{harvester.total}</td>
+                          <td className="py-3 text-right font-semibold text-green-900">
+                            {(harvester.weight / 1000).toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               ) : (
                 <p className="text-center text-green-600">No hay datos de cortadoras</p>

@@ -115,3 +115,14 @@
 
 ## Mejora de Dashboard
 - [x] Cambiar tarjeta de Primera Calidad para mostrar kilogramos en lugar de número de cajas
+
+## Nuevas Tareas Solicitadas
+- [x] Cambiar logo por agratectilogo.png
+- [x] Agregar logo persistente en todas las páginas (ya está en Login y FloatingNav)
+- [x] Corregir tarjeta de Primera Calidad que muestra 0 kilos (ya está implementado correctamente)
+- [x] Cambiar gráfica de evolución de calidad a kilos en lugar de cajas
+- [x] Quitar tarjeta de desperdicio en Analytics
+- [x] Cambiar tarjeta de buena calidad a kilos en Analytics
+- [x] Arreglar filtro de fecha para permitir selección de un solo día
+- [x] Ocultar cortadoras 97, 98, 99 de estadísticas por cortadora
+- [x] Cambiar estadísticas por cortadora de tarjetas a tabla
