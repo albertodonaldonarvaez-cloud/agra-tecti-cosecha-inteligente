@@ -149,3 +149,6 @@
 
 ## Bug Reportado
 - [x] Corregir duplicación de días en página de Análisis Diario
+
+## Carga de Datos
+- [x] Cargar datos desde output.json con fotos usando proxy de imágenes

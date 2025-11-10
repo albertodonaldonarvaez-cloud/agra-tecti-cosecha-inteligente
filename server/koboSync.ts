@@ -106,7 +106,7 @@ export async function processKoboData(data: KoboData) {
         photoSmallUrl,
         latitude,
         longitude,
-        submissionTime: new Date(result._submission_time),
+        submissionTime: (result._submission_time && result._submission_time.trim() !== '') ? new Date(result._submission_time) : new Date(),
       }).onDuplicateKeyUpdate({
         set: {
           harvesterId,
@@ -120,7 +120,7 @@ export async function processKoboData(data: KoboData) {
           photoSmallUrl,
           latitude,
           longitude,
-          submissionTime: new Date(result._submission_time),
+          submissionTime: (result._submission_time && result._submission_time.trim() !== '') ? new Date(result._submission_time) : new Date(),
           updatedAt: new Date(),
         },
       });
