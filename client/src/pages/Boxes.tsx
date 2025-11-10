@@ -69,11 +69,11 @@ export default function Boxes() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b-2 border-green-200">
-                    <th className="pb-3 text-left text-sm font-semibold text-green-900">Código</th>
-                    <th className="pb-3 text-left text-sm font-semibold text-green-900">Cortadora</th>
-                    <th className="pb-3 text-left text-sm font-semibold text-green-900">Parcela</th>
-                    <th className="pb-3 text-right text-sm font-semibold text-green-900">Peso</th>
-                    <th className="pb-3 text-left text-sm font-semibold text-green-900">Fecha</th>
+                    <th className="pb-3 pr-8 text-left text-sm font-semibold text-green-900">Código</th>
+                    <th className="pb-3 pr-8 text-left text-sm font-semibold text-green-900">Cortadora</th>
+                    <th className="pb-3 pr-8 text-left text-sm font-semibold text-green-900">Parcela</th>
+                    <th className="pb-3 pr-8 text-right text-sm font-semibold text-green-900">Peso</th>
+                    <th className="pb-3 pr-8 text-left text-sm font-semibold text-green-900">Fecha</th>
                     <th className="pb-3 text-center text-sm font-semibold text-green-900">Foto</th>
                   </tr>
                 </thead>
@@ -86,23 +86,23 @@ export default function Boxes() {
                         className="cursor-pointer border-b border-green-100 transition-colors hover:bg-green-50/50"
                         onClick={() => setSelectedBox(box)}
                       >
-                        <td className="py-3 text-sm font-semibold text-green-900">{box.boxCode}</td>
-                        <td className="py-3 text-sm text-green-900">
+                        <td className="py-3 pr-8 text-sm font-semibold text-green-900">{box.boxCode}</td>
+                        <td className="py-3 pr-8 text-sm text-green-900">
                           <div>
                             <div className="font-semibold">#{box.harvesterId}</div>
                             <div className={`text-xs ${quality.color}`}>{quality.label}</div>
                           </div>
                         </td>
-                        <td className="py-3 text-sm text-green-900">
+                        <td className="py-3 pr-8 text-sm text-green-900">
                           <div>
                             <div className="font-semibold">{box.parcelName}</div>
                             <div className="text-xs text-green-600">{box.parcelCode}</div>
                           </div>
                         </td>
-                        <td className="py-3 text-right text-sm text-green-900">
+                        <td className="py-3 pr-8 text-right text-sm text-green-900">
                           {(box.weight / 1000).toFixed(2)} kg
                         </td>
-                        <td className="py-3 text-sm text-green-900">
+                        <td className="py-3 pr-8 text-sm text-green-900">
                           {new Date(box.submissionTime).toLocaleDateString()}
                         </td>
                         <td className="py-3 text-center text-sm text-green-900">

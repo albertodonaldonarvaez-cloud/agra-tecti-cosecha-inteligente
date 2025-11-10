@@ -180,3 +180,22 @@ export async function getBoxesWithFilters(startDate?: string, endDate?: string) 
   
   return await query.orderBy(boxes.submissionTime);
 }
+
+export async function getAvailableDates() {
+  const db = await getDb();
+  if (!db) return [];
+  
+  const allBoxes = await db.select({
+    submissionTime: boxes.submissionTime
+  }).from(boxes);
+  
+  // Extraer solo las fechas únicas (sin hora)
+  const uniqueDates = new Set(
+    allBoxes.map(box => {
+      const date = new Date(box.submissionTime);
+      return date.toISOString().split('T')[0];
+    })
+  );
+  
+  return Array.from(uniqueDates);
+}

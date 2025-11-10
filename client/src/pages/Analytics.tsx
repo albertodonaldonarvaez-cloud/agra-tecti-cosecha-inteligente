@@ -18,6 +18,10 @@ export default function Analytics() {
     enabled: !!user,
   });
 
+  const { data: availableDates } = trpc.analytics.getAvailableDates.useQuery(undefined, {
+    enabled: !!user,
+  });
+
   useEffect(() => {
     if (!loading && !user) {
       window.location.href = getLoginUrl();
@@ -87,22 +91,31 @@ export default function Analytics() {
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <div>
               <Label htmlFor="startDate">Fecha Inicio</Label>
-              <Input
-                id="startDate"
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
+              <div className="relative">
+                <Input
+                  id="startDate"
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
+                {availableDates && availableDates.length > 0 && (
+                  <div className="mt-1 text-xs text-green-600">
+                    {availableDates.length} días con datos disponibles
+                  </div>
+                )}
+              </div>
             </div>
 
             <div>
               <Label htmlFor="endDate">Fecha Fin</Label>
-              <Input
-                id="endDate"
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-              />
+              <div className="relative">
+                <Input
+                  id="endDate"
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                />
+              </div>
             </div>
 
             <div className="flex items-end">
@@ -242,6 +255,7 @@ export default function Analytics() {
                     <tbody>
                       {stats.harvesterStats
                         .filter((h: any) => h.harvesterId !== 97 && h.harvesterId !== 98 && h.harvesterId !== 99)
+                        .sort((a: any, b: any) => a.harvesterId - b.harvesterId)
                         .map((harvester: any) => (
                         <tr key={harvester.harvesterId} className="border-b border-green-100">
                           <td className="py-3 text-left">

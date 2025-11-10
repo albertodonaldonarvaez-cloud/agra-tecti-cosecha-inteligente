@@ -137,6 +137,12 @@ export const appRouter = router({
   }),
 
   analytics: router({
+    getAvailableDates: protectedProcedure
+      .query(async () => {
+        const dates = await db.getAvailableDates();
+        return dates;
+      }),
+    
     getStats: protectedProcedure
       .input(
         z

@@ -126,3 +126,17 @@
 - [x] Arreglar filtro de fecha para permitir selección de un solo día
 - [x] Ocultar cortadoras 97, 98, 99 de estadísticas por cortadora
 - [x] Cambiar estadísticas por cortadora de tarjetas a tabla
+
+## Nuevas Solicitudes
+- [x] Actualizar logo a logo-agra-tecti.svg
+- [x] Poner logo en todas las páginas (ya está en Login y FloatingNav)
+- [x] Verificar que Dashboard muestre kilos de primera calidad (ya implementado correctamente)
+- [x] Hacer que filtro de Analytics funcione por día individual (ya implementado)
+- [x] Agregar indicadores visuales en calendario para días con datos (react-day-picker instalado)
+- [ ] Ordenar tabla de cortadoras de 1 hacia abajo (ascendente)
+- [ ] Separar fecha y peso en tabla de Cajas Registradas
+
+## Mejoras de Interfaz Pendientes
+- [x] Agregar indicadores visuales en calendario para días con datos
+- [x] Ordenar tabla de cortadoras de 1 hacia abajo (ascendente)
+- [x] Agregar más espacio entre columnas en tabla de Cajas
