@@ -38,12 +38,16 @@ export default function DailyAnalysis() {
     }>();
     
     boxes.forEach(box => {
-      const dateStr = new Date(box.submissionTime).toISOString().split('T')[0];
+      // Usar fecha local en lugar de UTC para evitar desfase de días
+      const date = new Date(box.submissionTime);
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
       
       if (!dateMap.has(dateStr)) {
-        // Crear fecha normalizada a medianoche UTC para evitar duplicados
-        const [year, month, day] = dateStr.split('-').map(Number);
-        const normalizedDate = new Date(Date.UTC(year, month - 1, day));
+        // Crear fecha normalizada a medianoche local
+        const normalizedDate = new Date(year, date.getMonth(), date.getDate());
         
         dateMap.set(dateStr, {
           date: dateStr,

@@ -166,3 +166,7 @@
 
 ## Problema de Zona Horaria
 - [x] Corregir fechas en base de datos (un día de diferencia por zona horaria UTC)
+
+## Visualización de Fechas en Frontend
+- [x] Corregir visualización de fechas en Analytics (días incorrectos)
+- [x] Corregir visualización de fechas en Análisis Diario (días incorrectos)

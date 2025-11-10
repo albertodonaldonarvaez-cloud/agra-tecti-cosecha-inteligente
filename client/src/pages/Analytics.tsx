@@ -40,31 +40,30 @@ export default function Analytics() {
       endDate: finalEndDate || undefined,
     });
   };
-
   const handleLast15Days = () => {
     const end = new Date();
     const start = new Date();
     start.setDate(start.getDate() - 15);
     
-    const startStr = start.toISOString().split('T')[0];
-    const endStr = end.toISOString().split('T')[0];
+    // Usar fecha local en lugar de UTC
+    const startStr = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
+    const endStr = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
     
     setStartDate(startStr);
     setEndDate(endStr);
-    setFilterDates({ startDate: startStr, endDate: endStr });
   };
-
+  
   const handleLastMonth = () => {
     const end = new Date();
     const start = new Date();
     start.setMonth(start.getMonth() - 1);
     
-    const startStr = start.toISOString().split('T')[0];
-    const endStr = end.toISOString().split('T')[0];
+    // Usar fecha local en lugar de UTC
+    const startStr = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
+    const endStr = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
     
     setStartDate(startStr);
     setEndDate(endStr);
-    setFilterDates({ startDate: startStr, endDate: endStr });
   };
 
   const handleClearFilter = () => {
