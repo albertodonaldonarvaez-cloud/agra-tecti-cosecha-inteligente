@@ -170,3 +170,6 @@
 ## Visualización de Fechas en Frontend
 - [x] Corregir visualización de fechas en Analytics (días incorrectos)
 - [x] Corregir visualización de fechas en Análisis Diario (días incorrectos)
+
+## Caja Faltante
+- [x] Agregar manualmente caja con código 15617848 que dio error en importación (agregada como 15-617848)
