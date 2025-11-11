@@ -60,11 +60,14 @@ COPY --chown=agratec:nodejs shared ./shared
 COPY --from=builder --chown=agratec:nodejs /app/dist/index.js ./dist/index.js
 
 # Copiar build del cliente al directorio correcto para producción
-COPY --from=builder --chown=agratec:nodejs /app/dist/public ./server/public
+# En producción, server/_core/vite.ts busca en path.resolve(import.meta.dirname, "public")
+# que se traduce a /app/server/_core/public
+COPY --from=builder --chown=agratec:nodejs /app/dist/public ./server/_core/public
 
 # Copiar archivos de configuración
 COPY --chown=agratec:nodejs package.json ./
 COPY --chown=agratec:nodejs tsconfig.json ./
+COPY --chown=agratec:nodejs drizzle.config.ts ./
 
 # Crear directorio para fotos descargadas
 RUN mkdir -p /app/photos && chown -R agratec:nodejs /app/photos
