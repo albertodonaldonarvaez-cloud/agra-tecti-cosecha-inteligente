@@ -52,7 +52,6 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --chown=agratec:nodejs server ./server
 COPY --chown=agratec:nodejs drizzle ./drizzle
 COPY --chown=agratec:nodejs shared ./shared
-COPY --chown=agratec:nodejs storage ./storage
 
 # Copiar build del cliente
 COPY --from=builder --chown=agratec:nodejs /app/client/dist ./client/dist
@@ -60,6 +59,9 @@ COPY --from=builder --chown=agratec:nodejs /app/client/dist ./client/dist
 # Copiar archivos de configuración
 COPY --chown=agratec:nodejs package.json ./
 COPY --chown=agratec:nodejs tsconfig.json ./
+
+# Crear directorio para fotos descargadas
+RUN mkdir -p /app/photos && chown -R agratec:nodejs /app/photos
 
 # Cambiar al usuario no-root
 USER agratec
