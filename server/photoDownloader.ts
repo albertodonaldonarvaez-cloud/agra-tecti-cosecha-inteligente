@@ -19,7 +19,7 @@ export async function downloadPhoto(
   photoUrl: string,
   apiToken: string,
   boxCode: string,
-  downloadDir: string = '/home/ubuntu/agra-tecti-cosecha-inteligente/photos'
+  downloadDir: string = '/app/photos'
 ): Promise<PhotoDownloadResult> {
   try {
     // Crear directorio si no existe
@@ -82,7 +82,7 @@ export async function downloadPhoto(
 export async function downloadPhotosInBatch(
   photos: Array<{ photoUrl: string; boxCode: string }>,
   apiToken: string,
-  downloadDir: string = '/home/ubuntu/agra-tecti-cosecha-inteligente/photos',
+  downloadDir: string = '/app/photos',
   concurrency: number = 5
 ): Promise<{ success: number; failed: number; results: PhotoDownloadResult[] }> {
   const results: PhotoDownloadResult[] = [];

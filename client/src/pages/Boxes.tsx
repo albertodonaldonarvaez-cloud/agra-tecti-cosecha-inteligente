@@ -11,7 +11,7 @@ import {
 import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { Package, X, MapPin } from "lucide-react";
-import { BoxLocationMap } from "@/components/BoxLocationMap";
+
 import { useEffect, useState } from "react";
 
 interface Box {
@@ -189,11 +189,14 @@ export default function Boxes() {
                     
                     <div>
                       <p className="text-sm text-green-600 mb-1">Ubicación GPS</p>
-                      <BoxLocationMap 
-                        latitude={selectedBox.latitude}
-                        longitude={selectedBox.longitude}
-                        boxCode={selectedBox.boxCode}
-                      />
+                      {selectedBox.latitude && selectedBox.longitude ? (
+                        <div className="text-sm text-gray-700">
+                          <p className="font-mono">Lat: {selectedBox.latitude.toFixed(6)}</p>
+                          <p className="font-mono">Lng: {selectedBox.longitude.toFixed(6)}</p>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-500">Sin coordenadas</p>
+                      )}
                     </div>
                     
                     <div>
