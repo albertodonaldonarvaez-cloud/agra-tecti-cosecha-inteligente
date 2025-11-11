@@ -188,18 +188,6 @@ export default function Boxes() {
                     </div>
                     
                     <div>
-                      <p className="text-sm text-green-600 mb-1">Ubicación GPS</p>
-                      {selectedBox.latitude && selectedBox.longitude ? (
-                        <div className="text-sm text-gray-700">
-                          <p className="font-mono">Lat: {selectedBox.latitude.toFixed(6)}</p>
-                          <p className="font-mono">Lng: {selectedBox.longitude.toFixed(6)}</p>
-                        </div>
-                      ) : (
-                        <p className="text-sm text-gray-500">Sin coordenadas</p>
-                      )}
-                    </div>
-                    
-                    <div>
                       <p className="text-sm text-green-600 mb-1">Fecha de Registro</p>
                       <p className="text-lg font-semibold text-green-900">
                         {new Date(selectedBox.submissionTime).toLocaleDateString('es-MX', { 
