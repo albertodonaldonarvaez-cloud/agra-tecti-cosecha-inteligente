@@ -112,6 +112,12 @@ export async function clearResolvedErrors() {
   await db.delete(uploadErrors).where(eq(uploadErrors.resolved, true));
 }
 
+export async function clearAllErrors() {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(uploadErrors);
+}
+
 // ============================================
 // FUNCIONES PARA LOTES DE CARGA
 // ============================================

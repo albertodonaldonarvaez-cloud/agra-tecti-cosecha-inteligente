@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { AlertTriangle, CheckCircle, Edit, Trash2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle, ChevronLeft, ChevronRight, Edit, Trash2, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -30,10 +30,13 @@ interface EditFormData {
   collectedAt?: string;
 }
 
+const ITEMS_PER_PAGE = 50;
+
 export default function UploadErrors() {
   const { user, loading } = useAuth();
   const [selectedBatch, setSelectedBatch] = useState<string | null>(null);
   const [editingError, setEditingError] = useState<any | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
   const [formData, setFormData] = useState<EditFormData>({
     boxCode: "",
     parcelCode: "",
@@ -103,33 +106,58 @@ export default function UploadErrors() {
     },
   });
 
+  const clearAll = trpc.uploadErrors.clearAll.useMutation({
+    onSuccess: () => {
+      toast.success("Todos los errores han sido eliminados");
+      refetchUnresolved();
+      if (selectedBatch) refetchBatch();
+    },
+    onError: (error) => {
+      toast.error(error.message);
+    },
+  });
+
   useEffect(() => {
-    if (!loading && (!user || user.role !== "admin")) {
+    if (!loading && !user) {
       window.location.href = getLoginUrl();
     }
   }, [user, loading]);
 
-  if (loading || !user || user.role !== "admin") {
-    return null;
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedBatch]);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-lg">Cargando...</div>
+      </div>
+    );
+  }
+
+  if (!user || user.role !== "admin") {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-lg">Acceso denegado</div>
+      </div>
+    );
   }
 
   const displayErrors = selectedBatch ? batchErrors : unresolvedErrors;
-  const totalUnresolved = unresolvedErrors?.length || 0;
+
+  // Paginación
+  const totalItems = displayErrors?.length || 0;
+  const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const paginatedErrors = displayErrors?.slice(startIndex, endIndex) || [];
 
   const handleEdit = (error: any) => {
     setEditingError(error);
     
-    // Parsear rowData si existe
-    let rowData: any = {};
-    try {
-      rowData = error.rowData ? JSON.parse(error.rowData) : {};
-    } catch (e) {
-      console.error("Error parsing rowData:", e);
-    }
-
     // Pre-llenar el formulario con los datos del error
-    const boxCode = error.boxCode || rowData['Escanea la caja'] || "";
-    const parcelString = error.parcelCode || rowData['Escanea la parcela'] || "";
+    const boxCode = error.boxCode || error.rowData?.['Escanea la caja'] || "";
+    const parcelString = error.parcelCode || error.rowData?.['Escanea la parcela'] || "";
     
     // Extraer código de parcela del formato "CODIGO - NOMBRE"
     let parcelCode = parcelString.split(/\s*-\s*/)[0]?.trim() || parcelString;
@@ -140,20 +168,24 @@ export default function UploadErrors() {
     
     // Extraer harvesterId del boxCode (formato XX-XXXXXX)
     const harvesterIdFromBox = boxCode ? parseInt(boxCode.split('-')[0]) : 1;
-
+    
+    const weightKg = error.rowData?.['Peso de la caja'] || 0;
+    const photoUrl = error.rowData?.['foto de la caja de primera_URL'] || "";
+    const latitude = error.rowData?.['_Pon tu ubicación_latitude'] || undefined;
+    const longitude = error.rowData?.['_Pon tu ubicación_longitude'] || undefined;
+    
     setFormData({
       boxCode,
       parcelCode,
-      harvesterId: isNaN(harvesterIdFromBox) ? 1 : harvesterIdFromBox,
-      weightKg: parseFloat(rowData['Peso de la caja']) || 0,
-      photoUrl: rowData['foto de la caja de primera_URL'] || "",
-      latitude: rowData['_Pon tu ubicación_latitude'] || undefined,
-      longitude: rowData['_Pon tu ubicación_longitude'] || undefined,
-      collectedAt: rowData['_submission_time'] || undefined,
+      harvesterId: harvesterIdFromBox,
+      weightKg,
+      photoUrl,
+      latitude,
+      longitude,
     });
   };
 
-  const handleSaveCorrection = () => {
+  const handleSave = () => {
     if (!editingError) return;
 
     correctAndSave.mutate({
@@ -162,42 +194,51 @@ export default function UploadErrors() {
     });
   };
 
+  const handleClearAll = () => {
+    if (confirm("¿Estás seguro de que deseas eliminar TODOS los errores? Esta acción no se puede deshacer.")) {
+      clearAll.mutate();
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
-      <div className="container">
+    <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 p-6">
+      <div className="mx-auto max-w-7xl">
         {/* Header */}
         <div className="mb-8 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <img src={APP_LOGO} alt="Agratec" className="h-16 w-16" />
+            <img src={APP_LOGO} alt="Logo" className="h-16 w-16" />
             <div>
-              <h1 className="text-4xl font-bold text-green-900">Errores de Validación</h1>
-              <p className="text-green-700">
-                {totalUnresolved > 0
-                  ? `${totalUnresolved} errores sin resolver`
-                  : "No hay errores pendientes"}
-              </p>
+              <h1 className="text-3xl font-bold text-green-900">Errores de Validación</h1>
+              <p className="text-gray-600">Gestiona y corrige errores de carga de datos</p>
             </div>
           </div>
-          {totalUnresolved > 0 && (
+          <div className="flex gap-2">
             <Button
               onClick={() => clearResolved.mutate()}
               variant="outline"
-              className="border-green-600 text-green-700 hover:bg-green-50"
+              className="border-orange-600 text-orange-700 hover:bg-orange-50"
             >
               Limpiar Resueltos
             </Button>
-          )}
+            <Button
+              onClick={handleClearAll}
+              variant="outline"
+              className="border-red-600 text-red-700 hover:bg-red-50"
+            >
+              Limpiar Todo
+            </Button>
+          </div>
         </div>
 
-        {/* Estadísticas por Lote */}
-        {selectedBatch && batchStats && (
+        {/* Estadísticas por Tipo */}
+        {batchStats && (
           <GlassCard className="mb-6">
-            <h3 className="mb-4 text-lg font-semibold text-green-900">Estadísticas del Lote</h3>
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            <h3 className="mb-4 text-lg font-semibold text-green-900">Estadísticas por Tipo de Error</h3>
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
               {Object.entries(batchStats).map(([type, count]) => {
                 const typeInfo = errorTypeLabels[type] || { label: type, color: "text-gray-600" };
                 return (
-                  <div key={type} className="rounded-lg border border-green-200 bg-white/50 p-3">
+                  <div key={type} className="rounded-lg border-2 border-green-200 bg-white p-4 text-center">
                     <div className={`text-2xl font-bold ${typeInfo.color}`}>{count as number}</div>
                     <div className="text-sm text-gray-600">{typeInfo.label}</div>
                   </div>
@@ -241,94 +282,135 @@ export default function UploadErrors() {
 
         {/* Lista de Errores */}
         <GlassCard>
-          <h3 className="mb-4 text-lg font-semibold text-green-900">
-            {selectedBatch ? "Errores del Lote Seleccionado" : "Errores Sin Resolver"}
-          </h3>
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-lg font-semibold text-green-900">
+              {selectedBatch ? "Errores del Lote Seleccionado" : "Errores Sin Resolver"}
+            </h3>
+            {totalItems > 0 && (
+              <div className="text-sm text-gray-600">
+                Mostrando {startIndex + 1}-{Math.min(endIndex, totalItems)} de {totalItems} errores
+              </div>
+            )}
+          </div>
+          
           {!displayErrors || displayErrors.length === 0 ? (
             <div className="py-12 text-center text-gray-500">
               <CheckCircle className="mx-auto mb-4 h-16 w-16 text-green-500" />
               <p className="text-lg">No hay errores para mostrar</p>
             </div>
           ) : (
-            <div className="overflow-x-auto relative">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b-2 border-green-600 text-left">
-                    <th className="p-3 font-semibold text-green-900">Tipo</th>
-                    <th className="p-3 font-semibold text-green-900">Caja</th>
-                    <th className="p-3 font-semibold text-green-900">Parcela</th>
-                    <th className="p-3 font-semibold text-green-900">Mensaje</th>
-                    <th className="p-3 font-semibold text-green-900">Estado</th>
-                    <th className="p-3 font-semibold text-green-900">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayErrors.map((error) => {
-                    const typeInfo = errorTypeLabels[error.errorType] || {
-                      label: error.errorType,
-                      color: "text-gray-600",
-                    };
-                    return (
-                      <tr
-                        key={error.id}
-                        className="border-b border-green-200"
-                      >
-                        <td className="p-3">
-                          <span className={`font-medium ${typeInfo.color}`}>{typeInfo.label}</span>
-                        </td>
-                        <td className="p-3 font-mono text-sm">{error.boxCode || "-"}</td>
-                        <td className="p-3">{error.parcelCode || "-"}</td>
-                        <td className="p-3 text-sm text-gray-700">{error.errorMessage}</td>
-                        <td className="p-3">
-                          {error.resolved ? (
-                            <span className="flex items-center gap-1 text-green-600">
-                              <CheckCircle className="h-4 w-4" />
-                              Resuelto
-                            </span>
-                          ) : (
-                            <span className="flex items-center gap-1 text-orange-600">
-                              <XCircle className="h-4 w-4" />
-                              Pendiente
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-3">
-                          <div className="flex gap-2">
-                            {!error.resolved && (
-                              <>
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleEdit(error)}
-                                  className="bg-blue-600 hover:bg-blue-700"
-                                >
-                                  <Edit className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  onClick={() => markResolved.mutate({ errorId: error.id })}
-                                  variant="outline"
-                                  className="border-green-600 text-green-700 hover:bg-green-50"
-                                >
-                                  <CheckCircle className="h-4 w-4" />
-                                </Button>
-                              </>
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full table-fixed">
+                  <thead>
+                    <tr className="border-b-2 border-green-600 text-left bg-green-50">
+                      <th className="px-4 py-3 font-semibold text-green-900 w-32">Tipo</th>
+                      <th className="px-4 py-3 font-semibold text-green-900 w-32">Caja</th>
+                      <th className="px-4 py-3 font-semibold text-green-900 w-32">Parcela</th>
+                      <th className="px-4 py-3 font-semibold text-green-900">Mensaje</th>
+                      <th className="px-4 py-3 font-semibold text-green-900 w-28">Estado</th>
+                      <th className="px-4 py-3 font-semibold text-green-900 w-40">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedErrors.map((error) => {
+                      const typeInfo = errorTypeLabels[error.errorType] || {
+                        label: error.errorType,
+                        color: "text-gray-600",
+                      };
+                      return (
+                        <tr
+                          key={error.id}
+                          className="border-b border-green-100"
+                        >
+                          <td className="px-4 py-3">
+                            <span className={`font-medium text-sm ${typeInfo.color}`}>{typeInfo.label}</span>
+                          </td>
+                          <td className="px-4 py-3 font-mono text-sm truncate">{error.boxCode || "-"}</td>
+                          <td className="px-4 py-3 text-sm truncate">{error.parcelCode || "-"}</td>
+                          <td className="px-4 py-3 text-sm text-gray-700 truncate">{error.errorMessage}</td>
+                          <td className="px-4 py-3">
+                            {error.resolved ? (
+                              <span className="flex items-center gap-1 text-green-600 text-sm">
+                                <CheckCircle className="h-4 w-4" />
+                                Resuelto
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-1 text-orange-600 text-sm">
+                                <XCircle className="h-4 w-4" />
+                                Pendiente
+                              </span>
                             )}
-                            <Button
-                              size="sm"
-                              onClick={() => deleteError.mutate({ errorId: error.id })}
-                              variant="outline"
-                              className="border-red-600 text-red-700 hover:bg-red-50"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex gap-2">
+                              {!error.resolved && (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleEdit(error)}
+                                    className="bg-blue-600 hover:bg-blue-700 h-8 w-8 p-0"
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => markResolved.mutate({ errorId: error.id })}
+                                    variant="outline"
+                                    className="border-green-600 text-green-700 hover:bg-green-50 h-8 w-8 p-0"
+                                  >
+                                    <CheckCircle className="h-4 w-4" />
+                                  </Button>
+                                </>
+                              )}
+                              <Button
+                                size="sm"
+                                onClick={() => deleteError.mutate({ errorId: error.id })}
+                                variant="outline"
+                                className="border-red-600 text-red-700 hover:bg-red-50 h-8 w-8 p-0"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Paginación */}
+              {totalPages > 1 && (
+                <div className="mt-6 flex items-center justify-between border-t border-green-200 pt-4">
+                  <Button
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    variant="outline"
+                    className="border-green-600 text-green-700 hover:bg-green-50"
+                  >
+                    <ChevronLeft className="h-4 w-4 mr-1" />
+                    Anterior
+                  </Button>
+                  
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">
+                      Página {currentPage} de {totalPages}
+                    </span>
+                  </div>
+
+                  <Button
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    variant="outline"
+                    className="border-green-600 text-green-700 hover:bg-green-50"
+                  >
+                    Siguiente
+                    <ChevronRight className="h-4 w-4 ml-1" />
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </GlassCard>
       </div>
@@ -351,16 +433,16 @@ export default function UploadErrors() {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="boxCode">Código de Caja *</Label>
+                <Label htmlFor="boxCode">Código de Caja</Label>
                 <Input
                   id="boxCode"
                   value={formData.boxCode}
                   onChange={(e) => setFormData({ ...formData, boxCode: e.target.value })}
-                  placeholder="XX-XXXXXX"
+                  placeholder="01-123456"
                 />
               </div>
               <div>
-                <Label htmlFor="parcelCode">Código de Parcela *</Label>
+                <Label htmlFor="parcelCode">Código de Parcela</Label>
                 <Input
                   id="parcelCode"
                   value={formData.parcelCode}
@@ -369,22 +451,20 @@ export default function UploadErrors() {
                 />
               </div>
               <div>
-                <Label htmlFor="harvesterId">ID de Cortadora *</Label>
+                <Label htmlFor="harvesterId">ID de Cortadora</Label>
                 <Input
                   id="harvesterId"
                   type="number"
                   value={formData.harvesterId}
                   onChange={(e) => setFormData({ ...formData, harvesterId: parseInt(e.target.value) })}
-                  min={1}
-                  max={99}
                 />
               </div>
               <div>
-                <Label htmlFor="weightKg">Peso (kg) *</Label>
+                <Label htmlFor="weightKg">Peso (kg)</Label>
                 <Input
                   id="weightKg"
                   type="number"
-                  step="0.01"
+                  step="0.001"
                   value={formData.weightKg}
                   onChange={(e) => setFormData({ ...formData, weightKg: parseFloat(e.target.value) })}
                 />
@@ -403,9 +483,9 @@ export default function UploadErrors() {
                 <Input
                   id="latitude"
                   type="number"
-                  step="0.000001"
+                  step="0.0000001"
                   value={formData.latitude || ""}
-                  onChange={(e) => setFormData({ ...formData, latitude: parseFloat(e.target.value) || undefined })}
+                  onChange={(e) => setFormData({ ...formData, latitude: parseFloat(e.target.value) })}
                 />
               </div>
               <div>
@@ -413,9 +493,9 @@ export default function UploadErrors() {
                 <Input
                   id="longitude"
                   type="number"
-                  step="0.000001"
+                  step="0.0000001"
                   value={formData.longitude || ""}
-                  onChange={(e) => setFormData({ ...formData, longitude: parseFloat(e.target.value) || undefined })}
+                  onChange={(e) => setFormData({ ...formData, longitude: parseFloat(e.target.value) })}
                 />
               </div>
             </div>
@@ -428,9 +508,9 @@ export default function UploadErrors() {
                 Cancelar
               </Button>
               <Button
-                onClick={handleSaveCorrection}
-                disabled={correctAndSave.isPending}
+                onClick={handleSave}
                 className="bg-green-600 hover:bg-green-700"
+                disabled={correctAndSave.isPending}
               >
                 {correctAndSave.isPending ? "Guardando..." : "Guardar Caja"}
               </Button>

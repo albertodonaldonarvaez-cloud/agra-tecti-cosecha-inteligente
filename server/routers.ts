@@ -317,11 +317,16 @@ export const appRouter = router({
             console.log('\u2713 Cortadora ya existe:', input.harvesterId);
           }
 
+          // Obtener el nombre de la parcela
+          const parcelData = await database.select().from(parcels).where(eq(parcels.code, input.parcelCode)).limit(1);
+          const parcelName = parcelData.length > 0 ? parcelData[0].name : input.parcelCode;
+
           // Insertar la caja corregida
           console.log('\ud83d\udce6 Insertando caja en la base de datos...');
           await database.insert(boxes).values({
             boxCode: input.boxCode,
             parcelCode: input.parcelCode,
+            parcelName: parcelName,
             harvesterId: input.harvesterId,
             weight: input.weightKg,
             photoUrl: input.photoUrl || null,
@@ -345,6 +350,11 @@ export const appRouter = router({
 
     clearResolved: adminProcedure.mutation(async () => {
       await dbExt.clearResolvedErrors();
+      return { success: true };
+    }),
+
+    clearAll: adminProcedure.mutation(async () => {
+      await dbExt.clearAllErrors();
       return { success: true };
     }),
 
