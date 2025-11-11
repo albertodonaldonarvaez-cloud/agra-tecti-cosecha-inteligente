@@ -72,14 +72,19 @@ function parseParcelCode(parcelString: string): { code: string; name: string; er
 
   // Formato esperado: "CODIGO -NOMBRE" o "CODIGO - NOMBRE"
   const parts = parcelString.split(/\s*-\s*/);
-  const code = parts[0]?.trim() || '';
-  const name = parts[1]?.trim() || '';
+  let code = parts[0]?.trim() || '';
+  let name = parts[1]?.trim() || '';
+
+  // Si el código está vacío pero hay nombre (ej. " -LOS ELOTES"), usar el nombre como código
+  if (!code && name) {
+    code = name;
+  }
 
   if (!code) {
     return { code: '', name: '', error: 'Código de parcela inválido' };
   }
 
-  return { code, name };
+  return { code, name: name || code };
 }
 
 /**

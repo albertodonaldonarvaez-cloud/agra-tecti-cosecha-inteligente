@@ -310,7 +310,8 @@ export const appRouter = router({
             console.log('\ud83d\udc69\u200d\ud83c\udf3e Creando nueva cortadora:', input.harvesterId);
             await database.insert(harvesters).values({
               id: input.harvesterId,
-              name: `Cortadora ${input.harvesterId}`,
+              number: input.harvesterId,
+              customName: `Cortadora ${input.harvesterId}`,
             });
           } else {
             console.log('\u2713 Cortadora ya existe:', input.harvesterId);

@@ -132,7 +132,11 @@ export default function UploadErrors() {
     const parcelString = error.parcelCode || rowData['Escanea la parcela'] || "";
     
     // Extraer código de parcela del formato "CODIGO - NOMBRE"
-    const parcelCode = parcelString.split(/\s*-\s*/)[0]?.trim() || parcelString;
+    let parcelCode = parcelString.split(/\s*-\s*/)[0]?.trim() || parcelString;
+    // Si el código está vacío (ej. " -LOS ELOTES"), usar el nombre
+    if (!parcelCode) {
+      parcelCode = parcelString.split(/\s*-\s*/)[1]?.trim() || parcelString.trim();
+    }
     
     // Extraer harvesterId del boxCode (formato XX-XXXXXX)
     const harvesterIdFromBox = boxCode ? parseInt(boxCode.split('-')[0]) : 1;
