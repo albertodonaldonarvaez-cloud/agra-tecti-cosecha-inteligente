@@ -69,8 +69,8 @@ COPY --chown=agratec:nodejs package.json ./
 COPY --chown=agratec:nodejs tsconfig.json ./
 COPY --chown=agratec:nodejs drizzle.config.ts ./
 
-# Crear directorio para fotos descargadas
-RUN mkdir -p /app/photos && chown -R agratec:nodejs /app/photos
+# Crear directorios para fotos descargadas y uploads temporales
+RUN mkdir -p /app/photos /tmp/uploads && chown -R agratec:nodejs /app/photos /tmp/uploads
 
 # Cambiar al usuario no-root
 USER agratec

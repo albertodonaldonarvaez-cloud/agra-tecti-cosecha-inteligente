@@ -4,6 +4,8 @@ import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import cookieParser from "cookie-parser";
+import multer from "multer";
+import path from "path";
 import { appRouter } from "../routers";
 import { createContext } from "./authContext";
 import { serveStatic, setupVite } from "./vite";
@@ -35,6 +37,28 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   // Cookie parser for authentication
   app.use(cookieParser());
+  
+  // Multer for file uploads
+  const upload = multer({ 
+    dest: "/tmp/uploads/",
+    limits: { fileSize: 50 * 1024 * 1024 } // 50MB
+  });
+  
+  // File upload endpoint
+  app.post("/api/upload-excel", upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+      res.json({ 
+        success: true, 
+        filePath: req.file.path,
+        fileName: req.file.originalname
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
   
   // Image proxy for Kobo images
   const { proxyKoboImage } = await import("../imageProxy");

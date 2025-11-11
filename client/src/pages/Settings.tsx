@@ -130,14 +130,32 @@ export default function Settings() {
       return;
     }
     
-    // En un entorno real, subirías el archivo al servidor
-    // Por ahora, simulamos la ruta del archivo
-    const filePath = `/tmp/${excelFile.name}`;
-    uploadExcel.mutate({ 
-      filePath, 
-      fileName: excelFile.name,
-      downloadPhotos 
-    });
+    try {
+      // Subir archivo al servidor
+      const formData = new FormData();
+      formData.append("file", excelFile);
+      
+      const response = await fetch("/api/upload-excel", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      
+      if (!response.ok) {
+        throw new Error("Error al subir el archivo");
+      }
+      
+      const { filePath, fileName } = await response.json();
+      
+      // Procesar el archivo subido
+      uploadExcel.mutate({ 
+        filePath, 
+        fileName,
+        downloadPhotos 
+      });
+    } catch (error: any) {
+      toast.error(error.message || "Error al subir el archivo");
+    }
   };
 
   const handleUploadJson = () => {
