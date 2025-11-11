@@ -141,22 +141,52 @@ export async function processKoboData(data: KoboData) {
 
 export async function syncFromKoboAPI(apiUrl: string, apiToken: string, assetId: string) {
   try {
+    console.log('\ud83d\udd04 Iniciando sincronización con KoboToolbox...');
+    console.log('\ud83c\udf10 API URL:', apiUrl);
+    console.log('\ud83d\udcce Asset ID:', assetId);
+    
     const url = `${apiUrl}/api/v2/assets/${assetId}/data.json`;
+    console.log('\ud83d\udd17 URL completa:', url);
     
     const response = await fetch(url, {
       headers: {
         Authorization: `Token ${apiToken}`,
       },
+      // Agregar timeout de 30 segundos
+      signal: AbortSignal.timeout(30000),
     });
 
+    console.log('\ud83d\udce1 Respuesta recibida. Status:', response.status);
+
     if (!response.ok) {
-      throw new Error(`Error al conectar con Kobo: ${response.statusText}`);
+      const errorText = await response.text();
+      console.error('\u274c Error de API:', response.status, errorText);
+      throw new Error(`Error al conectar con Kobo (${response.status}): ${response.statusText}`);
     }
 
     const data: KoboData = await response.json();
+    console.log('\ud83d\udcca Datos recibidos:', data.results?.length || 0, 'registros');
     
-    return await processKoboData(data);
-  } catch (error) {
-    throw new Error(`Error en sincronización: ${error}`);
+    const result = await processKoboData(data);
+    console.log('\u2705 Sincronización completada:', result.processedCount, 'registros procesados');
+    
+    return result;
+  } catch (error: any) {
+    console.error('\u274c Error en sincronización:', error);
+    
+    // Proporcionar mensajes de error más específicos
+    if (error.name === 'AbortError') {
+      throw new Error('Tiempo de espera agotado al conectar con KoboToolbox. Verifica tu conexión a internet.');
+    }
+    
+    if (error.cause?.code === 'ENOTFOUND') {
+      throw new Error('No se pudo resolver el dominio de KoboToolbox. Verifica la URL de la API.');
+    }
+    
+    if (error.cause?.code === 'ECONNREFUSED') {
+      throw new Error('Conexión rechazada por KoboToolbox. Verifica la URL de la API.');
+    }
+    
+    throw new Error(`Error en sincronización: ${error.message || error}`);
   }
 }
