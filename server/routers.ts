@@ -5,6 +5,9 @@ import { COOKIE_NAME } from "./_core/authContext";
 import { loginUser, registerUser, hashPassword } from "./auth";
 import * as db from "./db";
 import * as dbExt from "./db_extended";
+import { getDb } from "./db";
+import { boxes, harvesters, parcels } from "../drizzle/schema";
+import { eq } from "drizzle-orm";
 
 export const appRouter = router({
   auth: router({
@@ -270,52 +273,73 @@ export const appRouter = router({
         collectedAt: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
-        const db = await getDb();
-        if (!db) throw new Error('Base de datos no disponible');
-
-        // Verificar que la caja no exista ya
-        const existingBox = await db.select().from(boxes).where(eq(boxes.boxCode, input.boxCode)).limit(1);
-        if (existingBox.length > 0) {
-          throw new Error(`La caja ${input.boxCode} ya existe en la base de datos`);
+        console.log('\u2699\ufe0f Corrigiendo error ID:', input.errorId);
+        console.log('\ud83d\udce6 Datos de la caja:', input);
+        
+        const database = await getDb();
+        if (!database) {
+          console.error('\u274c Base de datos no disponible');
+          throw new Error('Base de datos no disponible');
         }
 
-        // Verificar o crear la parcela
-        let parcel = await db.select().from(parcels).where(eq(parcels.code, input.parcelCode)).limit(1);
-        if (parcel.length === 0) {
-          // Crear parcela si no existe
-          await db.insert(parcels).values({
-            code: input.parcelCode,
-            name: input.parcelCode,
-            polygon: null,
-            isActive: true,
+        try {
+          // Verificar que la caja no exista ya
+          const existingBox = await database.select().from(boxes).where(eq(boxes.boxCode, input.boxCode)).limit(1);
+          if (existingBox.length > 0) {
+            console.error('\u26a0\ufe0f Caja duplicada:', input.boxCode);
+            throw new Error(`La caja ${input.boxCode} ya existe en la base de datos`);
+          }
+
+          // Verificar o crear la parcela
+          let parcel = await database.select().from(parcels).where(eq(parcels.code, input.parcelCode)).limit(1);
+          if (parcel.length === 0) {
+            console.log('\ud83c\udf3f Creando nueva parcela:', input.parcelCode);
+            await database.insert(parcels).values({
+              code: input.parcelCode,
+              name: input.parcelCode,
+              polygon: null,
+              isActive: true,
+            });
+          } else {
+            console.log('\u2713 Parcela ya existe:', input.parcelCode);
+          }
+
+          // Verificar o crear la cortadora
+          let harvester = await database.select().from(harvesters).where(eq(harvesters.id, input.harvesterId)).limit(1);
+          if (harvester.length === 0) {
+            console.log('\ud83d\udc69\u200d\ud83c\udf3e Creando nueva cortadora:', input.harvesterId);
+            await database.insert(harvesters).values({
+              id: input.harvesterId,
+              name: `Cortadora ${input.harvesterId}`,
+            });
+          } else {
+            console.log('\u2713 Cortadora ya existe:', input.harvesterId);
+          }
+
+          // Insertar la caja corregida
+          console.log('\ud83d\udce6 Insertando caja en la base de datos...');
+          await database.insert(boxes).values({
+            boxCode: input.boxCode,
+            parcelCode: input.parcelCode,
+            harvesterId: input.harvesterId,
+            weight: input.weightKg,
+            photoUrl: input.photoUrl || null,
+            latitude: input.latitude || null,
+            longitude: input.longitude || null,
+            collectedAt: input.collectedAt ? new Date(input.collectedAt) : new Date(),
           });
+          console.log('\u2705 Caja insertada exitosamente:', input.boxCode);
+
+          // Marcar el error como resuelto
+          console.log('\u2705 Marcando error como resuelto...');
+          await dbExt.markErrorAsResolved(input.errorId);
+          console.log('\u2705 Error resuelto exitosamente');
+
+          return { success: true, boxCode: input.boxCode };
+        } catch (error) {
+          console.error('\u274c Error al corregir y guardar:', error);
+          throw error;
         }
-
-        // Verificar o crear la cortadora
-        let harvester = await db.select().from(harvesters).where(eq(harvesters.id, input.harvesterId)).limit(1);
-        if (harvester.length === 0) {
-          await db.insert(harvesters).values({
-            id: input.harvesterId,
-            name: `Cortadora ${input.harvesterId}`,
-          });
-        }
-
-        // Insertar la caja corregida
-        await db.insert(boxes).values({
-          boxCode: input.boxCode,
-          parcelCode: input.parcelCode,
-          harvesterId: input.harvesterId,
-          weight: input.weightKg,
-          photoUrl: input.photoUrl || null,
-          latitude: input.latitude || null,
-          longitude: input.longitude || null,
-          collectedAt: input.collectedAt ? new Date(input.collectedAt) : new Date(),
-        });
-
-        // Marcar el error como resuelto
-        await dbExt.markErrorAsResolved(input.errorId);
-
-        return { success: true };
       }),
 
     clearResolved: adminProcedure.mutation(async () => {

@@ -246,7 +246,7 @@ export default function UploadErrors() {
               <p className="text-lg">No hay errores para mostrar</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto relative">
               <table className="w-full">
                 <thead>
                   <tr className="border-b-2 border-green-600 text-left">
@@ -267,7 +267,7 @@ export default function UploadErrors() {
                     return (
                       <tr
                         key={error.id}
-                        className="border-b border-green-200 transition-colors hover:bg-green-50/50"
+                        className="border-b border-green-200"
                       >
                         <td className="p-3">
                           <span className={`font-medium ${typeInfo.color}`}>{typeInfo.label}</span>
