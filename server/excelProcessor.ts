@@ -206,40 +206,17 @@ export async function processExcelFile(
         parcelCode = parcelParsed.code;
         parcelName = parcelParsed.name;
 
-        // Validar que la parcela exista y esté activa
+        // Si la parcela no existe, crearla automáticamente
         if (!parcelCodes.has(parcelCode)) {
-          // Intentar georreferenciar como fallback
-          const lat = row['_Pon tu ubicación_latitude'];
-          const lng = row['_Pon tu ubicación_longitude'];
-          
-          if (lat && lng) {
-            const foundParcel = findParcelByCoordinates(lat, lng, activeParcels);
-            if (foundParcel) {
-              parcelCode = foundParcel.code;
-              parcelName = foundParcel.name;
-              console.log(`✓ Caja ${boxCode} georreferenciada a parcela ${parcelCode} (parcela original inválida)`);
-            } else {
-              errors.push({
-                type: 'invalid_parcel',
-                boxCode,
-                parcelCode,
-                message: `La parcela ${parcelCode} no está registrada o no está activa`,
-                rowData: row
-              });
-              errorRows++;
-              continue;
-            }
-          } else {
-            errors.push({
-              type: 'invalid_parcel',
-              boxCode,
-              parcelCode,
-              message: `La parcela ${parcelCode} no está registrada o no está activa`,
-              rowData: row
-            });
-            errorRows++;
-            continue;
-          }
+          console.log(`📍 Creando nueva parcela: ${parcelCode} - ${parcelName}`);
+          await db.insert(parcels).values({
+            code: parcelCode,
+            name: parcelName || parcelCode,
+            polygon: null,
+            isActive: true,
+          });
+          // Agregar al set para futuras validaciones en este lote
+          parcelCodes.add(parcelCode);
         }
       }
 

@@ -257,6 +257,67 @@ export const appRouter = router({
         return { success: true };
       }),
 
+    correctAndSave: adminProcedure
+      .input(z.object({
+        errorId: z.number(),
+        boxCode: z.string(),
+        parcelCode: z.string(),
+        harvesterId: z.number(),
+        weightKg: z.number(),
+        photoUrl: z.string().optional(),
+        latitude: z.number().optional(),
+        longitude: z.number().optional(),
+        collectedAt: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error('Base de datos no disponible');
+
+        // Verificar que la caja no exista ya
+        const existingBox = await db.select().from(boxes).where(eq(boxes.boxCode, input.boxCode)).limit(1);
+        if (existingBox.length > 0) {
+          throw new Error(`La caja ${input.boxCode} ya existe en la base de datos`);
+        }
+
+        // Verificar o crear la parcela
+        let parcel = await db.select().from(parcels).where(eq(parcels.code, input.parcelCode)).limit(1);
+        if (parcel.length === 0) {
+          // Crear parcela si no existe
+          await db.insert(parcels).values({
+            code: input.parcelCode,
+            name: input.parcelCode,
+            polygon: null,
+            isActive: true,
+          });
+        }
+
+        // Verificar o crear la cortadora
+        let harvester = await db.select().from(harvesters).where(eq(harvesters.id, input.harvesterId)).limit(1);
+        if (harvester.length === 0) {
+          await db.insert(harvesters).values({
+            id: input.harvesterId,
+            name: `Cortadora ${input.harvesterId}`,
+          });
+        }
+
+        // Insertar la caja corregida
+        await db.insert(boxes).values({
+          boxCode: input.boxCode,
+          parcelCode: input.parcelCode,
+          harvesterId: input.harvesterId,
+          weight: input.weightKg,
+          photoUrl: input.photoUrl || null,
+          latitude: input.latitude || null,
+          longitude: input.longitude || null,
+          collectedAt: input.collectedAt ? new Date(input.collectedAt) : new Date(),
+        });
+
+        // Marcar el error como resuelto
+        await dbExt.markErrorAsResolved(input.errorId);
+
+        return { success: true };
+      }),
+
     clearResolved: adminProcedure.mutation(async () => {
       await dbExt.clearResolvedErrors();
       return { success: true };

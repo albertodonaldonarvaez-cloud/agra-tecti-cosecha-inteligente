@@ -1,9 +1,12 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { GlassCard } from "@/components/GlassCard";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { AlertTriangle, CheckCircle, Trash2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle, Edit, Trash2, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -16,9 +19,27 @@ const errorTypeLabels: Record<string, { label: string; color: string }> = {
   other: { label: "Otro", color: "text-gray-600" },
 };
 
+interface EditFormData {
+  boxCode: string;
+  parcelCode: string;
+  harvesterId: number;
+  weightKg: number;
+  photoUrl?: string;
+  latitude?: number;
+  longitude?: number;
+  collectedAt?: string;
+}
+
 export default function UploadErrors() {
   const { user, loading } = useAuth();
   const [selectedBatch, setSelectedBatch] = useState<string | null>(null);
+  const [editingError, setEditingError] = useState<any | null>(null);
+  const [formData, setFormData] = useState<EditFormData>({
+    boxCode: "",
+    parcelCode: "",
+    harvesterId: 1,
+    weightKg: 0,
+  });
 
   const { data: batches } = trpc.uploadBatches.list.useQuery({ limit: 50 }, {
     enabled: !!user && user.role === "admin",
@@ -60,6 +81,18 @@ export default function UploadErrors() {
     },
   });
 
+  const correctAndSave = trpc.uploadErrors.correctAndSave.useMutation({
+    onSuccess: () => {
+      toast.success("Error corregido y caja guardada exitosamente");
+      setEditingError(null);
+      refetchUnresolved();
+      if (selectedBatch) refetchBatch();
+    },
+    onError: (error) => {
+      toast.error(error.message);
+    },
+  });
+
   const clearResolved = trpc.uploadErrors.clearResolved.useMutation({
     onSuccess: () => {
       toast.success("Errores resueltos eliminados");
@@ -83,6 +116,48 @@ export default function UploadErrors() {
   const displayErrors = selectedBatch ? batchErrors : unresolvedErrors;
   const totalUnresolved = unresolvedErrors?.length || 0;
 
+  const handleEdit = (error: any) => {
+    setEditingError(error);
+    
+    // Parsear rowData si existe
+    let rowData: any = {};
+    try {
+      rowData = error.rowData ? JSON.parse(error.rowData) : {};
+    } catch (e) {
+      console.error("Error parsing rowData:", e);
+    }
+
+    // Pre-llenar el formulario con los datos del error
+    const boxCode = error.boxCode || rowData['Escanea la caja'] || "";
+    const parcelString = error.parcelCode || rowData['Escanea la parcela'] || "";
+    
+    // Extraer código de parcela del formato "CODIGO - NOMBRE"
+    const parcelCode = parcelString.split(/\s*-\s*/)[0]?.trim() || parcelString;
+    
+    // Extraer harvesterId del boxCode (formato XX-XXXXXX)
+    const harvesterIdFromBox = boxCode ? parseInt(boxCode.split('-')[0]) : 1;
+
+    setFormData({
+      boxCode,
+      parcelCode,
+      harvesterId: isNaN(harvesterIdFromBox) ? 1 : harvesterIdFromBox,
+      weightKg: parseFloat(rowData['Peso de la caja']) || 0,
+      photoUrl: rowData['foto de la caja de primera_URL'] || "",
+      latitude: rowData['_Pon tu ubicación_latitude'] || undefined,
+      longitude: rowData['_Pon tu ubicación_longitude'] || undefined,
+      collectedAt: rowData['_submission_time'] || undefined,
+    });
+  };
+
+  const handleSaveCorrection = () => {
+    if (!editingError) return;
+
+    correctAndSave.mutate({
+      errorId: editingError.id,
+      ...formData,
+    });
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
       <div className="container">
@@ -99,103 +174,28 @@ export default function UploadErrors() {
               </p>
             </div>
           </div>
-          <Button
-            onClick={() => clearResolved.mutate()}
-            disabled={clearResolved.isPending}
-            variant="outline"
-            className="border-green-300 text-green-700 hover:bg-green-50"
-          >
-            Limpiar Resueltos
-          </Button>
+          {totalUnresolved > 0 && (
+            <Button
+              onClick={() => clearResolved.mutate()}
+              variant="outline"
+              className="border-green-600 text-green-700 hover:bg-green-50"
+            >
+              Limpiar Resueltos
+            </Button>
+          )}
         </div>
 
-        {/* Estadísticas */}
-        <div className="mb-6 grid gap-4 md:grid-cols-4">
-          <GlassCard className="p-4">
-            <div className="flex items-center gap-3">
-              <AlertTriangle className="h-8 w-8 text-red-600" />
-              <div>
-                <p className="text-sm text-green-700">Sin Resolver</p>
-                <p className="text-2xl font-bold text-green-900">{totalUnresolved}</p>
-              </div>
-            </div>
-          </GlassCard>
-          <GlassCard className="p-4">
-            <div className="flex items-center gap-3">
-              <XCircle className="h-8 w-8 text-yellow-600" />
-              <div>
-                <p className="text-sm text-green-700">Duplicados</p>
-                <p className="text-2xl font-bold text-green-900">
-                  {unresolvedErrors?.filter((e: any) => e.errorType === "duplicate_box").length || 0}
-                </p>
-              </div>
-            </div>
-          </GlassCard>
-          <GlassCard className="p-4">
-            <div className="flex items-center gap-3">
-              <AlertTriangle className="h-8 w-8 text-red-600" />
-              <div>
-                <p className="text-sm text-green-700">Parcelas Inválidas</p>
-                <p className="text-2xl font-bold text-green-900">
-                  {unresolvedErrors?.filter((e: any) => e.errorType === "invalid_parcel").length || 0}
-                </p>
-              </div>
-            </div>
-          </GlassCard>
-          <GlassCard className="p-4">
-            <div className="flex items-center gap-3">
-              <CheckCircle className="h-8 w-8 text-blue-600" />
-              <div>
-                <p className="text-sm text-green-700">Lotes Procesados</p>
-                <p className="text-2xl font-bold text-green-900">{batches?.length || 0}</p>
-              </div>
-            </div>
-          </GlassCard>
-        </div>
-
-        {/* Filtro por lote */}
-        {batches && batches.length > 0 && (
-          <GlassCard className="mb-6 p-4">
-            <div className="flex items-center gap-4">
-              <span className="text-sm font-semibold text-green-900">Filtrar por lote:</span>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant={selectedBatch === null ? "default" : "outline"}
-                  onClick={() => setSelectedBatch(null)}
-                  className={selectedBatch === null ? "bg-green-600 hover:bg-green-700" : ""}
-                >
-                  Todos los errores
-                </Button>
-                {batches.map((batch: any) => (
-                  <Button
-                    key={batch.batchId}
-                    size="sm"
-                    variant={selectedBatch === batch.batchId ? "default" : "outline"}
-                    onClick={() => setSelectedBatch(batch.batchId)}
-                    className={
-                      selectedBatch === batch.batchId ? "bg-green-600 hover:bg-green-700" : ""
-                    }
-                  >
-                    {batch.fileName} - {new Date(batch.createdAt).toLocaleDateString()}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          </GlassCard>
-        )}
-
-        {/* Estadísticas del lote seleccionado */}
+        {/* Estadísticas por Lote */}
         {selectedBatch && batchStats && (
-          <GlassCard className="mb-6 p-6">
+          <GlassCard className="mb-6">
             <h3 className="mb-4 text-lg font-semibold text-green-900">Estadísticas del Lote</h3>
-            <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
-              {Object.entries(batchStats.byType).map(([type, count]) => {
-                const errorInfo = errorTypeLabels[type] || { label: type, color: "text-gray-600" };
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+              {Object.entries(batchStats).map(([type, count]) => {
+                const typeInfo = errorTypeLabels[type] || { label: type, color: "text-gray-600" };
                 return (
                   <div key={type} className="rounded-lg border border-green-200 bg-white/50 p-3">
-                    <p className={`text-xs font-medium ${errorInfo.color}`}>{errorInfo.label}</p>
-                    <p className="text-2xl font-bold text-green-900">{count as number}</p>
+                    <div className={`text-2xl font-bold ${typeInfo.color}`}>{count as number}</div>
+                    <div className="text-sm text-gray-600">{typeInfo.label}</div>
                   </div>
                 );
               })}
@@ -203,87 +203,117 @@ export default function UploadErrors() {
           </GlassCard>
         )}
 
-        {/* Lista de errores */}
-        {!displayErrors || displayErrors.length === 0 ? (
-          <GlassCard className="p-12 text-center">
-            <CheckCircle className="mx-auto mb-4 h-16 w-16 text-green-300" />
-            <h3 className="mb-2 text-lg font-semibold text-green-900">No hay errores</h3>
-            <p className="text-green-700">
-              {selectedBatch
-                ? "Este lote no tiene errores registrados"
-                : "No hay errores sin resolver"}
-            </p>
-          </GlassCard>
-        ) : (
-          <GlassCard className="overflow-hidden p-6" hover={false}>
+        {/* Filtro por Lote */}
+        <GlassCard className="mb-6">
+          <h3 className="mb-4 text-lg font-semibold text-green-900">Filtrar por Lote de Carga</h3>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={() => setSelectedBatch(null)}
+              variant={selectedBatch === null ? "default" : "outline"}
+              className={
+                selectedBatch === null
+                  ? "bg-green-600 hover:bg-green-700"
+                  : "border-green-600 text-green-700 hover:bg-green-50"
+              }
+            >
+              Todos los Errores
+            </Button>
+            {batches?.map((batch) => (
+              <Button
+                key={batch.batchId}
+                onClick={() => setSelectedBatch(batch.batchId)}
+                variant={selectedBatch === batch.batchId ? "default" : "outline"}
+                className={
+                  selectedBatch === batch.batchId
+                    ? "bg-green-600 hover:bg-green-700"
+                    : "border-green-600 text-green-700 hover:bg-green-50"
+                }
+              >
+                {batch.fileName} ({batch.errorRows})
+              </Button>
+            ))}
+          </div>
+        </GlassCard>
+
+        {/* Lista de Errores */}
+        <GlassCard>
+          <h3 className="mb-4 text-lg font-semibold text-green-900">
+            {selectedBatch ? "Errores del Lote Seleccionado" : "Errores Sin Resolver"}
+          </h3>
+          {!displayErrors || displayErrors.length === 0 ? (
+            <div className="py-12 text-center text-gray-500">
+              <CheckCircle className="mx-auto mb-4 h-16 w-16 text-green-500" />
+              <p className="text-lg">No hay errores para mostrar</p>
+            </div>
+          ) : (
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="border-b-2 border-green-200">
-                    <th className="pb-3 pr-8 text-left text-sm font-semibold text-green-900">Tipo</th>
-                    <th className="pb-3 pr-8 text-left text-sm font-semibold text-green-900">Caja</th>
-                    <th className="pb-3 pr-8 text-left text-sm font-semibold text-green-900">Parcela</th>
-                    <th className="pb-3 pr-8 text-left text-sm font-semibold text-green-900">Mensaje</th>
-                    <th className="pb-3 pr-8 text-center text-sm font-semibold text-green-900">Estado</th>
-                    <th className="pb-3 text-center text-sm font-semibold text-green-900">Acciones</th>
+                  <tr className="border-b-2 border-green-600 text-left">
+                    <th className="p-3 font-semibold text-green-900">Tipo</th>
+                    <th className="p-3 font-semibold text-green-900">Caja</th>
+                    <th className="p-3 font-semibold text-green-900">Parcela</th>
+                    <th className="p-3 font-semibold text-green-900">Mensaje</th>
+                    <th className="p-3 font-semibold text-green-900">Estado</th>
+                    <th className="p-3 font-semibold text-green-900">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {displayErrors.map((error: any) => {
-                    const errorInfo = errorTypeLabels[error.errorType] || { label: error.errorType, color: "text-gray-600" };
+                  {displayErrors.map((error) => {
+                    const typeInfo = errorTypeLabels[error.errorType] || {
+                      label: error.errorType,
+                      color: "text-gray-600",
+                    };
                     return (
                       <tr
                         key={error.id}
-                        className="border-b border-green-100 transition-colors hover:bg-green-50/50"
+                        className="border-b border-green-200 transition-colors hover:bg-green-50/50"
                       >
-                        <td className="py-3 pr-8">
-                          <span className={`text-sm font-semibold ${errorInfo.color}`}>
-                            {errorInfo.label}
-                          </span>
+                        <td className="p-3">
+                          <span className={`font-medium ${typeInfo.color}`}>{typeInfo.label}</span>
                         </td>
-                        <td className="py-3 pr-8 font-mono text-sm text-green-900">
-                          {error.boxCode || "-"}
-                        </td>
-                        <td className="py-3 pr-8 font-mono text-sm text-green-900">
-                          {error.parcelCode || "-"}
-                        </td>
-                        <td className="py-3 pr-8 text-sm text-green-700">
-                          {error.errorMessage}
-                        </td>
-                        <td className="py-3 pr-8 text-center">
+                        <td className="p-3 font-mono text-sm">{error.boxCode || "-"}</td>
+                        <td className="p-3">{error.parcelCode || "-"}</td>
+                        <td className="p-3 text-sm text-gray-700">{error.errorMessage}</td>
+                        <td className="p-3">
                           {error.resolved ? (
-                            <span className="inline-flex items-center gap-1 text-sm text-green-600">
+                            <span className="flex items-center gap-1 text-green-600">
                               <CheckCircle className="h-4 w-4" />
                               Resuelto
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 text-sm text-red-600">
-                              <AlertTriangle className="h-4 w-4" />
+                            <span className="flex items-center gap-1 text-orange-600">
+                              <XCircle className="h-4 w-4" />
                               Pendiente
                             </span>
                           )}
                         </td>
-                        <td className="py-3 text-center">
-                          <div className="flex justify-center gap-2">
+                        <td className="p-3">
+                          <div className="flex gap-2">
                             {!error.resolved && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => markResolved.mutate({ errorId: error.id })}
-                                className="border-green-300 text-green-700 hover:bg-green-50"
-                              >
-                                <CheckCircle className="h-4 w-4" />
-                              </Button>
+                              <>
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleEdit(error)}
+                                  className="bg-blue-600 hover:bg-blue-700"
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={() => markResolved.mutate({ errorId: error.id })}
+                                  variant="outline"
+                                  className="border-green-600 text-green-700 hover:bg-green-50"
+                                >
+                                  <CheckCircle className="h-4 w-4" />
+                                </Button>
+                              </>
                             )}
                             <Button
                               size="sm"
+                              onClick={() => deleteError.mutate({ errorId: error.id })}
                               variant="outline"
-                              onClick={() => {
-                                if (confirm("¿Eliminar este error?")) {
-                                  deleteError.mutate({ errorId: error.id });
-                                }
-                              }}
-                              className="border-red-300 text-red-700 hover:bg-red-50"
+                              className="border-red-600 text-red-700 hover:bg-red-50"
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
@@ -295,9 +325,115 @@ export default function UploadErrors() {
                 </tbody>
               </table>
             </div>
-          </GlassCard>
-        )}
+          )}
+        </GlassCard>
       </div>
+
+      {/* Modal de Edición */}
+      <Dialog open={!!editingError} onOpenChange={() => setEditingError(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Corregir Error y Guardar Caja</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-lg bg-yellow-50 border border-yellow-200 p-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-5 w-5 text-yellow-600 mt-0.5" />
+                <div className="text-sm text-yellow-800">
+                  <strong>Error original:</strong> {editingError?.errorMessage}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="boxCode">Código de Caja *</Label>
+                <Input
+                  id="boxCode"
+                  value={formData.boxCode}
+                  onChange={(e) => setFormData({ ...formData, boxCode: e.target.value })}
+                  placeholder="XX-XXXXXX"
+                />
+              </div>
+              <div>
+                <Label htmlFor="parcelCode">Código de Parcela *</Label>
+                <Input
+                  id="parcelCode"
+                  value={formData.parcelCode}
+                  onChange={(e) => setFormData({ ...formData, parcelCode: e.target.value })}
+                  placeholder="232"
+                />
+              </div>
+              <div>
+                <Label htmlFor="harvesterId">ID de Cortadora *</Label>
+                <Input
+                  id="harvesterId"
+                  type="number"
+                  value={formData.harvesterId}
+                  onChange={(e) => setFormData({ ...formData, harvesterId: parseInt(e.target.value) })}
+                  min={1}
+                  max={99}
+                />
+              </div>
+              <div>
+                <Label htmlFor="weightKg">Peso (kg) *</Label>
+                <Input
+                  id="weightKg"
+                  type="number"
+                  step="0.01"
+                  value={formData.weightKg}
+                  onChange={(e) => setFormData({ ...formData, weightKg: parseFloat(e.target.value) })}
+                />
+              </div>
+              <div className="col-span-2">
+                <Label htmlFor="photoUrl">URL de Foto</Label>
+                <Input
+                  id="photoUrl"
+                  value={formData.photoUrl || ""}
+                  onChange={(e) => setFormData({ ...formData, photoUrl: e.target.value })}
+                  placeholder="https://..."
+                />
+              </div>
+              <div>
+                <Label htmlFor="latitude">Latitud</Label>
+                <Input
+                  id="latitude"
+                  type="number"
+                  step="0.000001"
+                  value={formData.latitude || ""}
+                  onChange={(e) => setFormData({ ...formData, latitude: parseFloat(e.target.value) || undefined })}
+                />
+              </div>
+              <div>
+                <Label htmlFor="longitude">Longitud</Label>
+                <Input
+                  id="longitude"
+                  type="number"
+                  step="0.000001"
+                  value={formData.longitude || ""}
+                  onChange={(e) => setFormData({ ...formData, longitude: parseFloat(e.target.value) || undefined })}
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4">
+              <Button
+                variant="outline"
+                onClick={() => setEditingError(null)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleSaveCorrection}
+                disabled={correctAndSave.isPending}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                {correctAndSave.isPending ? "Guardando..." : "Guardar Caja"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
