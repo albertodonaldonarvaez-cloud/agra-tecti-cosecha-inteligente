@@ -15,10 +15,10 @@ services:
       - VITE_APP_TITLE=${VITE_APP_TITLE}
       - VITE_APP_LOGO=${VITE_APP_LOGO}
     extra_hosts:
-      - "smart-harvest.tecti-cloud.com:172.16.3.10"
-      - "kf.smart-harvest.tecti-cloud.com:172.16.3.10"
-      - "kc.smart-harvest.tecti-cloud.com:172.16.3.10"
-      - "ee.smart-harvest.tecti-cloud.com:172.16.3.10"
+      - "smart-harvest.tecti-cloud.com:172.16.3.3"
+      - "kf.smart-harvest.tecti-cloud.com:172.16.3.3"
+      - "kc.smart-harvest.tecti-cloud.com:172.16.3.3"
+      - "ee.smart-harvest.tecti-cloud.com:172.16.3.3"
     depends_on:
       db:
         condition: service_healthy
