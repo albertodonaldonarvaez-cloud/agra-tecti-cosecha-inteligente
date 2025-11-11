@@ -14,9 +14,10 @@ export const appRouter = router({
         const { user, token } = await loginUser(input.email, input.password);
         
         // Establecer cookie
+        // secure: false permite HTTP (cambiar a true si usas HTTPS)
         ctx.res.cookie(COOKIE_NAME, token, {
           httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
+          secure: false, // Cambiar a true si usas HTTPS
           sameSite: "lax",
           maxAge: 7 * 24 * 60 * 60 * 1000, // 7 días
         });
