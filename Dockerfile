@@ -56,8 +56,8 @@ COPY --chown=agratec:nodejs server ./server
 COPY --chown=agratec:nodejs drizzle ./drizzle
 COPY --chown=agratec:nodejs shared ./shared
 
-# Copiar build del cliente
-COPY --from=builder --chown=agratec:nodejs /app/client/dist ./client/dist
+# Copiar build del cliente al directorio correcto para producción
+COPY --from=builder --chown=agratec:nodejs /app/dist/public ./server/public
 
 # Copiar archivos de configuración
 COPY --chown=agratec:nodejs package.json ./
