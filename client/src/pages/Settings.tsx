@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle } from "lucide-react";
+import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -16,6 +16,8 @@ export default function Settings() {
   const [apiToken, setApiToken] = useState("");
   const [assetId, setAssetId] = useState("");
   const [jsonData, setJsonData] = useState("");
+  const [excelFile, setExcelFile] = useState<File | null>(null);
+  const [downloadPhotos, setDownloadPhotos] = useState(true);
 
   const { data: config } = trpc.apiConfig.get.useQuery(undefined, {
     enabled: !!user && user.role === "admin",
@@ -39,6 +41,19 @@ export default function Settings() {
         }
       } else {
         toast.error(data.message || "Error en la sincronización");
+      }
+    },
+    onError: (error: any) => {
+      toast.error(error.message);
+    },
+  });
+
+  const uploadExcel = trpc.boxes.uploadExcel.useMutation({
+    onSuccess: (data: any) => {
+      toast.success(`¡Carga exitosa! ${data.successRows} filas procesadas, ${data.errorRows} errores`);
+      setExcelFile(null);
+      if (data.errors && data.errors.length > 0) {
+        toast.info(`Revisa la página de Errores para más detalles`);
       }
     },
     onError: (error: any) => {
@@ -109,6 +124,22 @@ export default function Settings() {
     syncFromKobo.mutate();
   };
 
+  const handleUploadExcel = async () => {
+    if (!excelFile) {
+      toast.error("Por favor selecciona un archivo Excel");
+      return;
+    }
+    
+    // En un entorno real, subirías el archivo al servidor
+    // Por ahora, simulamos la ruta del archivo
+    const filePath = `/tmp/${excelFile.name}`;
+    uploadExcel.mutate({ 
+      filePath, 
+      fileName: excelFile.name,
+      downloadPhotos 
+    });
+  };
+
   const handleUploadJson = () => {
     if (!jsonData.trim()) {
       toast.error("Por favor ingresa datos JSON válidos");
@@ -176,6 +207,51 @@ export default function Settings() {
                 className="w-full"
               >
                 {saveConfig.isPending ? "Guardando..." : "Guardar Configuración"}
+              </Button>
+            </div>
+          </GlassCard>
+
+          {/* Carga de Excel */}
+          <GlassCard className="p-6">
+            <div className="mb-4 flex items-center gap-2">
+              <FileSpreadsheet className="h-6 w-6 text-green-600" />
+              <h2 className="text-2xl font-semibold text-green-900">Carga desde Excel</h2>
+            </div>
+
+            <p className="mb-4 text-sm text-green-600">
+              Carga datos desde un archivo Excel con validación automática y descarga de fotos
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="excelFile">Archivo Excel (.xlsx)</Label>
+                <Input
+                  id="excelFile"
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={(e) => setExcelFile(e.target.files?.[0] || null)}
+                />
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="downloadPhotos"
+                  checked={downloadPhotos}
+                  onChange={(e) => setDownloadPhotos(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                <Label htmlFor="downloadPhotos" className="text-sm">
+                  Descargar fotos desde la API de KoboToolbox
+                </Label>
+              </div>
+
+              <Button 
+                onClick={handleUploadExcel} 
+                disabled={uploadExcel.isPending || !excelFile}
+                className="w-full"
+              >
+                {uploadExcel.isPending ? "Procesando..." : "Cargar Excel"}
               </Button>
             </div>
           </GlassCard>

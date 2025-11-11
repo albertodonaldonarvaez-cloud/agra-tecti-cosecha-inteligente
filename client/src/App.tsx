@@ -11,6 +11,8 @@ import DailyAnalysis from "./pages/DailyAnalysis";
 import Settings from "./pages/Settings";
 import Users from "./pages/Users";
 import Harvesters from "./pages/Harvesters";
+import Parcels from "./pages/Parcels";
+import UploadErrors from "./pages/UploadErrors";
 import Login from "./pages/Login";
 import { FloatingNav } from "./components/FloatingNav";
 import { useAuth } from "./_core/hooks/useAuth";
@@ -39,6 +41,8 @@ function Router() {
         <Route path="/analytics" component={Analytics} />
         <Route path="/daily" component={DailyAnalysis} />
         <Route path="/harvesters" component={Harvesters} />
+        <Route path="/parcels" component={Parcels} />
+        <Route path="/errors" component={UploadErrors} />
         <Route path="/users" component={Users} />
         <Route path="/settings" component={Settings} />
         <Route path={"/404"} component={NotFound} />

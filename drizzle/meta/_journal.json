@@ -29,6 +29,13 @@
       "when": 1762746975718,
       "tag": "0003_woozy_fixer",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1762824793124,
+      "tag": "0004_previous_scorpion",
+      "breakpoints": true
     }
   ]
 }

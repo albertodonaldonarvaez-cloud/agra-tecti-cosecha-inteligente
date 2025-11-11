@@ -4,6 +4,7 @@ import { router, publicProcedure, protectedProcedure, adminProcedure } from "./_
 import { COOKIE_NAME } from "./_core/authContext";
 import { loginUser, registerUser, hashPassword } from "./auth";
 import * as db from "./db";
+import * as dbExt from "./db_extended";
 
 export const appRouter = router({
   auth: router({
@@ -56,6 +57,12 @@ export const appRouter = router({
       return await db.getAllBoxes();
     }),
 
+    getById: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        return await db.getBoxById(input.id);
+      }),
+
     sync: adminProcedure
       .mutation(async () => {
         const { syncFromKoboAPI } = await import("./koboSync");
@@ -74,6 +81,34 @@ export const appRouter = router({
         return result;
       }),
 
+    uploadExcel: adminProcedure
+      .input(z.object({ 
+        filePath: z.string(),
+        fileName: z.string(),
+        downloadPhotos: z.boolean().optional().default(true)
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const { processExcelFile } = await import("./excelProcessor");
+        const config = await db.getApiConfig();
+        
+        if (!config || !config.apiUrl || !config.apiToken || !config.assetId) {
+          throw new TRPCError({ 
+            code: "BAD_REQUEST", 
+            message: "Configuración de API incompleta. Por favor configura la API primero." 
+          });
+        }
+
+        const result = await processExcelFile(
+          input.filePath,
+          input.fileName,
+          ctx.user.id,
+          config,
+          input.downloadPhotos
+        );
+        
+        return result;
+      }),
+
     uploadJson: adminProcedure
       .input(z.object({ jsonData: z.any() }))
       .mutation(async ({ input }) => {
@@ -87,6 +122,170 @@ export const appRouter = router({
       .mutation(async () => {
         await db.clearAllBoxes();
         return { success: true, message: "Todas las cajas han sido eliminadas" };
+      }),
+  }),
+
+  parcels: router({
+    list: protectedProcedure.query(async () => {
+      return await dbExt.getAllParcels();
+    }),
+
+    listActive: protectedProcedure.query(async () => {
+      return await dbExt.getActiveParcels();
+    }),
+
+    getByCode: protectedProcedure
+      .input(z.object({ code: z.string() }))
+      .query(async ({ input }) => {
+        return await dbExt.getParcelByCode(input.code);
+      }),
+
+    create: adminProcedure
+      .input(z.object({
+        code: z.string(),
+        name: z.string(),
+        polygon: z.string().optional(),
+        isActive: z.boolean().optional().default(true),
+      }))
+      .mutation(async ({ input }) => {
+        await dbExt.upsertParcel({
+          code: input.code,
+          name: input.name,
+          polygon: input.polygon || null,
+          isActive: input.isActive,
+        });
+        return { success: true };
+      }),
+
+    update: adminProcedure
+      .input(z.object({
+        code: z.string(),
+        name: z.string(),
+        polygon: z.string().optional(),
+        isActive: z.boolean().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        await dbExt.upsertParcel({
+          code: input.code,
+          name: input.name,
+          polygon: input.polygon || null,
+          isActive: input.isActive ?? true,
+        });
+        return { success: true };
+      }),
+
+    toggleActive: adminProcedure
+      .input(z.object({
+        code: z.string(),
+        isActive: z.boolean(),
+      }))
+      .mutation(async ({ input }) => {
+        await dbExt.toggleParcelActive(input.code, input.isActive);
+        return { success: true };
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ code: z.string() }))
+      .mutation(async ({ input }) => {
+        await dbExt.deleteParcel(input.code);
+        return { success: true };
+      }),
+
+    uploadKML: adminProcedure
+      .input(z.object({
+        fileContent: z.string(),
+        fileType: z.enum(['kml', 'kmz']),
+      }))
+      .mutation(async ({ input }) => {
+        const { parseKML, parseKMZ } = await import("./kmlParser");
+        
+        let polygons;
+        if (input.fileType === 'kml') {
+          polygons = await parseKML(input.fileContent);
+        } else {
+          const buffer = Buffer.from(input.fileContent, 'base64');
+          polygons = await parseKMZ(buffer);
+        }
+
+        // Insertar o actualizar parcelas con polígonos
+        for (const poly of polygons) {
+          await dbExt.upsertParcel({
+            code: poly.code,
+            name: poly.name,
+            polygon: JSON.stringify(poly.coordinates),
+            isActive: true,
+          });
+        }
+
+        return { 
+          success: true, 
+          parcelsProcessed: polygons.length,
+          parcels: polygons.map(p => ({ code: p.code, name: p.name }))
+        };
+      }),
+  }),
+
+  uploadErrors: router({
+    listByBatch: adminProcedure
+      .input(z.object({ batchId: z.string() }))
+      .query(async ({ input }) => {
+        return await dbExt.getUploadErrorsByBatch(input.batchId);
+      }),
+
+    listAll: adminProcedure
+      .input(z.object({ limit: z.number().optional().default(100) }))
+      .query(async ({ input }) => {
+        return await dbExt.getAllUploadErrors(input.limit);
+      }),
+
+    listUnresolved: adminProcedure.query(async () => {
+      return await dbExt.getUnresolvedErrors();
+    }),
+
+    markResolved: adminProcedure
+      .input(z.object({ errorId: z.number() }))
+      .mutation(async ({ input }) => {
+        await dbExt.markErrorAsResolved(input.errorId);
+        return { success: true };
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ errorId: z.number() }))
+      .mutation(async ({ input }) => {
+        await dbExt.deleteUploadError(input.errorId);
+        return { success: true };
+      }),
+
+    clearResolved: adminProcedure.mutation(async () => {
+      await dbExt.clearResolvedErrors();
+      return { success: true };
+    }),
+
+    getStatsByBatch: adminProcedure
+      .input(z.object({ batchId: z.string() }))
+      .query(async ({ input }) => {
+        return await dbExt.getErrorStatsByBatch(input.batchId);
+      }),
+  }),
+
+  uploadBatches: router({
+    list: adminProcedure
+      .input(z.object({ limit: z.number().optional().default(50) }))
+      .query(async ({ input }) => {
+        return await dbExt.getAllUploadBatches(input.limit);
+      }),
+
+    getById: adminProcedure
+      .input(z.object({ batchId: z.string() }))
+      .query(async ({ input }) => {
+        return await dbExt.getUploadBatchById(input.batchId);
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ batchId: z.string() }))
+      .mutation(async ({ input }) => {
+        await dbExt.deleteUploadBatch(input.batchId);
+        return { success: true };
       }),
   }),
 
@@ -250,4 +449,3 @@ export const appRouter = router({
 });
 
 export type AppRouter = typeof appRouter;
-

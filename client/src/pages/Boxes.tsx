@@ -10,7 +10,8 @@ import {
 } from "@/components/ui/dialog";
 import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Package, X } from "lucide-react";
+import { Package, X, MapPin } from "lucide-react";
+import { BoxLocationMap } from "@/components/BoxLocationMap";
 import { useEffect, useState } from "react";
 
 interface Box {
@@ -21,6 +22,8 @@ interface Box {
   parcelName: string;
   weight: number;
   photoUrl: string | null;
+  latitude: string | null;
+  longitude: string | null;
   location?: string | null;
   submissionTime: Date;
 }
@@ -182,6 +185,15 @@ export default function Boxes() {
                           ? "Desperdicio"
                           : "Cortadora"}
                       </p>
+                    </div>
+                    
+                    <div>
+                      <p className="text-sm text-green-600 mb-1">Ubicación GPS</p>
+                      <BoxLocationMap 
+                        latitude={selectedBox.latitude}
+                        longitude={selectedBox.longitude}
+                        boxCode={selectedBox.boxCode}
+                      />
                     </div>
                     
                     <div>

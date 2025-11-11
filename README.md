@@ -98,26 +98,11 @@ DATABASE_URL=mysql://agratec_user:tu_password_db@db:3306/agratec_db
 JWT_SECRET=tu_jwt_secret_muy_seguro_aqui
 NODE_ENV=production
 
-# OAuth y Autenticación (Manus)
-VITE_APP_ID=tu_app_id
-OAUTH_SERVER_URL=https://api.manus.im
-VITE_OAUTH_PORTAL_URL=https://portal.manus.im
-OWNER_OPEN_ID=tu_owner_open_id
-OWNER_NAME=Tu Nombre
-
 # Configuración de la aplicación
 VITE_APP_TITLE=Agratec - Dashboard de Cosecha
 VITE_APP_LOGO=/logo.svg
 
-# APIs de Manus (opcional)
-BUILT_IN_FORGE_API_URL=https://forge.manus.im
-BUILT_IN_FORGE_API_KEY=tu_forge_api_key
-VITE_FRONTEND_FORGE_API_KEY=tu_frontend_forge_key
-VITE_FRONTEND_FORGE_API_URL=https://forge.manus.im
 
-# Analytics (opcional)
-VITE_ANALYTICS_ENDPOINT=tu_analytics_endpoint
-VITE_ANALYTICS_WEBSITE_ID=tu_website_id
 ```
 
 ### 3. Iniciar los servicios
@@ -258,7 +243,6 @@ Este proyecto está bajo la Licencia MIT. Ver el archivo [LICENSE](LICENSE) para
 ## 🙏 Agradecimientos
 
 - KoboToolbox por la plataforma de captura de datos
-- Manus por la infraestructura de autenticación
 - Comunidad de código abierto por las herramientas utilizadas
 
 ## 📞 Soporte

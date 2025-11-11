@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, boolean } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -19,11 +19,13 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// Tabla de parcelas
+// Tabla de parcelas con polígonos geográficos
 export const parcels = mysqlTable("parcels", {
   id: int("id").autoincrement().primaryKey(),
-  code: varchar("code", { length: 64 }).notNull(),
+  code: varchar("code", { length: 64 }).notNull().unique(),
   name: varchar("name", { length: 255 }).notNull(),
+  polygon: text("polygon"), // GeoJSON del polígono de la parcela
+  isActive: boolean("isActive").default(true).notNull(), // Parcela activa/válida
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -80,3 +82,43 @@ export const apiConfig = mysqlTable("apiConfig", {
 
 export type ApiConfig = typeof apiConfig.$inferSelect;
 export type InsertApiConfig = typeof apiConfig.$inferInsert;
+
+// Tabla de errores de validación de carga
+export const uploadErrors = mysqlTable("uploadErrors", {
+  id: int("id").autoincrement().primaryKey(),
+  uploadBatchId: varchar("uploadBatchId", { length: 64 }).notNull(), // ID único del lote de carga
+  errorType: mysqlEnum("errorType", [
+    "duplicate_box",
+    "invalid_parcel",
+    "missing_data",
+    "invalid_format",
+    "photo_download_failed",
+    "other"
+  ]).notNull(),
+  boxCode: varchar("boxCode", { length: 64 }),
+  parcelCode: varchar("parcelCode", { length: 64 }),
+  errorMessage: text("errorMessage").notNull(),
+  rowData: text("rowData"), // JSON con los datos de la fila que causó el error
+  resolved: boolean("resolved").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type UploadError = typeof uploadErrors.$inferSelect;
+export type InsertUploadError = typeof uploadErrors.$inferInsert;
+
+// Tabla de lotes de carga
+export const uploadBatches = mysqlTable("uploadBatches", {
+  id: int("id").autoincrement().primaryKey(),
+  batchId: varchar("batchId", { length: 64 }).notNull().unique(),
+  fileName: varchar("fileName", { length: 255 }).notNull(),
+  totalRows: int("totalRows").notNull(),
+  successRows: int("successRows").notNull(),
+  errorRows: int("errorRows").notNull(),
+  status: mysqlEnum("status", ["processing", "completed", "failed"]).notNull(),
+  uploadedBy: int("uploadedBy").notNull(), // ID del usuario que subió
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  completedAt: timestamp("completedAt"),
+});
+
+export type UploadBatch = typeof uploadBatches.$inferSelect;
+export type InsertUploadBatch = typeof uploadBatches.$inferInsert;
