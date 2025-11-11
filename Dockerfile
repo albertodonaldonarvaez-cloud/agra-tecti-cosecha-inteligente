@@ -34,8 +34,8 @@ COPY . .
 # Variables de entorno necesarias para el build
 ENV NODE_ENV=production
 
-# Construir la aplicación cliente (Vite)
-RUN pnpm run build:client
+# Construir la aplicación completa (cliente y servidor)
+RUN pnpm run build
 
 # ===== Etapa de producción =====
 FROM base AS runner
@@ -55,6 +55,9 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --chown=agratec:nodejs server ./server
 COPY --chown=agratec:nodejs drizzle ./drizzle
 COPY --chown=agratec:nodejs shared ./shared
+
+# Copiar build del servidor compilado
+COPY --from=builder --chown=agratec:nodejs /app/dist/index.js ./dist/index.js
 
 # Copiar build del cliente al directorio correcto para producción
 COPY --from=builder --chown=agratec:nodejs /app/dist/public ./server/public
