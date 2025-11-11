@@ -10,6 +10,9 @@ WORKDIR /app
 # Copiar archivos de configuración de pnpm
 COPY package.json pnpm-lock.yaml ./
 
+# Copiar patches necesarios para pnpm
+COPY patches ./patches
+
 # Instalar pnpm globalmente
 RUN npm install -g pnpm
 
