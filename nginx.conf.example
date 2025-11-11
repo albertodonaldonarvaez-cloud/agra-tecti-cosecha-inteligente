@@ -1,0 +1,76 @@
+# Configuración de Nginx para Dashboard Agratec
+# Coloca este archivo en /etc/nginx/sites-available/ y crea un enlace simbólico en /etc/nginx/sites-enabled/
+
+server {
+    listen 80;
+    server_name tu-dominio.com;  # Cambia esto por tu dominio
+
+    # Aumentar límite de tamaño de archivos para subida de Excel
+    client_max_body_size 50M;
+    client_body_buffer_size 50M;
+
+    # Timeouts para operaciones largas (procesamiento de Excel)
+    proxy_connect_timeout 300s;
+    proxy_send_timeout 300s;
+    proxy_read_timeout 300s;
+    send_timeout 300s;
+
+    # Proxy hacia la aplicación Docker
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        
+        # Headers necesarios
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Deshabilitar caché para la aplicación
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Configuración específica para subida de archivos
+    location /api/upload-excel {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        
+        # Headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Límites específicos para subida
+        client_max_body_size 50M;
+        client_body_buffer_size 50M;
+        
+        # Timeouts extendidos
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+    }
+
+    # Logs
+    access_log /var/log/nginx/agratec_access.log;
+    error_log /var/log/nginx/agratec_error.log;
+}
+
+# Configuración HTTPS (opcional pero recomendado)
+# Descomenta y configura después de obtener certificados SSL con certbot
+#
+# server {
+#     listen 443 ssl http2;
+#     server_name tu-dominio.com;
+#
+#     ssl_certificate /etc/letsencrypt/live/tu-dominio.com/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/tu-dominio.com/privkey.pem;
+#     ssl_protocols TLSv1.2 TLSv1.3;
+#     ssl_ciphers HIGH:!aNULL:!MD5;
+#
+#     # Resto de la configuración igual que arriba
+#     client_max_body_size 50M;
+#     # ... (copiar el resto de la configuración del bloque HTTP)
+# }
