@@ -1,324 +1,303 @@
-import { useState } from "react";
-import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { GlassCard } from "@/components/GlassCard";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { APP_LOGO, getLoginUrl } from "@/const";
+import { trpc } from "@/lib/trpc";
+import { AlertTriangle, CheckCircle, Trash2, XCircle } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AlertCircle, CheckCircle, Trash2, Filter, FileText } from "lucide-react";
-import DashboardLayout from "@/components/DashboardLayout";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
-const errorTypeLabels: Record<string, string> = {
-  duplicate_box: "Caja Duplicada",
-  invalid_parcel: "Parcela Inválida",
-  missing_data: "Datos Faltantes",
-  invalid_format: "Formato Inválido",
-  photo_download_failed: "Error Descarga Foto",
-  other: "Otro",
-};
-
-const errorTypeColors: Record<string, string> = {
-  duplicate_box: "bg-yellow-100 text-yellow-800",
-  invalid_parcel: "bg-red-100 text-red-800",
-  missing_data: "bg-orange-100 text-orange-800",
-  invalid_format: "bg-purple-100 text-purple-800",
-  photo_download_failed: "bg-blue-100 text-blue-800",
-  other: "bg-gray-100 text-gray-800",
+const errorTypeLabels: Record<string, { label: string; color: string }> = {
+  duplicate_box: { label: "Caja Duplicada", color: "text-yellow-600" },
+  invalid_parcel: { label: "Parcela Inválida", color: "text-red-600" },
+  missing_data: { label: "Datos Faltantes", color: "text-orange-600" },
+  invalid_format: { label: "Formato Inválido", color: "text-purple-600" },
+  photo_download_failed: { label: "Error Descarga Foto", color: "text-blue-600" },
+  other: { label: "Otro", color: "text-gray-600" },
 };
 
 export default function UploadErrors() {
+  const { user, loading } = useAuth();
   const [selectedBatch, setSelectedBatch] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"all" | "unresolved">("unresolved");
 
-  const { data: batches } = trpc.uploadBatches.list.useQuery({ limit: 50 });
-  const { data: unresolvedErrors, refetch: refetchUnresolved } = trpc.uploadErrors.listUnresolved.useQuery();
+  const { data: batches } = trpc.uploadBatches.list.useQuery({ limit: 50 }, {
+    enabled: !!user && user.role === "admin",
+  });
+
+  const { data: unresolvedErrors, refetch: refetchUnresolved } = trpc.uploadErrors.listUnresolved.useQuery(undefined, {
+    enabled: !!user && user.role === "admin",
+  });
+
   const { data: batchErrors, refetch: refetchBatch } = trpc.uploadErrors.listByBatch.useQuery(
     { batchId: selectedBatch! },
-    { enabled: !!selectedBatch }
-  );
-  const { data: batchStats } = trpc.uploadErrors.getStatsByBatch.useQuery(
-    { batchId: selectedBatch! },
-    { enabled: !!selectedBatch }
+    { enabled: !!selectedBatch && !!user && user.role === "admin" }
   );
 
-  const markResolvedMutation = trpc.uploadErrors.markResolved.useMutation({
+  const { data: batchStats } = trpc.uploadErrors.getStatsByBatch.useQuery(
+    { batchId: selectedBatch! },
+    { enabled: !!selectedBatch && !!user && user.role === "admin" }
+  );
+
+  const markResolved = trpc.uploadErrors.markResolved.useMutation({
     onSuccess: () => {
       toast.success("Error marcado como resuelto");
       refetchUnresolved();
       if (selectedBatch) refetchBatch();
     },
-    onError: (error) => toast.error(error.message),
+    onError: (error) => {
+      toast.error(error.message);
+    },
   });
 
-  const deleteErrorMutation = trpc.uploadErrors.delete.useMutation({
+  const deleteError = trpc.uploadErrors.delete.useMutation({
     onSuccess: () => {
       toast.success("Error eliminado");
       refetchUnresolved();
       if (selectedBatch) refetchBatch();
     },
-    onError: (error) => toast.error(error.message),
+    onError: (error) => {
+      toast.error(error.message);
+    },
   });
 
-  const clearResolvedMutation = trpc.uploadErrors.clearResolved.useMutation({
+  const clearResolved = trpc.uploadErrors.clearResolved.useMutation({
     onSuccess: () => {
       toast.success("Errores resueltos eliminados");
       refetchUnresolved();
-      if (selectedBatch) refetchBatch();
     },
-    onError: (error) => toast.error(error.message),
+    onError: (error) => {
+      toast.error(error.message);
+    },
   });
 
-  const deleteBatchMutation = trpc.uploadBatches.delete.useMutation({
-    onSuccess: () => {
-      toast.success("Lote eliminado");
-      setSelectedBatch(null);
-    },
-    onError: (error) => toast.error(error.message),
-  });
+  useEffect(() => {
+    if (!loading && (!user || user.role !== "admin")) {
+      window.location.href = getLoginUrl();
+    }
+  }, [user, loading]);
 
-  const displayErrors = viewMode === "unresolved" ? unresolvedErrors : batchErrors;
+  if (loading || !user || user.role !== "admin") {
+    return null;
+  }
+
+  const displayErrors = selectedBatch ? batchErrors : unresolvedErrors;
+  const totalUnresolved = unresolvedErrors?.length || 0;
 
   return (
-    <DashboardLayout>
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-green-900">Errores de Validación</h1>
-            <p className="text-green-600">Revisa y gestiona los errores de carga de datos</p>
+    <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
+      <div className="container">
+        {/* Header */}
+        <div className="mb-8 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <img src={APP_LOGO} alt="Agratec" className="h-16 w-16" />
+            <div>
+              <h1 className="text-4xl font-bold text-green-900">Errores de Validación</h1>
+              <p className="text-green-700">
+                {totalUnresolved > 0
+                  ? `${totalUnresolved} errores sin resolver`
+                  : "No hay errores pendientes"}
+              </p>
+            </div>
           </div>
           <Button
+            onClick={() => clearResolved.mutate()}
+            disabled={clearResolved.isPending}
             variant="outline"
-            onClick={() => clearResolvedMutation.mutate()}
-            disabled={clearResolvedMutation.isPending}
+            className="border-green-300 text-green-700 hover:bg-green-50"
           >
             Limpiar Resueltos
           </Button>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-3">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Errores Sin Resolver</CardTitle>
-              <AlertCircle className="h-4 w-4 text-red-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{unresolvedErrors?.length || 0}</div>
-              <p className="text-xs text-muted-foreground">Requieren atención</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Lotes de Carga</CardTitle>
-              <FileText className="h-4 w-4 text-blue-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{batches?.length || 0}</div>
-              <p className="text-xs text-muted-foreground">Total procesados</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Errores por Lote</CardTitle>
-              <Filter className="h-4 w-4 text-purple-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{batchStats?.total || 0}</div>
-              <p className="text-xs text-muted-foreground">
-                {batchStats?.unresolved || 0} sin resolver
-              </p>
-            </CardContent>
-          </Card>
+        {/* Estadísticas */}
+        <div className="mb-6 grid gap-4 md:grid-cols-4">
+          <GlassCard className="p-4">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-8 w-8 text-red-600" />
+              <div>
+                <p className="text-sm text-green-700">Sin Resolver</p>
+                <p className="text-2xl font-bold text-green-900">{totalUnresolved}</p>
+              </div>
+            </div>
+          </GlassCard>
+          <GlassCard className="p-4">
+            <div className="flex items-center gap-3">
+              <XCircle className="h-8 w-8 text-yellow-600" />
+              <div>
+                <p className="text-sm text-green-700">Duplicados</p>
+                <p className="text-2xl font-bold text-green-900">
+                  {unresolvedErrors?.filter((e: any) => e.errorType === "duplicate_box").length || 0}
+                </p>
+              </div>
+            </div>
+          </GlassCard>
+          <GlassCard className="p-4">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-8 w-8 text-red-600" />
+              <div>
+                <p className="text-sm text-green-700">Parcelas Inválidas</p>
+                <p className="text-2xl font-bold text-green-900">
+                  {unresolvedErrors?.filter((e: any) => e.errorType === "invalid_parcel").length || 0}
+                </p>
+              </div>
+            </div>
+          </GlassCard>
+          <GlassCard className="p-4">
+            <div className="flex items-center gap-3">
+              <CheckCircle className="h-8 w-8 text-blue-600" />
+              <div>
+                <p className="text-sm text-green-700">Lotes Procesados</p>
+                <p className="text-2xl font-bold text-green-900">{batches?.length || 0}</p>
+              </div>
+            </div>
+          </GlassCard>
         </div>
 
-        <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as any)}>
-          <TabsList>
-            <TabsTrigger value="unresolved">Sin Resolver</TabsTrigger>
-            <TabsTrigger value="all">Por Lote</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="unresolved" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Errores Sin Resolver</CardTitle>
-                <CardDescription>
-                  {unresolvedErrors?.length || 0} errores pendientes de revisión
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ErrorsTable
-                  errors={unresolvedErrors || []}
-                  onMarkResolved={(id) => markResolvedMutation.mutate({ errorId: id })}
-                  onDelete={(id) => deleteErrorMutation.mutate({ errorId: id })}
-                />
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="all" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Seleccionar Lote</CardTitle>
-                <CardDescription>Filtra errores por lote de carga</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex gap-4">
-                  <Select value={selectedBatch || ""} onValueChange={setSelectedBatch}>
-                    <SelectTrigger className="flex-1">
-                      <SelectValue placeholder="Selecciona un lote" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {batches?.map((batch) => (
-                        <SelectItem key={batch.batchId} value={batch.batchId}>
-                          {batch.fileName} - {new Date(batch.createdAt).toLocaleString()}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {selectedBatch && (
-                    <Button
-                      variant="destructive"
-                      onClick={() => {
-                        if (confirm("¿Eliminar este lote y sus errores?")) {
-                          deleteBatchMutation.mutate({ batchId: selectedBatch });
-                        }
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {selectedBatch && batchStats && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Estadísticas del Lote</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {Object.entries(batchStats.byType).map(([type, count]) => (
-                      <div key={type} className="flex items-center justify-between p-3 border rounded">
-                        <span className="text-sm font-medium">{errorTypeLabels[type]}</span>
-                        <Badge variant="secondary">{count}</Badge>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {selectedBatch && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Errores del Lote</CardTitle>
-                  <CardDescription>
-                    {batchErrors?.length || 0} errores en este lote
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ErrorsTable
-                    errors={batchErrors || []}
-                    onMarkResolved={(id) => markResolvedMutation.mutate({ errorId: id })}
-                    onDelete={(id) => deleteErrorMutation.mutate({ errorId: id })}
-                  />
-                </CardContent>
-              </Card>
-            )}
-          </TabsContent>
-        </Tabs>
-      </div>
-    </DashboardLayout>
-  );
-}
-
-function ErrorsTable({
-  errors,
-  onMarkResolved,
-  onDelete,
-}: {
-  errors: any[];
-  onMarkResolved: (id: number) => void;
-  onDelete: (id: number) => void;
-}) {
-  if (errors.length === 0) {
-    return (
-      <div className="text-center py-8 text-muted-foreground">
-        <CheckCircle className="h-12 w-12 mx-auto mb-2 text-green-500" />
-        <p>No hay errores para mostrar</p>
-      </div>
-    );
-  }
-
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Tipo</TableHead>
-          <TableHead>Caja</TableHead>
-          <TableHead>Parcela</TableHead>
-          <TableHead>Mensaje</TableHead>
-          <TableHead>Estado</TableHead>
-          <TableHead>Acciones</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {errors.map((error) => (
-          <TableRow key={error.id}>
-            <TableCell>
-              <Badge className={errorTypeColors[error.errorType]}>
-                {errorTypeLabels[error.errorType]}
-              </Badge>
-            </TableCell>
-            <TableCell className="font-mono text-sm">{error.boxCode || "-"}</TableCell>
-            <TableCell className="font-mono text-sm">{error.parcelCode || "-"}</TableCell>
-            <TableCell className="max-w-md truncate">{error.errorMessage}</TableCell>
-            <TableCell>
-              {error.resolved ? (
-                <Badge variant="outline" className="gap-1">
-                  <CheckCircle className="h-3 w-3" />
-                  Resuelto
-                </Badge>
-              ) : (
-                <Badge variant="destructive" className="gap-1">
-                  <AlertCircle className="h-3 w-3" />
-                  Pendiente
-                </Badge>
-              )}
-            </TableCell>
-            <TableCell>
-              <div className="flex gap-2">
-                {!error.resolved && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onMarkResolved(error.id)}
-                  >
-                    <CheckCircle className="h-4 w-4 text-green-500" />
-                  </Button>
-                )}
+        {/* Filtro por lote */}
+        {batches && batches.length > 0 && (
+          <GlassCard className="mb-6 p-4">
+            <div className="flex items-center gap-4">
+              <span className="text-sm font-semibold text-green-900">Filtrar por lote:</span>
+              <div className="flex flex-wrap gap-2">
                 <Button
-                  variant="ghost"
                   size="sm"
-                  onClick={() => onDelete(error.id)}
+                  variant={selectedBatch === null ? "default" : "outline"}
+                  onClick={() => setSelectedBatch(null)}
+                  className={selectedBatch === null ? "bg-green-600 hover:bg-green-700" : ""}
                 >
-                  <Trash2 className="h-4 w-4 text-red-500" />
+                  Todos los errores
                 </Button>
+                {batches.map((batch: any) => (
+                  <Button
+                    key={batch.batchId}
+                    size="sm"
+                    variant={selectedBatch === batch.batchId ? "default" : "outline"}
+                    onClick={() => setSelectedBatch(batch.batchId)}
+                    className={
+                      selectedBatch === batch.batchId ? "bg-green-600 hover:bg-green-700" : ""
+                    }
+                  >
+                    {batch.fileName} - {new Date(batch.createdAt).toLocaleDateString()}
+                  </Button>
+                ))}
               </div>
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+            </div>
+          </GlassCard>
+        )}
+
+        {/* Estadísticas del lote seleccionado */}
+        {selectedBatch && batchStats && (
+          <GlassCard className="mb-6 p-6">
+            <h3 className="mb-4 text-lg font-semibold text-green-900">Estadísticas del Lote</h3>
+            <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+              {Object.entries(batchStats.byType).map(([type, count]) => {
+                const errorInfo = errorTypeLabels[type] || { label: type, color: "text-gray-600" };
+                return (
+                  <div key={type} className="rounded-lg border border-green-200 bg-white/50 p-3">
+                    <p className={`text-xs font-medium ${errorInfo.color}`}>{errorInfo.label}</p>
+                    <p className="text-2xl font-bold text-green-900">{count as number}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </GlassCard>
+        )}
+
+        {/* Lista de errores */}
+        {!displayErrors || displayErrors.length === 0 ? (
+          <GlassCard className="p-12 text-center">
+            <CheckCircle className="mx-auto mb-4 h-16 w-16 text-green-300" />
+            <h3 className="mb-2 text-lg font-semibold text-green-900">No hay errores</h3>
+            <p className="text-green-700">
+              {selectedBatch
+                ? "Este lote no tiene errores registrados"
+                : "No hay errores sin resolver"}
+            </p>
+          </GlassCard>
+        ) : (
+          <GlassCard className="overflow-hidden p-6" hover={false}>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b-2 border-green-200">
+                    <th className="pb-3 pr-8 text-left text-sm font-semibold text-green-900">Tipo</th>
+                    <th className="pb-3 pr-8 text-left text-sm font-semibold text-green-900">Caja</th>
+                    <th className="pb-3 pr-8 text-left text-sm font-semibold text-green-900">Parcela</th>
+                    <th className="pb-3 pr-8 text-left text-sm font-semibold text-green-900">Mensaje</th>
+                    <th className="pb-3 pr-8 text-center text-sm font-semibold text-green-900">Estado</th>
+                    <th className="pb-3 text-center text-sm font-semibold text-green-900">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayErrors.map((error: any) => {
+                    const errorInfo = errorTypeLabels[error.errorType] || { label: error.errorType, color: "text-gray-600" };
+                    return (
+                      <tr
+                        key={error.id}
+                        className="border-b border-green-100 transition-colors hover:bg-green-50/50"
+                      >
+                        <td className="py-3 pr-8">
+                          <span className={`text-sm font-semibold ${errorInfo.color}`}>
+                            {errorInfo.label}
+                          </span>
+                        </td>
+                        <td className="py-3 pr-8 font-mono text-sm text-green-900">
+                          {error.boxCode || "-"}
+                        </td>
+                        <td className="py-3 pr-8 font-mono text-sm text-green-900">
+                          {error.parcelCode || "-"}
+                        </td>
+                        <td className="py-3 pr-8 text-sm text-green-700">
+                          {error.errorMessage}
+                        </td>
+                        <td className="py-3 pr-8 text-center">
+                          {error.resolved ? (
+                            <span className="inline-flex items-center gap-1 text-sm text-green-600">
+                              <CheckCircle className="h-4 w-4" />
+                              Resuelto
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-sm text-red-600">
+                              <AlertTriangle className="h-4 w-4" />
+                              Pendiente
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 text-center">
+                          <div className="flex justify-center gap-2">
+                            {!error.resolved && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => markResolved.mutate({ errorId: error.id })}
+                                className="border-green-300 text-green-700 hover:bg-green-50"
+                              >
+                                <CheckCircle className="h-4 w-4" />
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                if (confirm("¿Eliminar este error?")) {
+                                  deleteError.mutate({ errorId: error.id });
+                                }
+                              }}
+                              className="border-red-300 text-red-700 hover:bg-red-50"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </GlassCard>
+        )}
+      </div>
+    </div>
   );
 }

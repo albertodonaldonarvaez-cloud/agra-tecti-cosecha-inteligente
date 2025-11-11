@@ -1,94 +1,141 @@
-import { useState } from "react";
-import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { GlassCard } from "@/components/GlassCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { APP_LOGO, getLoginUrl } from "@/const";
+import { trpc } from "@/lib/trpc";
+import { MapPin, Upload, Plus, Edit, Trash2, CheckCircle, XCircle } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Upload, Plus, Edit, Trash2, MapPin, FileUp } from "lucide-react";
-import DashboardLayout from "@/components/DashboardLayout";
-import { Switch } from "@/components/ui/switch";
+
+interface Parcel {
+  id: number;
+  code: string;
+  name: string;
+  polygon: any;
+  isActive: boolean;
+  createdAt: Date;
+}
 
 export default function Parcels() {
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const [editingParcel, setEditingParcel] = useState<any>(null);
-  const [newParcel, setNewParcel] = useState({ code: "", name: "" });
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const { user, loading } = useAuth();
+  const [showDialog, setShowDialog] = useState(false);
+  const [editingParcel, setEditingParcel] = useState<Parcel | null>(null);
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+  const [kmlFile, setKmlFile] = useState<File | null>(null);
 
-  const { data: parcels, refetch } = trpc.parcels.list.useQuery();
-  const createMutation = trpc.parcels.create.useMutation({
-    onSuccess: () => {
-      toast.success("Parcela creada exitosamente");
-      setIsCreateOpen(false);
-      setNewParcel({ code: "", name: "" });
-      refetch();
-    },
-    onError: (error) => toast.error(error.message),
+  const { data: parcels, isLoading, refetch } = trpc.parcels.list.useQuery(undefined, {
+    enabled: !!user && user.role === "admin",
   });
 
-  const updateMutation = trpc.parcels.update.useMutation({
+  const createParcel = trpc.parcels.create.useMutation({
     onSuccess: () => {
-      toast.success("Parcela actualizada exitosamente");
-      setEditingParcel(null);
+      toast.success("Parcela creada correctamente");
       refetch();
+      closeDialog();
     },
-    onError: (error) => toast.error(error.message),
+    onError: (error) => {
+      toast.error(error.message);
+    },
   });
 
-  const toggleActiveMutation = trpc.parcels.toggleActive.useMutation({
+  const updateParcel = trpc.parcels.update.useMutation({
     onSuccess: () => {
-      toast.success("Estado de parcela actualizado");
+      toast.success("Parcela actualizada correctamente");
       refetch();
+      closeDialog();
     },
-    onError: (error) => toast.error(error.message),
+    onError: (error) => {
+      toast.error(error.message);
+    },
   });
 
-  const deleteMutation = trpc.parcels.delete.useMutation({
+  const deleteParcel = trpc.parcels.delete.useMutation({
     onSuccess: () => {
-      toast.success("Parcela eliminada");
+      toast.success("Parcela eliminada correctamente");
       refetch();
     },
-    onError: (error) => toast.error(error.message),
+    onError: (error) => {
+      toast.error(error.message);
+    },
   });
 
-  const uploadKMLMutation = trpc.parcels.uploadKML.useMutation({
+  const uploadKml = trpc.parcels.uploadKML.useMutation({
     onSuccess: (data) => {
-      toast.success(`${data.parcelsProcessed} parcelas procesadas desde KML/KMZ`);
-      setIsUploadOpen(false);
-      setUploadFile(null);
+      toast.success(`${data.parcelsProcessed} parcelas cargadas desde KML/KMZ`);
       refetch();
+      setKmlFile(null);
     },
-    onError: (error) => toast.error(error.message),
+    onError: (error) => {
+      toast.error(error.message);
+    },
   });
 
-  const handleCreateParcel = () => {
-    if (!newParcel.code || !newParcel.name) {
+  useEffect(() => {
+    if (!loading && (!user || user.role !== "admin")) {
+      window.location.href = getLoginUrl();
+    }
+  }, [user, loading]);
+
+  if (loading || !user || user.role !== "admin") {
+    return null;
+  }
+
+  const closeDialog = () => {
+    setShowDialog(false);
+    setEditingParcel(null);
+    setCode("");
+    setName("");
+  };
+
+  const openCreateDialog = () => {
+    setEditingParcel(null);
+    setCode("");
+    setName("");
+    setShowDialog(true);
+  };
+
+  const openEditDialog = (parcel: Parcel) => {
+    setEditingParcel(parcel);
+    setCode(parcel.code);
+    setName(parcel.name);
+    setShowDialog(true);
+  };
+
+  const handleSave = () => {
+    if (!code || !name) {
       toast.error("Por favor completa todos los campos");
       return;
     }
-    createMutation.mutate({ ...newParcel, isActive: true });
+
+    if (editingParcel) {
+      updateParcel.mutate({ code, name, isActive: editingParcel.isActive });
+    } else {
+      createParcel.mutate({ code, name, isActive: true });
+    }
   };
 
-  const handleUpdateParcel = () => {
-    if (!editingParcel) return;
-    updateMutation.mutate({
-      code: editingParcel.code,
-      name: editingParcel.name,
-      isActive: editingParcel.isActive,
-    });
+  const handleDelete = (parcelCode: string) => {
+    if (confirm("¿Estás seguro de eliminar esta parcela?")) {
+      deleteParcel.mutate({ code: parcelCode });
+    }
   };
 
-  const handleFileUpload = async () => {
-    if (!uploadFile) {
-      toast.error("Por favor selecciona un archivo");
+  const handleKmlUpload = async () => {
+    if (!kmlFile) {
+      toast.error("Por favor selecciona un archivo KML/KMZ");
       return;
     }
 
-    const fileType = uploadFile.name.toLowerCase().endsWith('.kmz') ? 'kmz' : 'kml';
+    const fileType = kmlFile.name.toLowerCase().endsWith('.kmz') ? 'kmz' : 'kml';
     
     try {
       const reader = new FileReader();
@@ -98,23 +145,21 @@ export default function Parcels() {
 
         let fileContent: string;
         if (fileType === 'kmz') {
-          // Para KMZ, convertir a base64
           fileContent = btoa(
             new Uint8Array(content as ArrayBuffer)
               .reduce((data, byte) => data + String.fromCharCode(byte), '')
           );
         } else {
-          // Para KML, usar como texto
           fileContent = content as string;
         }
 
-        uploadKMLMutation.mutate({ fileContent, fileType });
+        uploadKml.mutate({ fileContent, fileType });
       };
 
       if (fileType === 'kmz') {
-        reader.readAsArrayBuffer(uploadFile);
+        reader.readAsArrayBuffer(kmlFile);
       } else {
-        reader.readAsText(uploadFile);
+        reader.readAsText(kmlFile);
       }
     } catch (error) {
       toast.error("Error leyendo el archivo");
@@ -122,202 +167,180 @@ export default function Parcels() {
   };
 
   return (
-    <DashboardLayout>
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-green-900">Gestión de Parcelas</h1>
-            <p className="text-green-600">Administra las parcelas y sus polígonos geográficos</p>
+    <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
+      <div className="container">
+        {/* Header */}
+        <div className="mb-8 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <img src={APP_LOGO} alt="Agratec" className="h-16 w-16" />
+            <div>
+              <h1 className="text-4xl font-bold text-green-900">Gestión de Parcelas</h1>
+              <p className="text-green-700">
+                {parcels ? `${parcels.length} parcelas registradas` : "Cargando..."}
+              </p>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <Dialog open={isUploadOpen} onOpenChange={setIsUploadOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline" className="gap-2">
-                  <FileUp className="h-4 w-4" />
-                  Cargar KML/KMZ
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Cargar Polígonos desde KML/KMZ</DialogTitle>
-                  <DialogDescription>
-                    Sube un archivo KML o KMZ con los polígonos de las parcelas
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="kml-file">Archivo KML/KMZ</Label>
-                    <Input
-                      id="kml-file"
-                      type="file"
-                      accept=".kml,.kmz"
-                      onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                    />
-                  </div>
-                  <Button 
-                    onClick={handleFileUpload} 
-                    disabled={!uploadFile || uploadKMLMutation.isPending}
-                    className="w-full"
-                  >
-                    {uploadKMLMutation.isPending ? "Procesando..." : "Cargar Polígonos"}
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
-
-            <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-              <DialogTrigger asChild>
-                <Button className="gap-2">
-                  <Plus className="h-4 w-4" />
-                  Nueva Parcela
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Crear Nueva Parcela</DialogTitle>
-                  <DialogDescription>
-                    Agrega una nueva parcela al sistema
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="code">Código de Parcela</Label>
-                    <Input
-                      id="code"
-                      value={newParcel.code}
-                      onChange={(e) => setNewParcel({ ...newParcel, code: e.target.value })}
-                      placeholder="ej: 232"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="name">Nombre de Parcela</Label>
-                    <Input
-                      id="name"
-                      value={newParcel.name}
-                      onChange={(e) => setNewParcel({ ...newParcel, name: e.target.value })}
-                      placeholder="ej: LOS ELOTES"
-                    />
-                  </div>
-                  <Button 
-                    onClick={handleCreateParcel} 
-                    disabled={createMutation.isPending}
-                    className="w-full"
-                  >
-                    {createMutation.isPending ? "Creando..." : "Crear Parcela"}
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
-          </div>
+          <Button onClick={openCreateDialog} className="bg-green-600 hover:bg-green-700">
+            <Plus className="mr-2 h-4 w-4" />
+            Nueva Parcela
+          </Button>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Parcelas Registradas</CardTitle>
-            <CardDescription>
-              {parcels?.length || 0} parcelas en total
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Código</TableHead>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead>Polígono</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead>Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {parcels?.map((parcel) => (
-                  <TableRow key={parcel.code}>
-                    <TableCell className="font-mono font-semibold">{parcel.code}</TableCell>
-                    <TableCell>{parcel.name}</TableCell>
-                    <TableCell>
-                      {parcel.polygon ? (
-                        <Badge variant="outline" className="gap-1">
-                          <MapPin className="h-3 w-3" />
-                          Definido
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary">Sin polígono</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Switch
-                          checked={parcel.isActive}
-                          onCheckedChange={(checked) =>
-                            toggleActiveMutation.mutate({ code: parcel.code, isActive: checked })
-                          }
-                        />
-                        <span className="text-sm">
-                          {parcel.isActive ? "Activa" : "Inactiva"}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setEditingParcel(parcel)}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            if (confirm(`¿Eliminar parcela ${parcel.code}?`)) {
-                              deleteMutation.mutate({ code: parcel.code });
-                            }
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4 text-red-500" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+        {/* Sección de carga KML/KMZ */}
+        <GlassCard className="mb-6 p-6">
+          <div className="flex items-center gap-4">
+            <MapPin className="h-8 w-8 text-green-600" />
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold text-green-900">Cargar desde KML/KMZ</h3>
+              <p className="text-sm text-green-700">
+                Importa múltiples parcelas con sus polígonos desde un archivo KML o KMZ
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                type="file"
+                accept=".kml,.kmz"
+                onChange={(e) => setKmlFile(e.target.files?.[0] || null)}
+                className="w-64"
+              />
+              <Button
+                onClick={handleKmlUpload}
+                disabled={!kmlFile || uploadKml.isPending}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                <Upload className="mr-2 h-4 w-4" />
+                {uploadKml.isPending ? "Cargando..." : "Cargar"}
+              </Button>
+            </div>
+          </div>
+        </GlassCard>
 
-        {/* Dialog de edición */}
-        <Dialog open={!!editingParcel} onOpenChange={() => setEditingParcel(null)}>
-          <DialogContent>
+        {/* Lista de parcelas */}
+        {isLoading ? (
+          <GlassCard className="p-12 text-center">
+            <p className="text-green-600">Cargando parcelas...</p>
+          </GlassCard>
+        ) : parcels && parcels.length > 0 ? (
+          <GlassCard className="overflow-hidden p-6" hover={false}>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b-2 border-green-200">
+                    <th className="pb-3 pr-8 text-left text-sm font-semibold text-green-900">Código</th>
+                    <th className="pb-3 pr-8 text-left text-sm font-semibold text-green-900">Nombre</th>
+                    <th className="pb-3 pr-8 text-center text-sm font-semibold text-green-900">Estado</th>
+                    <th className="pb-3 pr-8 text-center text-sm font-semibold text-green-900">Polígono</th>
+                    <th className="pb-3 text-center text-sm font-semibold text-green-900">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {parcels.map((parcel) => (
+                    <tr
+                      key={parcel.id}
+                      className="border-b border-green-100 transition-colors hover:bg-green-50/50"
+                    >
+                      <td className="py-3 pr-8 text-sm font-semibold text-green-900">{parcel.code}</td>
+                      <td className="py-3 pr-8 text-sm text-green-900">{parcel.name}</td>
+                      <td className="py-3 pr-8 text-center">
+                        {parcel.isActive ? (
+                          <span className="inline-flex items-center gap-1 text-sm text-green-600">
+                            <CheckCircle className="h-4 w-4" />
+                            Activa
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-sm text-gray-500">
+                            <XCircle className="h-4 w-4" />
+                            Inactiva
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 pr-8 text-center text-sm text-green-700">
+                        {parcel.polygon ? "✓ Definido" : "✗ Sin definir"}
+                      </td>
+                      <td className="py-3 text-center">
+                        <div className="flex justify-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openEditDialog(parcel)}
+                            className="border-green-300 text-green-700 hover:bg-green-50"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleDelete(parcel.code)}
+                            className="border-red-300 text-red-700 hover:bg-red-50"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </GlassCard>
+        ) : (
+          <GlassCard className="p-12 text-center">
+            <MapPin className="mx-auto mb-4 h-16 w-16 text-green-300" />
+            <h3 className="mb-2 text-lg font-semibold text-green-900">No hay parcelas registradas</h3>
+            <p className="mb-4 text-green-700">
+              Crea una parcela manualmente o carga desde un archivo KML/KMZ
+            </p>
+            <Button onClick={openCreateDialog} className="bg-green-600 hover:bg-green-700">
+              <Plus className="mr-2 h-4 w-4" />
+              Crear Primera Parcela
+            </Button>
+          </GlassCard>
+        )}
+
+        {/* Dialog para crear/editar parcela */}
+        <Dialog open={showDialog} onOpenChange={setShowDialog}>
+          <DialogContent className="bg-white">
             <DialogHeader>
-              <DialogTitle>Editar Parcela</DialogTitle>
+              <DialogTitle className="text-green-900">
+                {editingParcel ? "Editar Parcela" : "Nueva Parcela"}
+              </DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
               <div>
-                <Label>Código</Label>
-                <Input value={editingParcel?.code || ""} disabled />
-              </div>
-              <div>
-                <Label htmlFor="edit-name">Nombre</Label>
+                <Label htmlFor="code">Código de Parcela</Label>
                 <Input
-                  id="edit-name"
-                  value={editingParcel?.name || ""}
-                  onChange={(e) =>
-                    setEditingParcel({ ...editingParcel, name: e.target.value })
-                  }
+                  id="code"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  placeholder="Ej: 232"
+                  disabled={!!editingParcel}
                 />
               </div>
-              <Button 
-                onClick={handleUpdateParcel} 
-                disabled={updateMutation.isPending}
-                className="w-full"
-              >
-                {updateMutation.isPending ? "Guardando..." : "Guardar Cambios"}
-              </Button>
+              <div>
+                <Label htmlFor="name">Nombre de Parcela</Label>
+                <Input
+                  id="name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Ej: LOS ELOTES"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={closeDialog}>
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={handleSave}
+                  disabled={createParcel.isPending || updateParcel.isPending}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  {createParcel.isPending || updateParcel.isPending ? "Guardando..." : "Guardar"}
+                </Button>
+              </div>
             </div>
           </DialogContent>
         </Dialog>
       </div>
-    </DashboardLayout>
+    </div>
   );
 }
