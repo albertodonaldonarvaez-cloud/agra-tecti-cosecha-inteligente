@@ -66,31 +66,37 @@ export default function Home() {
   const chartData = useMemo(() => {
     if (!boxes || boxes.length === 0) return [];
     
-    const dateMap = new Map<string, { date: string; primera: number; segunda: number; desperdicio: number }>();
+    // Usar un Map con fecha completa como clave para ordenar correctamente
+    const dateMap = new Map<string, { fullDate: Date; date: string; primera: number; segunda: number; desperdicio: number }>();
     
     boxes.forEach(box => {
-      const date = new Date(box.submissionTime).toLocaleDateString('es-MX', { month: 'short', day: 'numeric' });
+      const fullDate = new Date(box.submissionTime);
+      const dateKey = fullDate.toISOString().split('T')[0]; // YYYY-MM-DD
+      const displayDate = fullDate.toLocaleDateString('es-MX', { month: 'short', day: 'numeric' });
       
-      if (!dateMap.has(date)) {
-        dateMap.set(date, { date, primera: 0, segunda: 0, desperdicio: 0 });
+      if (!dateMap.has(dateKey)) {
+        dateMap.set(dateKey, { fullDate, date: displayDate, primera: 0, segunda: 0, desperdicio: 0 });
       }
       
-      const entry = dateMap.get(date)!;
+      const entry = dateMap.get(dateKey)!;
       const weightKg = box.weight / 1000; // Convertir gramos a kilogramos
       if (box.harvesterId === 99) entry.desperdicio += weightKg;
       else if (box.harvesterId === 98) entry.segunda += weightKg;
       else entry.primera += weightKg;
     });
     
-    // Redondear a 2 decimales
-    const result = Array.from(dateMap.values()).map(entry => ({
+    // Ordenar por fecha y tomar los últimos 10 días
+    const sortedEntries = Array.from(dateMap.values())
+      .sort((a, b) => a.fullDate.getTime() - b.fullDate.getTime())
+      .slice(-10);
+    
+    // Redondear a 2 decimales y eliminar fullDate del resultado
+    return sortedEntries.map(entry => ({
       date: entry.date,
       primera: Number(entry.primera.toFixed(2)),
       segunda: Number(entry.segunda.toFixed(2)),
       desperdicio: Number(entry.desperdicio.toFixed(2))
     }));
-    
-    return result.slice(-10); // Últimos 10 días
   }, [boxes]);
 
   // Obtener últimas 5 cajas con imágenes

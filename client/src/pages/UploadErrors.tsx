@@ -300,16 +300,16 @@ export default function UploadErrors() {
             </div>
           ) : (
             <>
-              <div className="overflow-x-auto">
-                <table className="w-full table-fixed">
+              <div className="overflow-x-auto -mx-6">
+                <table className="w-full">
                   <thead>
                     <tr className="border-b-2 border-green-600 text-left bg-green-50">
-                      <th className="px-4 py-3 font-semibold text-green-900 w-32">Tipo</th>
-                      <th className="px-4 py-3 font-semibold text-green-900 w-32">Caja</th>
-                      <th className="px-4 py-3 font-semibold text-green-900 w-32">Parcela</th>
-                      <th className="px-4 py-3 font-semibold text-green-900">Mensaje</th>
-                      <th className="px-4 py-3 font-semibold text-green-900 w-28">Estado</th>
-                      <th className="px-4 py-3 font-semibold text-green-900 w-40">Acciones</th>
+                      <th className="px-6 py-4 font-semibold text-green-900 w-36">Tipo</th>
+                      <th className="px-6 py-4 font-semibold text-green-900 w-36">Caja</th>
+                      <th className="px-6 py-4 font-semibold text-green-900 w-36">Parcela</th>
+                      <th className="px-6 py-4 font-semibold text-green-900">Mensaje</th>
+                      <th className="px-6 py-4 font-semibold text-green-900 w-32">Estado</th>
+                      <th className="px-6 py-4 font-semibold text-green-900 w-44">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -323,13 +323,13 @@ export default function UploadErrors() {
                           key={error.id}
                           className="border-b border-green-100"
                         >
-                          <td className="px-4 py-3">
+                          <td className="px-6 py-4">
                             <span className={`font-medium text-sm ${typeInfo.color}`}>{typeInfo.label}</span>
                           </td>
-                          <td className="px-4 py-3 font-mono text-sm truncate">{error.boxCode || "-"}</td>
-                          <td className="px-4 py-3 text-sm truncate">{error.parcelCode || "-"}</td>
-                          <td className="px-4 py-3 text-sm text-gray-700 truncate">{error.errorMessage}</td>
-                          <td className="px-4 py-3">
+                          <td className="px-6 py-4 font-mono text-sm">{error.boxCode || "-"}</td>
+                          <td className="px-6 py-4 text-sm">{error.parcelCode || "-"}</td>
+                          <td className="px-6 py-4 text-sm text-gray-700">{error.errorMessage}</td>
+                          <td className="px-6 py-4">
                             {error.resolved ? (
                               <span className="flex items-center gap-1 text-green-600 text-sm">
                                 <CheckCircle className="h-4 w-4" />
@@ -342,7 +342,7 @@ export default function UploadErrors() {
                               </span>
                             )}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-6 py-4">
                             <div className="flex gap-2">
                               {!error.resolved && (
                                 <>
