@@ -85,10 +85,9 @@ export default function Home() {
       else entry.primera += weightKg;
     });
     
-    // Ordenar por fecha y tomar los últimos 10 días
+    // Ordenar por fecha (mostrar todos los días)
     const sortedEntries = Array.from(dateMap.values())
-      .sort((a, b) => a.fullDate.getTime() - b.fullDate.getTime())
-      .slice(-10);
+      .sort((a, b) => a.fullDate.getTime() - b.fullDate.getTime());
     
     // Redondear a 2 decimales y eliminar fullDate del resultado
     return sortedEntries.map(entry => ({

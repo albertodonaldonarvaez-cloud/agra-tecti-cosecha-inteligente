@@ -60,7 +60,7 @@ export default function Harvesters() {
 
   const handleSave = (harvesterId: number, harvesterNumber: number) => {
     updateHarvester.mutate({
-      harvesterId,
+      harvesterId: harvesterNumber,  // Usar el número de cortadora, no el ID
       customName: customNames[harvesterNumber] || "",
     });
   };
