@@ -518,6 +518,16 @@ export const appRouter = router({
           harvester.total++;
           harvester.weight += box.weight;
         });
+        
+        // Obtener nombres personalizados de cortadoras
+        const allHarvesters = await db.getAllHarvesters();
+        const harvesterStats = Array.from(harvesterMap.values()).map(stat => {
+          const harvesterInfo = allHarvesters.find(h => h.number === stat.harvesterId);
+          return {
+            ...stat,
+            harvesterName: harvesterInfo?.customName || null,
+          };
+        });
 
         return {
           total,
@@ -530,7 +540,7 @@ export const appRouter = router({
           secondQualityPercent,
           wastePercent,
           parcelStats: Array.from(parcelMap.values()),
-          harvesterStats: Array.from(harvesterMap.values()),
+          harvesterStats,
         };
       }),
   }),

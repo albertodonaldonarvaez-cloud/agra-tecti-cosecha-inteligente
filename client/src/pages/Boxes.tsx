@@ -34,6 +34,9 @@ export default function Boxes() {
   const { data: boxes, isLoading } = trpc.boxes.list.useQuery(undefined, {
     enabled: !!user,
   });
+  const { data: harvesters } = trpc.harvesters.list.useQuery(undefined, {
+    enabled: !!user,
+  });
 
   useEffect(() => {
     if (!loading && !user) {
@@ -44,6 +47,16 @@ export default function Boxes() {
   if (loading || !user) {
     return null;
   }
+
+  const getHarvesterName = (harvesterId: number) => {
+    const harvester = harvesters?.find(h => h.number === harvesterId);
+    if (harvester?.customName) return harvester.customName;
+    
+    if (harvesterId === 97) return "Recolecta (1ra Calidad)";
+    if (harvesterId === 98) return "Segunda Calidad";
+    if (harvesterId === 99) return "Desperdicio";
+    return `Cortadora #${harvesterId}`;
+  };
 
   const getQualityType = (harvesterId: number) => {
     if (harvesterId === 97) return { label: "Recolecta", color: "text-green-600" };
@@ -177,13 +190,7 @@ export default function Boxes() {
                       <p className="text-sm text-green-600 mb-1">Cortadora</p>
                       <p className="text-lg font-semibold text-green-900">#{selectedBox.harvesterId}</p>
                       <p className="text-sm text-gray-600">
-                        {selectedBox.harvesterId === 97
-                          ? "Recolecta (1ra Calidad)"
-                          : selectedBox.harvesterId === 98
-                          ? "Segunda Calidad"
-                          : selectedBox.harvesterId === 99
-                          ? "Desperdicio"
-                          : "Cortadora"}
+                        {getHarvesterName(selectedBox.harvesterId)}
                       </p>
                     </div>
                     
