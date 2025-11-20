@@ -8,11 +8,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Package, X, MapPin } from "lucide-react";
+import { Package, X, MapPin, Filter } from "lucide-react";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 
 interface Box {
   id: number;
@@ -31,6 +38,10 @@ interface Box {
 export default function Boxes() {
   const { user, loading } = useAuth();
   const [selectedBox, setSelectedBox] = useState<Box | null>(null);
+  const [filterDate, setFilterDate] = useState<string>("all");
+  const [filterParcel, setFilterParcel] = useState<string>("all");
+  const [filterHarvester, setFilterHarvester] = useState<string>("all");
+  
   const { data: boxes, isLoading } = trpc.boxes.list.useQuery(undefined, {
     enabled: !!user,
   });
@@ -65,6 +76,72 @@ export default function Boxes() {
     return { label: "1ra Calidad", color: "text-green-600" };
   };
 
+  // Obtener fechas únicas
+  const uniqueDates = useMemo(() => {
+    if (!boxes) return [];
+    const dates = new Set<string>();
+    boxes.forEach(box => {
+      const date = new Date(box.submissionTime).toLocaleDateString('es-MX');
+      dates.add(date);
+    });
+    return Array.from(dates).sort((a, b) => {
+      const dateA = new Date(a.split('/').reverse().join('-'));
+      const dateB = new Date(b.split('/').reverse().join('-'));
+      return dateB.getTime() - dateA.getTime();
+    });
+  }, [boxes]);
+
+  // Obtener parcelas únicas
+  const uniqueParcels = useMemo(() => {
+    if (!boxes) return [];
+    const parcels = new Map<string, string>();
+    boxes.forEach(box => {
+      parcels.set(box.parcelCode, box.parcelName);
+    });
+    return Array.from(parcels.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [boxes]);
+
+  // Obtener cortadoras únicas
+  const uniqueHarvesters = useMemo(() => {
+    if (!boxes) return [];
+    const harvesterIds = new Set<number>();
+    boxes.forEach(box => {
+      harvesterIds.add(box.harvesterId);
+    });
+    return Array.from(harvesterIds).sort((a, b) => a - b);
+  }, [boxes]);
+
+  // Filtrar cajas
+  const filteredBoxes = useMemo(() => {
+    if (!boxes) return [];
+    
+    return boxes.filter(box => {
+      // Filtro de fecha
+      if (filterDate !== "all") {
+        const boxDate = new Date(box.submissionTime).toLocaleDateString('es-MX');
+        if (boxDate !== filterDate) return false;
+      }
+      
+      // Filtro de parcela
+      if (filterParcel !== "all" && box.parcelCode !== filterParcel) {
+        return false;
+      }
+      
+      // Filtro de cortadora
+      if (filterHarvester !== "all" && box.harvesterId.toString() !== filterHarvester) {
+        return false;
+      }
+      
+      return true;
+    });
+  }, [boxes, filterDate, filterParcel, filterHarvester]);
+
+  const handleClearFilters = () => {
+    setFilterDate("all");
+    setFilterParcel("all");
+    setFilterHarvester("all");
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
       <div className="container">
@@ -74,16 +151,88 @@ export default function Boxes() {
           <div>
             <h1 className="text-4xl font-bold text-green-900">Cajas Registradas</h1>
             <p className="text-green-700">
-              {boxes ? `${boxes.length} cajas en total` : "Cargando..."}
+              {filteredBoxes ? `${filteredBoxes.length} cajas` : "Cargando..."}
+              {boxes && filteredBoxes && filteredBoxes.length !== boxes.length && (
+                <span className="text-sm"> (de {boxes.length} totales)</span>
+              )}
             </p>
           </div>
         </div>
+
+        {/* Filtros */}
+        <GlassCard className="mb-6 p-6">
+          <div className="mb-4 flex items-center gap-2">
+            <Filter className="h-5 w-5 text-green-600" />
+            <h2 className="text-lg font-semibold text-green-900">Filtros</h2>
+          </div>
+          
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+            <div>
+              <label className="mb-2 block text-sm font-medium text-green-900">Fecha</label>
+              <Select value={filterDate} onValueChange={setFilterDate}>
+                <SelectTrigger className="border-green-200">
+                  <SelectValue placeholder="Todas las fechas" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas las fechas</SelectItem>
+                  {uniqueDates.map(date => (
+                    <SelectItem key={date} value={date}>{date}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-green-900">Parcela</label>
+              <Select value={filterParcel} onValueChange={setFilterParcel}>
+                <SelectTrigger className="border-green-200">
+                  <SelectValue placeholder="Todas las parcelas" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas las parcelas</SelectItem>
+                  {uniqueParcels.map(([code, name]) => (
+                    <SelectItem key={code} value={code}>
+                      {code} - {name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-green-900">Cortadora</label>
+              <Select value={filterHarvester} onValueChange={setFilterHarvester}>
+                <SelectTrigger className="border-green-200">
+                  <SelectValue placeholder="Todas las cortadoras" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas las cortadoras</SelectItem>
+                  {uniqueHarvesters.map(id => (
+                    <SelectItem key={id} value={id.toString()}>
+                      #{id} - {getHarvesterName(id)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-end">
+              <Button
+                onClick={handleClearFilters}
+                variant="outline"
+                className="w-full border-green-600 text-green-700 hover:bg-green-50"
+              >
+                Limpiar Filtros
+              </Button>
+            </div>
+          </div>
+        </GlassCard>
 
         {isLoading ? (
           <GlassCard className="p-12 text-center">
             <p className="text-green-600">Cargando cajas...</p>
           </GlassCard>
-        ) : boxes && boxes.length > 0 ? (
+        ) : filteredBoxes && filteredBoxes.length > 0 ? (
           <GlassCard className="overflow-hidden p-6" hover={false}>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -98,7 +247,7 @@ export default function Boxes() {
                   </tr>
                 </thead>
                 <tbody>
-                  {boxes.map((box) => {
+                  {filteredBoxes.map((box) => {
                     const quality = getQualityType(box.harvesterId);
                     return (
                       <tr
@@ -119,17 +268,17 @@ export default function Boxes() {
                             <div className="text-xs text-green-600">{box.parcelCode}</div>
                           </div>
                         </td>
-                        <td className="py-3 pr-8 text-right text-sm text-green-900">
+                        <td className="py-3 pr-8 text-right text-sm font-semibold text-green-900">
                           {(box.weight / 1000).toFixed(2)} kg
                         </td>
                         <td className="py-3 pr-8 text-sm text-green-900">
-                          {new Date(box.submissionTime).toLocaleDateString()}
+                          {new Date(box.submissionTime).toLocaleDateString('es-MX')}
                         </td>
-                        <td className="py-3 text-center text-sm text-green-900">
+                        <td className="py-3 text-center">
                           {box.photoUrl ? (
-                            <span className="text-green-600">✓ Sí</span>
+                            <Package className="mx-auto h-5 w-5 text-green-600" />
                           ) : (
-                            <span className="text-red-600">✗ No</span>
+                            <X className="mx-auto h-5 w-5 text-gray-300" />
                           )}
                         </td>
                       </tr>
@@ -142,15 +291,15 @@ export default function Boxes() {
         ) : (
           <GlassCard className="p-12 text-center">
             <Package className="mx-auto mb-4 h-16 w-16 text-green-300" />
-            <h3 className="mb-2 text-xl font-semibold text-green-900">No hay cajas registradas</h3>
-            <p className="text-green-600">Las cajas aparecerán aquí cuando se sincronicen datos</p>
+            <h3 className="mb-2 text-xl font-semibold text-green-900">No hay cajas que coincidan</h3>
+            <p className="text-green-600">Intenta ajustar los filtros</p>
           </GlassCard>
         )}
       </div>
 
-      {/* Modal de detalle */}
+      {/* Modal de Detalles */}
       <Dialog open={!!selectedBox} onOpenChange={() => setSelectedBox(null)}>
-        <DialogContent className="max-w-[95vw] sm:max-w-4xl lg:max-w-5xl max-h-[90vh] overflow-hidden p-0">
+        <DialogContent className="max-w-6xl p-0">
           {selectedBox && (
             <div className="flex flex-col lg:flex-row max-h-[90vh]">
               {/* Imagen - Lado izquierdo */}

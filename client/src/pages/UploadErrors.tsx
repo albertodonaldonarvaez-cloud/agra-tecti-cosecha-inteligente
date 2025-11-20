@@ -300,16 +300,16 @@ export default function UploadErrors() {
             </div>
           ) : (
             <>
-              <div className="overflow-x-auto -mx-6">
+              <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
                     <tr className="border-b-2 border-green-600 text-left bg-green-50">
-                      <th className="px-6 py-4 font-semibold text-green-900 w-36">Tipo</th>
-                      <th className="px-6 py-4 font-semibold text-green-900 w-36">Caja</th>
-                      <th className="px-6 py-4 font-semibold text-green-900 w-36">Parcela</th>
-                      <th className="px-6 py-4 font-semibold text-green-900">Mensaje</th>
-                      <th className="px-6 py-4 font-semibold text-green-900 w-32">Estado</th>
-                      <th className="px-6 py-4 font-semibold text-green-900 w-44">Acciones</th>
+                      <th className="px-4 py-3 font-semibold text-green-900">Tipo</th>
+                      <th className="px-4 py-3 font-semibold text-green-900">Caja</th>
+                      <th className="px-4 py-3 font-semibold text-green-900">Parcela</th>
+                      <th className="px-4 py-3 font-semibold text-green-900">Mensaje</th>
+                      <th className="px-4 py-3 font-semibold text-green-900">Estado</th>
+                      <th className="px-4 py-3 font-semibold text-green-900">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -323,13 +323,13 @@ export default function UploadErrors() {
                           key={error.id}
                           className="border-b border-green-100"
                         >
-                          <td className="px-6 py-4">
+                          <td className="px-4 py-3">
                             <span className={`font-medium text-sm ${typeInfo.color}`}>{typeInfo.label}</span>
                           </td>
-                          <td className="px-6 py-4 font-mono text-sm">{error.boxCode || "-"}</td>
-                          <td className="px-6 py-4 text-sm">{error.parcelCode || "-"}</td>
-                          <td className="px-6 py-4 text-sm text-gray-700">{error.errorMessage}</td>
-                          <td className="px-6 py-4">
+                          <td className="px-4 py-3 font-mono text-sm">{error.boxCode || "-"}</td>
+                          <td className="px-4 py-3 text-sm">{error.parcelCode || "-"}</td>
+                          <td className="px-4 py-3 text-sm text-gray-700">{error.errorMessage}</td>
+                          <td className="px-4 py-3">
                             {error.resolved ? (
                               <span className="flex items-center gap-1 text-green-600 text-sm">
                                 <CheckCircle className="h-4 w-4" />
@@ -342,20 +342,20 @@ export default function UploadErrors() {
                               </span>
                             )}
                           </td>
-                          <td className="px-6 py-4">
+                          <td className="px-4 py-3">
                             <div className="flex gap-2">
                               {!error.resolved && (
                                 <>
                                   <Button
                                     size="sm"
-                                    onClick={() => handleEdit(error)}
+                                    onClick={(e) => { e.stopPropagation(); handleEdit(error); }}
                                     className="bg-blue-600 hover:bg-blue-700 h-8 w-8 p-0"
                                   >
                                     <Edit className="h-4 w-4" />
                                   </Button>
                                   <Button
                                     size="sm"
-                                    onClick={() => markResolved.mutate({ errorId: error.id })}
+                                    onClick={(e) => { e.stopPropagation(); markResolved.mutate({ errorId: error.id }); }}
                                     variant="outline"
                                     className="border-green-600 text-green-700 hover:bg-green-50 h-8 w-8 p-0"
                                   >
@@ -365,7 +365,7 @@ export default function UploadErrors() {
                               )}
                               <Button
                                 size="sm"
-                                onClick={() => deleteError.mutate({ errorId: error.id })}
+                                onClick={(e) => { e.stopPropagation(); deleteError.mutate({ errorId: error.id }); }}
                                 variant="outline"
                                 className="border-red-600 text-red-700 hover:bg-red-50 h-8 w-8 p-0"
                               >
