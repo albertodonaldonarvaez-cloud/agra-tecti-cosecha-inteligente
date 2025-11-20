@@ -1,4 +1,5 @@
 import { useAuth } from "@/_core/hooks/useAuth";
+import { ProtectedPage } from "@/components/ProtectedPage";
 import { GlassCard } from "@/components/GlassCard";
 import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
@@ -6,6 +7,14 @@ import { Calendar, TrendingUp, Package, BarChart3 } from "lucide-react";
 import { useEffect, useMemo } from "react";
 
 export default function DailyAnalysis() {
+  return (
+    <ProtectedPage permission="canViewDailyAnalysis">
+      <DailyAnalysisContent />
+    </ProtectedPage>
+  );
+}
+
+function DailyAnalysisContent() {
   const { user, loading } = useAuth();
   
   const { data: boxes } = trpc.boxes.list.useQuery(undefined, {

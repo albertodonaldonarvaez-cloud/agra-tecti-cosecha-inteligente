@@ -1,4 +1,5 @@
 import { useAuth } from "@/_core/hooks/useAuth";
+import { ProtectedPage } from "@/components/ProtectedPage";
 import { GlassCard } from "@/components/GlassCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +10,14 @@ import { BarChart3, Calendar, TrendingUp, Package } from "lucide-react";
 import { useEffect, useState } from "react";
 
 export default function Analytics() {
+  return (
+    <ProtectedPage permission="canViewAnalytics">
+      <AnalyticsContent />
+    </ProtectedPage>
+  );
+}
+
+function AnalyticsContent() {
   const { user, loading } = useAuth();
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");

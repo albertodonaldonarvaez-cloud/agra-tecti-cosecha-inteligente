@@ -411,6 +411,24 @@ export const appRouter = router({
         return { success: true };
       }),
 
+    updatePermissions: adminProcedure
+      .input(z.object({
+        userId: z.number(),
+        permissions: z.object({
+          canViewDashboard: z.boolean(),
+          canViewBoxes: z.boolean(),
+          canViewAnalytics: z.boolean(),
+          canViewDailyAnalysis: z.boolean(),
+          canViewParcels: z.boolean(),
+          canViewHarvesters: z.boolean(),
+          canViewErrors: z.boolean(),
+        }),
+      }))
+      .mutation(async ({ input }) => {
+        await db.updateUserPermissions(input.userId, input.permissions);
+        return { success: true };
+      }),
+
     create: adminProcedure
       .input(
         z.object({

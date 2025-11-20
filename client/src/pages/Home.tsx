@@ -1,5 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { GlassCard } from "@/components/GlassCard";
+import { ProtectedPage } from "@/components/ProtectedPage";
 import { Button } from "@/components/ui/button";
 import { getProxiedImageUrl } from "@/lib/imageProxy";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -10,6 +11,14 @@ import { useEffect, useMemo, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
 export default function Home() {
+  return (
+    <ProtectedPage permission="canViewDashboard">
+      <HomeContent />
+    </ProtectedPage>
+  );
+}
+
+function HomeContent() {
   const { user, loading } = useAuth();
   const [selectedBox, setSelectedBox] = useState<any>(null);
   const [showImageModal, setShowImageModal] = useState(false);

@@ -145,6 +145,20 @@ export async function updateUserRole(userId: number, role: "user" | "admin") {
   await db.update(users).set({ role, updatedAt: new Date() }).where(eq(users.id, userId));
 }
 
+export async function updateUserPermissions(userId: number, permissions: {
+  canViewDashboard: boolean;
+  canViewBoxes: boolean;
+  canViewAnalytics: boolean;
+  canViewDailyAnalysis: boolean;
+  canViewParcels: boolean;
+  canViewHarvesters: boolean;
+  canViewErrors: boolean;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(users).set({ ...permissions, updatedAt: new Date() }).where(eq(users.id, userId));
+}
+
 export async function createManualUser(data: { name: string; email: string; password: string; role?: "user" | "admin" }) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");

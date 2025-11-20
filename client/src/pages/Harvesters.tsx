@@ -1,4 +1,5 @@
 import { useAuth } from "@/_core/hooks/useAuth";
+import { ProtectedPage } from "@/components/ProtectedPage";
 import { GlassCard } from "@/components/GlassCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +11,14 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 export default function Harvesters() {
+  return (
+    <ProtectedPage permission="canViewHarvesters">
+      <HarvestersContent />
+    </ProtectedPage>
+  );
+}
+
+function HarvestersContent() {
   const { user, loading } = useAuth();
   const { data: harvesters, refetch } = trpc.harvesters.list.useQuery(undefined, {
     enabled: !!user && user.role === "admin",

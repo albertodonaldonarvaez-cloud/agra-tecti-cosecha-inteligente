@@ -16,19 +16,32 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Users as UsersIcon, Shield, User, UserPlus } from "lucide-react";
+import { Users as UsersIcon, Shield, User, UserPlus, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 export default function Users() {
   const { user, loading } = useAuth();
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const [showPermissionsDialog, setShowPermissionsDialog] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<any>(null);
   const [newUserName, setNewUserName] = useState("");
   const [newUserEmail, setNewUserEmail] = useState("");
   const [newUserPassword, setNewUserPassword] = useState("");
   const [newUserRole, setNewUserRole] = useState<"user" | "admin">("user");
+  
+  const [permissions, setPermissions] = useState({
+    canViewDashboard: true,
+    canViewBoxes: true,
+    canViewAnalytics: true,
+    canViewDailyAnalysis: true,
+    canViewParcels: false,
+    canViewHarvesters: false,
+    canViewErrors: false,
+  });
   
   const { data: users, refetch } = trpc.usersAdmin.list.useQuery(undefined, {
     enabled: !!user && user.role === "admin",
@@ -37,6 +50,17 @@ export default function Users() {
   const updateRole = trpc.usersAdmin.updateRole.useMutation({
     onSuccess: () => {
       toast.success("Rol actualizado correctamente");
+      refetch();
+    },
+    onError: (error) => {
+      toast.error(error.message);
+    },
+  });
+
+  const updatePermissions = trpc.usersAdmin.updatePermissions.useMutation({
+    onSuccess: () => {
+      toast.success("Permisos actualizados correctamente");
+      setShowPermissionsDialog(false);
       refetch();
     },
     onError: (error) => {
@@ -82,6 +106,28 @@ export default function Users() {
 
   const handleRoleChange = (userId: number, newRole: "user" | "admin") => {
     updateRole.mutate({ userId, role: newRole });
+  };
+
+  const handleOpenPermissions = (u: any) => {
+    setSelectedUser(u);
+    setPermissions({
+      canViewDashboard: u.canViewDashboard ?? true,
+      canViewBoxes: u.canViewBoxes ?? true,
+      canViewAnalytics: u.canViewAnalytics ?? true,
+      canViewDailyAnalysis: u.canViewDailyAnalysis ?? true,
+      canViewParcels: u.canViewParcels ?? false,
+      canViewHarvesters: u.canViewHarvesters ?? false,
+      canViewErrors: u.canViewErrors ?? false,
+    });
+    setShowPermissionsDialog(true);
+  };
+
+  const handleSavePermissions = () => {
+    if (!selectedUser) return;
+    updatePermissions.mutate({
+      userId: selectedUser.id,
+      permissions,
+    });
   };
 
   const handleCreateUser = () => {
@@ -151,6 +197,18 @@ export default function Users() {
                         <SelectItem value="admin">Admin</SelectItem>
                       </SelectContent>
                     </Select>
+                    
+                    {u.role === "user" && (
+                      <Button
+                        onClick={() => handleOpenPermissions(u)}
+                        variant="outline"
+                        size="sm"
+                        className="flex items-center gap-2"
+                      >
+                        <Settings className="h-4 w-4" />
+                        Permisos
+                      </Button>
+                    )}
                   </div>
                 </div>
               </GlassCard>
@@ -202,8 +260,8 @@ export default function Users() {
               </div>
               <div>
                 <Label htmlFor="userRole">Rol</Label>
-                <Select value={newUserRole} onValueChange={(value) => setNewUserRole(value as "user" | "admin")}>
-                  <SelectTrigger>
+                <Select value={newUserRole} onValueChange={(value: any) => setNewUserRole(value)}>
+                  <SelectTrigger id="userRole">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -212,12 +270,128 @@ export default function Users() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex gap-2">
-                <Button onClick={handleCreateUser} disabled={createUser.isPending} className="flex-1">
-                  {createUser.isPending ? "Creando..." : "Crear Usuario"}
-                </Button>
-                <Button onClick={() => setShowAddDialog(false)} variant="outline" className="flex-1">
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setShowAddDialog(false)}>
                   Cancelar
+                </Button>
+                <Button onClick={handleCreateUser} disabled={createUser.isPending}>
+                  Crear Usuario
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Dialog para gestionar permisos */}
+        <Dialog open={showPermissionsDialog} onOpenChange={setShowPermissionsDialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Permisos de {selectedUser?.name}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                Selecciona qué páginas puede ver este usuario
+              </p>
+              
+              <div className="space-y-3">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="dashboard"
+                    checked={permissions.canViewDashboard}
+                    onCheckedChange={(checked) => 
+                      setPermissions({ ...permissions, canViewDashboard: !!checked })
+                    }
+                  />
+                  <label htmlFor="dashboard" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                    Dashboard (Inicio)
+                  </label>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="boxes"
+                    checked={permissions.canViewBoxes}
+                    onCheckedChange={(checked) => 
+                      setPermissions({ ...permissions, canViewBoxes: !!checked })
+                    }
+                  />
+                  <label htmlFor="boxes" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                    Cajas Registradas
+                  </label>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="analytics"
+                    checked={permissions.canViewAnalytics}
+                    onCheckedChange={(checked) => 
+                      setPermissions({ ...permissions, canViewAnalytics: !!checked })
+                    }
+                  />
+                  <label htmlFor="analytics" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                    Análisis de Datos
+                  </label>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="daily"
+                    checked={permissions.canViewDailyAnalysis}
+                    onCheckedChange={(checked) => 
+                      setPermissions({ ...permissions, canViewDailyAnalysis: !!checked })
+                    }
+                  />
+                  <label htmlFor="daily" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                    Análisis Diario
+                  </label>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="parcels"
+                    checked={permissions.canViewParcels}
+                    onCheckedChange={(checked) => 
+                      setPermissions({ ...permissions, canViewParcels: !!checked })
+                    }
+                  />
+                  <label htmlFor="parcels" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                    Parcelas
+                  </label>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="harvesters"
+                    checked={permissions.canViewHarvesters}
+                    onCheckedChange={(checked) => 
+                      setPermissions({ ...permissions, canViewHarvesters: !!checked })
+                    }
+                  />
+                  <label htmlFor="harvesters" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                    Cortadoras
+                  </label>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="errors"
+                    checked={permissions.canViewErrors}
+                    onCheckedChange={(checked) => 
+                      setPermissions({ ...permissions, canViewErrors: !!checked })
+                    }
+                  />
+                  <label htmlFor="errors" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                    Errores de Validación
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4">
+                <Button variant="outline" onClick={() => setShowPermissionsDialog(false)}>
+                  Cancelar
+                </Button>
+                <Button onClick={handleSavePermissions} disabled={updatePermissions.isPending}>
+                  Guardar Permisos
                 </Button>
               </div>
             </div>

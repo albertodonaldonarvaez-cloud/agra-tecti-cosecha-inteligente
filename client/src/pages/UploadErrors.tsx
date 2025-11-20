@@ -1,4 +1,5 @@
 import { useAuth } from "@/_core/hooks/useAuth";
+import { ProtectedPage } from "@/components/ProtectedPage";
 import { GlassCard } from "@/components/GlassCard";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -33,6 +34,14 @@ interface EditFormData {
 const ITEMS_PER_PAGE = 50;
 
 export default function UploadErrors() {
+  return (
+    <ProtectedPage permission="canViewErrors">
+      <UploadErrorsContent />
+    </ProtectedPage>
+  );
+}
+
+function UploadErrorsContent() {
   const { user, loading } = useAuth();
   const [selectedBatch, setSelectedBatch] = useState<string | null>(null);
   const [editingError, setEditingError] = useState<any | null>(null);

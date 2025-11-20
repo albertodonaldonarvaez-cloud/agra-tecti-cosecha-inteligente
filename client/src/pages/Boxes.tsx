@@ -1,4 +1,5 @@
 import { useAuth } from "@/_core/hooks/useAuth";
+import { ProtectedPage } from "@/components/ProtectedPage";
 import { GlassCard } from "@/components/GlassCard";
 import { Button } from "@/components/ui/button";
 import { getProxiedImageUrl } from "@/lib/imageProxy";
@@ -36,6 +37,14 @@ interface Box {
 }
 
 export default function Boxes() {
+  return (
+    <ProtectedPage permission="canViewBoxes">
+      <BoxesContent />
+    </ProtectedPage>
+  );
+}
+
+function BoxesContent() {
   const { user, loading } = useAuth();
   const [selectedBox, setSelectedBox] = useState<Box | null>(null);
   const [filterDate, setFilterDate] = useState<string>("all");

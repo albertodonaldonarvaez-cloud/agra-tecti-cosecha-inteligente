@@ -1,4 +1,5 @@
 import { useAuth } from "@/_core/hooks/useAuth";
+import { ProtectedPage } from "@/components/ProtectedPage";
 import { GlassCard } from "@/components/GlassCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +26,14 @@ interface Parcel {
 }
 
 export default function Parcels() {
+  return (
+    <ProtectedPage permission="canViewParcels">
+      <ParcelsContent />
+    </ProtectedPage>
+  );
+}
+
+function ParcelsContent() {
   const { user, loading } = useAuth();
   const [showDialog, setShowDialog] = useState(false);
   const [editingParcel, setEditingParcel] = useState<Parcel | null>(null);

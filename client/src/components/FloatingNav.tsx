@@ -3,12 +3,14 @@ import { BarChart3, Box, Settings, Users, Scissors, LogOut, TrendingUp, Calendar
 import { Link, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
+import { useAuth } from "@/_core/hooks/useAuth";
 
 interface NavItem {
   to: string;
   icon: typeof BarChart3;
   label: string;
   adminOnly?: boolean;
+  permission?: string;
 }
 
 interface FloatingNavProps {
@@ -17,6 +19,7 @@ interface FloatingNavProps {
 
 export function FloatingNav({ isAdmin = false }: FloatingNavProps) {
   const [location] = useLocation();
+  const { user } = useAuth();
   
   const logout = trpc.auth.logout.useMutation({
     onSuccess: () => {
@@ -26,18 +29,31 @@ export function FloatingNav({ isAdmin = false }: FloatingNavProps) {
   });
 
   const navItems: NavItem[] = [
-    { to: "/", icon: BarChart3, label: "Dashboard" },
-    { to: "/boxes", icon: Box, label: "Cajas" },
-    { to: "/analytics", icon: TrendingUp, label: "Análisis" },
-    { to: "/daily", icon: Calendar, label: "Diario" },
-    { to: "/harvesters", icon: Scissors, label: "Cortadoras", adminOnly: true },
-    { to: "/parcels", icon: MapPin, label: "Parcelas", adminOnly: true },
-    { to: "/errors", icon: AlertCircle, label: "Errores", adminOnly: true },
+    { to: "/", icon: BarChart3, label: "Dashboard", permission: "canViewDashboard" },
+    { to: "/boxes", icon: Box, label: "Cajas", permission: "canViewBoxes" },
+    { to: "/analytics", icon: TrendingUp, label: "Análisis", permission: "canViewAnalytics" },
+    { to: "/daily", icon: Calendar, label: "Diario", permission: "canViewDailyAnalysis" },
+    { to: "/harvesters", icon: Scissors, label: "Cortadoras", adminOnly: true, permission: "canViewHarvesters" },
+    { to: "/parcels", icon: MapPin, label: "Parcelas", adminOnly: true, permission: "canViewParcels" },
+    { to: "/errors", icon: AlertCircle, label: "Errores", adminOnly: true, permission: "canViewErrors" },
     { to: "/users", icon: Users, label: "Usuarios", adminOnly: true },
     { to: "/settings", icon: Settings, label: "Configuración", adminOnly: true },
   ];
 
-  const filteredItems = navItems.filter(item => !item.adminOnly || isAdmin);
+  const filteredItems = navItems.filter(item => {
+    // Admins ven todo
+    if (isAdmin) return true;
+    
+    // Filtrar por adminOnly
+    if (item.adminOnly) return false;
+    
+    // Filtrar por permiso
+    if (item.permission && user && !(user as any)[item.permission]) {
+      return false;
+    }
+    
+    return true;
+  });
 
   const handleLogout = () => {
     if (confirm("¿Estás seguro de que deseas cerrar sesión?")) {
