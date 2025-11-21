@@ -1,3 +1,4 @@
+import { Loading } from "@/components/Loading";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { ProtectedPage } from "@/components/ProtectedPage";
 import { GlassCard } from "@/components/GlassCard";
@@ -95,7 +96,7 @@ function ParcelsContent() {
   }, [user, loading]);
 
   if (loading || !user || user.role !== "admin") {
-    return null;
+    return <Loading />;
   }
 
   const closeDialog = () => {

@@ -1,3 +1,4 @@
+import { Loading } from "@/components/Loading";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { GlassCard } from "@/components/GlassCard";
 import { ProtectedPage } from "@/components/ProtectedPage";
@@ -34,7 +35,7 @@ function HomeContent() {
   }, [user, loading]);
 
   const stats = useMemo(() => {
-    if (!boxes) return null;
+    if (!boxes) return <Loading />;
 
     const total = boxes.length;
     // El peso está en gramos, convertir a kilogramos
@@ -126,7 +127,7 @@ function HomeContent() {
   };
 
   if (loading || !user) {
-    return null;
+    return <Loading />;
   }
 
   return (

@@ -1,3 +1,4 @@
+import { Loading } from "@/components/Loading";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { GlassCard } from "@/components/GlassCard";
 import { Button } from "@/components/ui/button";
@@ -102,7 +103,7 @@ export default function Settings() {
   }, [config]);
 
   if (loading || !user) {
-    return null;
+    return <Loading />;
   }
 
   if (user.role !== "admin") {

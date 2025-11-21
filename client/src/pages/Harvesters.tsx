@@ -1,3 +1,4 @@
+import { Loading } from "@/components/Loading";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { ProtectedPage } from "@/components/ProtectedPage";
 import { GlassCard } from "@/components/GlassCard";
@@ -53,7 +54,7 @@ function HarvestersContent() {
   }, [harvesters]);
 
   if (loading || !user) {
-    return null;
+    return <Loading />;
   }
 
   if (user.role !== "admin") {

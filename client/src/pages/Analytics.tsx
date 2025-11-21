@@ -1,3 +1,4 @@
+import { Loading } from "@/components/Loading";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { ProtectedPage } from "@/components/ProtectedPage";
 import { GlassCard } from "@/components/GlassCard";
@@ -38,7 +39,7 @@ function AnalyticsContent() {
   }, [user, loading]);
 
   if (loading || !user) {
-    return null;
+    return <Loading />;
   }
 
   const handleApplyFilter = () => {

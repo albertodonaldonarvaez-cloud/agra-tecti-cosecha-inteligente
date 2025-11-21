@@ -137,11 +137,7 @@ function UploadErrorsContent() {
   }, [selectedBatch]);
 
   if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-lg">Cargando...</div>
-      </div>
-    );
+    return <Loading />;
   }
 
   if (!user || user.role !== "admin") {

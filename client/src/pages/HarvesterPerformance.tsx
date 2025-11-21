@@ -1,7 +1,7 @@
+import { Loading } from "@/components/Loading";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { ProtectedPage } from "@/components/ProtectedPage";
 import { GlassCard } from "@/components/GlassCard";
-import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import {
@@ -20,11 +20,9 @@ import {
 import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { getProxiedImageUrl } from "@/lib/imageProxy";
-import { BarChart3, TrendingUp, Package, Weight, Download, Calendar, X } from "lucide-react";
-import { useEffect, useState, useMemo, useRef } from "react";
+import { BarChart3, TrendingUp, Package, Weight, Calendar, X } from "lucide-react";
+import { useEffect, useState, useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import html2canvas from "html2canvas";
-import jsPDF from "jspdf";
 
 export default function HarvesterPerformance() {
   return (
@@ -53,7 +51,6 @@ function HarvesterPerformanceContent() {
   const [endDate, setEndDate] = useState<string>("");
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [selectedPhoto, setSelectedPhoto] = useState<{ url: string; title: string; weight: number; code: string } | null>(null);
-  const chartRef = useRef<HTMLDivElement>(null);
   
   const { data: boxes } = trpc.boxes.list.useQuery(undefined, {
     enabled: !!user,
@@ -176,98 +173,21 @@ function HarvesterPerformanceContent() {
     setShowPhotoModal(true);
   };
 
-  const exportToPDF = async () => {
-    if (!chartRef.current) return;
-    
-    try {
-      // Encontrar solo el SVG de la gráfica
-      const svgElement = chartRef.current.querySelector('svg');
-      if (!svgElement) {
-        alert('No se encontró la gráfica para exportar');
-        return;
-      }
-      
-      // Crear un contenedor temporal solo con el SVG y texto
-      const tempDiv = document.createElement('div');
-      tempDiv.style.cssText = 'position: absolute; left: -9999px; background: #ffffff; padding: 40px; width: 1200px;';
-      
-      // Clonar el contenido pero solo texto y SVG
-      const title = chartRef.current.querySelector('h2');
-      const subtitle = chartRef.current.querySelector('p');
-      const message = chartRef.current.querySelectorAll('p')[1];
-      
-      if (title) tempDiv.appendChild(title.cloneNode(true));
-      if (subtitle) tempDiv.appendChild(subtitle.cloneNode(true));
-      tempDiv.appendChild(svgElement.cloneNode(true));
-      if (message) tempDiv.appendChild(message.cloneNode(true));
-      
-      document.body.appendChild(tempDiv);
-      
-      const canvas = await html2canvas(tempDiv, {
-        scale: 2,
-        backgroundColor: '#ffffff',
-        logging: false,
-        ignoreElements: (element) => {
-          // Ignorar imágenes que puedan causar problemas
-          return element.tagName === 'IMG';
-        },
-      });
-      
-      document.body.removeChild(tempDiv);
-      
-      // Formato oficio horizontal: 330mm x 216mm
-      const pdf = new jsPDF({
-        orientation: 'landscape',
-        unit: 'mm',
-        format: 'legal',
-      });
-      
-      const pageWidth = 330;
-      const pageHeight = 216;
-      const margin = 10;
-      
-      const imgWidth = pageWidth - (margin * 2);
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      
-      const imgData = canvas.toDataURL('image/png');
-      
-      // Centrar verticalmente
-      const yPosition = (pageHeight - imgHeight) / 2;
-      
-      pdf.addImage(imgData, 'PNG', margin, yPosition, imgWidth, imgHeight);
-      
-      const fileName = selectedDate === "all" 
-        ? "rendimiento_cortadoras_temporada.pdf"
-        : `rendimiento_cortadoras_${selectedDate}.pdf`;
-      
-      pdf.save(fileName);
-    } catch (error) {
-      console.error("Error al exportar PDF:", error);
-      alert("Error al exportar PDF. Por favor intenta de nuevo.");
-    }
-  };
+
 
   if (loading || !user) {
-    return null;
+    return <Loading />;
   }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
       <div className="container max-w-7xl">
         {/* Header */}
-        <div className="mb-8">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-center gap-4">
-              <img src={APP_LOGO} alt="Agratec" className="h-12 w-12 md:h-16 md:w-16" />
-              <div>
-                <h1 className="text-2xl font-bold text-green-900 md:text-4xl">Rendimiento de Cortadoras</h1>
-                <p className="text-sm text-green-700 md:text-base">Análisis detallado del desempeño del personal</p>
-              </div>
-            </div>
-            <Button onClick={exportToPDF} className="flex items-center gap-2 w-full md:w-auto">
-              <Download className="h-5 w-5" />
-              Exportar Gráfica
-            </Button>
+        <div className="mb-8 flex items-center gap-4">
+          <img src={APP_LOGO} alt="Agratec" className="h-12 w-12 md:h-16 md:w-16" />
+          <div>
+            <h1 className="text-2xl font-bold text-green-900 md:text-4xl">Rendimiento de Cortadoras</h1>
+            <p className="text-sm text-green-700 md:text-base">Análisis detallado del desempeño del personal</p>
           </div>
         </div>
 
@@ -303,8 +223,8 @@ function HarvesterPerformanceContent() {
           </div>
         </GlassCard>
 
-        {/* Gráfica Principal - Para Exportar */}
-        <div ref={chartRef} className="mb-6 rounded-2xl bg-white p-8 shadow-lg">
+        {/* Gráfica Principal */}
+        <div className="mb-6 rounded-2xl bg-white p-8 shadow-lg">
           <div className="mb-6 text-center">
             <h2 className="mb-2 text-3xl font-bold text-green-900">
               🏆 Ranking de Rendimiento - Temporada 2024/2025
