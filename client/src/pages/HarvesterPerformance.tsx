@@ -162,10 +162,10 @@ function HarvesterPerformanceContent() {
     }));
   }, [harvesterStats]);
 
-  // Datos para la gráfica de rango
+  // Datos para la gráfica de rango (solo números)
   const rangeChartData = useMemo(() => {
     return rangeStats.map(stats => ({
-      name: stats.harvesterName || `#${stats.harvesterId}`,
+      name: `#${stats.harvesterId}`,
       cajas: stats.totalBoxes,
       kilos: Number((stats.totalWeight / 1000).toFixed(2)),
     }));
@@ -180,16 +180,37 @@ function HarvesterPerformanceContent() {
     if (!chartRef.current) return;
     
     try {
-      // Crear un canvas temporal con fondo blanco sólido
+      // Encontrar solo el SVG de la gráfica
+      const svgElement = chartRef.current.querySelector('svg');
+      if (!svgElement) {
+        alert('No se encontró la gráfica para exportar');
+        return;
+      }
+      
+      // Crear un contenedor temporal solo con el SVG y texto
       const tempDiv = document.createElement('div');
-      tempDiv.style.cssText = 'position: absolute; left: -9999px; background: #ffffff; padding: 20px;';
-      tempDiv.innerHTML = chartRef.current.innerHTML;
+      tempDiv.style.cssText = 'position: absolute; left: -9999px; background: #ffffff; padding: 40px; width: 1200px;';
+      
+      // Clonar el contenido pero solo texto y SVG
+      const title = chartRef.current.querySelector('h2');
+      const subtitle = chartRef.current.querySelector('p');
+      const message = chartRef.current.querySelectorAll('p')[1];
+      
+      if (title) tempDiv.appendChild(title.cloneNode(true));
+      if (subtitle) tempDiv.appendChild(subtitle.cloneNode(true));
+      tempDiv.appendChild(svgElement.cloneNode(true));
+      if (message) tempDiv.appendChild(message.cloneNode(true));
+      
       document.body.appendChild(tempDiv);
       
       const canvas = await html2canvas(tempDiv, {
         scale: 2,
         backgroundColor: '#ffffff',
         logging: false,
+        ignoreElements: (element) => {
+          // Ignorar imágenes que puedan causar problemas
+          return element.tagName === 'IMG';
+        },
       });
       
       document.body.removeChild(tempDiv);
@@ -296,7 +317,7 @@ function HarvesterPerformanceContent() {
           </div>
           {chartData.length > 0 ? (
             <div className="w-full overflow-x-auto">
-              <div style={{ minWidth: chartData.length > 5 ? `${chartData.length * 80}px` : '100%', height: '450px' }}>
+              <div style={{ minWidth: chartData.length > 8 ? `${chartData.length * 70}px` : '100%', height: '450px' }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#d1fae5" />
@@ -375,11 +396,11 @@ function HarvesterPerformanceContent() {
           {startDate && endDate && rangeChartData.length > 0 ? (
             <>
               <div className="w-full overflow-x-auto">
-                <div style={{ minWidth: rangeChartData.length > 5 ? `${rangeChartData.length * 80}px` : '100%', height: '400px' }}>
+                <div style={{ minWidth: rangeChartData.length > 8 ? `${rangeChartData.length * 70}px` : '100%', height: '400px' }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={rangeChartData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#d1fae5" />
-                      <XAxis dataKey="name" stroke="#059669" angle={-45} textAnchor="end" height={100} />
+                      <XAxis dataKey="name" stroke="#059669" style={{ fontSize: '14px', fontWeight: 'bold' }} />
                       <YAxis yAxisId="left" stroke="#059669" label={{ value: 'Cajas', angle: -90, position: 'insideLeft' }} />
                       <YAxis yAxisId="right" orientation="right" stroke="#f59e0b" label={{ value: 'Kilogramos', angle: 90, position: 'insideRight' }} />
                       <Tooltip />
