@@ -2,7 +2,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { GlassCard } from "@/components/GlassCard";
 import { getLoginUrl } from "@/const";
 import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation } from "wouter";
 
 interface ProtectedPageProps {
   children: React.ReactNode;
@@ -14,7 +14,7 @@ interface ProtectedPageProps {
 
 export function ProtectedPage({ children, permission }: ProtectedPageProps) {
   const { user, loading } = useAuth();
-  const navigate = useNavigate();
+  const [, setLocation] = useLocation();
 
   useEffect(() => {
     if (!loading && !user) {
@@ -39,7 +39,7 @@ export function ProtectedPage({ children, permission }: ProtectedPageProps) {
           <h2 className="mb-2 text-2xl font-bold text-green-900">Acceso Denegado</h2>
           <p className="text-green-600 mb-4">No tienes permiso para acceder a esta página</p>
           <button
-            onClick={() => navigate("/")}
+            onClick={() => setLocation("/")}
             className="text-green-700 underline hover:text-green-900"
           >
             Volver al inicio
