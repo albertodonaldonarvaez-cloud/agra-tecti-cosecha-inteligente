@@ -11,6 +11,7 @@ import DailyAnalysis from "./pages/DailyAnalysis";
 import Settings from "./pages/Settings";
 import Users from "./pages/Users";
 import Harvesters from "./pages/Harvesters";
+import HarvesterPerformance from "./pages/HarvesterPerformance";
 import Parcels from "./pages/Parcels";
 import UploadErrors from "./pages/UploadErrors";
 import Login from "./pages/Login";
@@ -41,6 +42,7 @@ function Router() {
         <Route path="/analytics" component={Analytics} />
         <Route path="/daily" component={DailyAnalysis} />
         <Route path="/harvesters" component={Harvesters} />
+        <Route path="/performance" component={HarvesterPerformance} />
         <Route path="/parcels" component={Parcels} />
         <Route path="/errors" component={UploadErrors} />
         <Route path="/users" component={Users} />

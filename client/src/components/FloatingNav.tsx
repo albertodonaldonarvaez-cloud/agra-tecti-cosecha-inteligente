@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { BarChart3, Box, Settings, Users, Scissors, LogOut, TrendingUp, Calendar, MapPin, AlertCircle } from "lucide-react";
+import { BarChart3, Box, Settings, Users, Scissors, LogOut, TrendingUp, Calendar, MapPin, AlertCircle, Target } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
@@ -33,6 +33,7 @@ export function FloatingNav({ isAdmin = false }: FloatingNavProps) {
     { to: "/boxes", icon: Box, label: "Cajas", permission: "canViewBoxes" },
     { to: "/analytics", icon: TrendingUp, label: "Análisis", permission: "canViewAnalytics" },
     { to: "/daily", icon: Calendar, label: "Diario", permission: "canViewDailyAnalysis" },
+    { to: "/performance", icon: Target, label: "Rendimiento", permission: "canViewAnalytics" },
     { to: "/harvesters", icon: Scissors, label: "Cortadoras", adminOnly: true, permission: "canViewHarvesters" },
     { to: "/parcels", icon: MapPin, label: "Parcelas", adminOnly: true, permission: "canViewParcels" },
     { to: "/errors", icon: AlertCircle, label: "Errores", adminOnly: true, permission: "canViewErrors" },
