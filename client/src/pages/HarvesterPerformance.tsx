@@ -372,21 +372,21 @@ function HarvesterPerformanceContent() {
                     <span className="text-xs font-medium">Total Kilos</span>
                   </div>
                   <p className="mt-1 text-2xl font-bold text-green-900">
-                    {(stats.totalWeight / 1000).toFixed(2)}
+                    {stats.totalWeight ? (stats.totalWeight / 1000).toFixed(2) : '0.00'}
                   </p>
                 </div>
 
                 <div className="rounded-lg bg-blue-50 p-4">
                   <div className="text-xs font-medium text-blue-600">Peso Promedio</div>
                   <p className="mt-1 text-xl font-bold text-blue-900">
-                    {(stats.avgWeight / 1000).toFixed(2)} kg
+                    {stats.avgWeight ? (stats.avgWeight / 1000).toFixed(2) : '0.00'} kg
                   </p>
                 </div>
 
                 <div className="rounded-lg bg-orange-50 p-4">
                   <div className="text-xs font-medium text-orange-600">Rango</div>
                   <p className="mt-1 text-xl font-bold text-orange-900">
-                    {(stats.minWeight / 1000).toFixed(2)} - {(stats.maxWeight / 1000).toFixed(2)} kg
+                    {stats.minWeight && stats.maxWeight ? `${(stats.minWeight / 1000).toFixed(2)} - ${(stats.maxWeight / 1000).toFixed(2)} kg` : '0.00 - 0.00 kg'}
                   </p>
                 </div>
               </div>
@@ -398,7 +398,7 @@ function HarvesterPerformanceContent() {
                   <div className="mb-2 flex items-center justify-between">
                     <span className="text-xs font-semibold text-green-900">🏆 Más Pesada</span>
                     <span className="text-xs font-bold text-green-600">
-                      {(stats.maxWeight / 1000).toFixed(2)} kg
+                      {stats.maxWeight ? (stats.maxWeight / 1000).toFixed(2) : '0.00'} kg
                     </span>
                   </div>
                   {stats.maxWeightBox?.photoUrl ? (
@@ -426,7 +426,7 @@ function HarvesterPerformanceContent() {
                   <div className="mb-2 flex items-center justify-between">
                     <span className="text-xs font-semibold text-orange-900">📦 Más Liviana</span>
                     <span className="text-xs font-bold text-orange-600">
-                      {(stats.minWeight / 1000).toFixed(2)} kg
+                      {stats.minWeight ? (stats.minWeight / 1000).toFixed(2) : '0.00'} kg
                     </span>
                   </div>
                   {stats.minWeightBox?.photoUrl ? (
@@ -495,7 +495,7 @@ function HarvesterPerformanceContent() {
                 <div>
                   <p className="text-sm text-green-600">Peso</p>
                   <p className="text-xl font-bold text-green-900">
-                    {(selectedPhoto.weight / 1000).toFixed(2)} kg
+                    {selectedPhoto.weight ? (selectedPhoto.weight / 1000).toFixed(2) : '0.00'} kg
                   </p>
                 </div>
               </div>

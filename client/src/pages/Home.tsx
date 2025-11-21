@@ -160,7 +160,7 @@ function HomeContent() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-green-600">Peso Total</p>
-                    <p className="text-3xl font-bold text-green-900">{stats.totalWeight.toFixed(2)}</p>
+                    <p className="text-3xl font-bold text-green-900">{stats.totalWeight ? stats.totalWeight.toFixed(2) : '0.00'}</p>
                     <p className="text-xs text-green-500">kilogramos</p>
                   </div>
                   <TrendingUp className="h-12 w-12 text-green-400" />
@@ -171,7 +171,7 @@ function HomeContent() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-green-600">Primera Calidad</p>
-                    <p className="text-3xl font-bold text-green-900">{stats.firstQualityWeight.toFixed(2)}</p>
+                    <p className="text-3xl font-bold text-green-900">{stats.firstQualityWeight ? stats.firstQualityWeight.toFixed(2) : '0.00'}</p>
                     <p className="text-xs text-green-500">kilogramos ({stats.firstQualityPercent}%)</p>
                   </div>
                   <CheckCircle className="h-12 w-12 text-green-400" />
@@ -309,7 +309,7 @@ function HomeContent() {
                 <div className="space-y-6">
                   <div className="border-b border-green-100 pb-4">
                     <p className="text-sm text-green-600 mb-1">Peso</p>
-                    <p className="text-3xl font-bold text-green-900">{(selectedBox.weight / 1000).toFixed(2)} <span className="text-lg">kg</span></p>
+                    <p className="text-3xl font-bold text-green-900">{selectedBox.weight ? (selectedBox.weight / 1000).toFixed(2) : '0.00'} <span className="text-lg">kg</span></p>
                   </div>
                   
                   <div className="space-y-4">

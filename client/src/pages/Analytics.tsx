@@ -176,7 +176,7 @@ function AnalyticsContent() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-green-600">Peso Total</p>
-                    <p className="text-3xl font-bold text-green-900">{stats.totalWeight.toFixed(2)}</p>
+                    <p className="text-3xl font-bold text-green-900">{stats.totalWeight ? stats.totalWeight.toFixed(2) : '0.00'}</p>
                     <p className="text-xs text-green-500">kilogramos</p>
                   </div>
                   <TrendingUp className="h-12 w-12 text-green-400" />
