@@ -279,7 +279,7 @@ function BoxesContent() {
                           </div>
                         </td>
                         <td className="py-3 pr-8 text-right text-sm font-semibold text-green-900">
-                          {(box.weight / 1000).toFixed(2)} kg
+                          {box.weight ? (box.weight / 1000).toFixed(2) : '0.00'} kg
                         </td>
                         <td className="py-3 pr-8 text-sm text-green-900">
                           {new Date(box.submissionTime).toLocaleDateString('es-MX')}
@@ -334,8 +334,8 @@ function BoxesContent() {
                 <div className="space-y-6">
                   <div className="border-b border-green-100 pb-4">
                     <p className="text-sm text-green-600 mb-1">Peso</p>
-                    <p className="text-3xl font-bold text-green-900">{(selectedBox.weight / 1000).toFixed(2)} <span className="text-lg">kg</span></p>
-                    <p className="text-xs text-gray-500">{selectedBox.weight} gramos</p>
+                    <p className="text-3xl font-bold text-green-900">{selectedBox.weight ? (selectedBox.weight / 1000).toFixed(2) : '0.00'} <span className="text-lg">kg</span></p>
+                    <p className="text-xs text-gray-500">{selectedBox.weight || 0} gramos</p>
                   </div>
                   
                   <div className="space-y-4">
