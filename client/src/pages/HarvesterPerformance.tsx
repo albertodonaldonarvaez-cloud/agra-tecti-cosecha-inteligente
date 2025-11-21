@@ -184,6 +184,22 @@ function HarvesterPerformanceContent() {
         scale: 3,
         backgroundColor: '#ffffff',
         logging: false,
+        useCORS: true,
+        allowTaint: true,
+        foreignObjectRendering: false,
+        onclone: (clonedDoc) => {
+          // Forzar todos los elementos a usar colores RGB
+          const elements = clonedDoc.querySelectorAll('*');
+          elements.forEach((el: any) => {
+            const computedStyle = window.getComputedStyle(el);
+            if (computedStyle.backgroundColor && computedStyle.backgroundColor !== 'rgba(0, 0, 0, 0)') {
+              el.style.backgroundColor = computedStyle.backgroundColor;
+            }
+            if (computedStyle.color) {
+              el.style.color = computedStyle.color;
+            }
+          });
+        },
       });
       
       // Formato oficio horizontal: 330mm x 216mm
