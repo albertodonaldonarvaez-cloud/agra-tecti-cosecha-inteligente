@@ -228,7 +228,9 @@ function HomeContent() {
             {chartData.length > 0 && (
                <GlassCard className="p-6">
                 <h3 className="mb-4 text-lg font-semibold text-green-900">Evolución de Calidad (Kilogramos)</h3>
-                <ResponsiveContainer width="100%" height={300}>
+                <div className="w-full overflow-x-auto">
+                  <div style={{ minWidth: chartData.length > 7 ? `${chartData.length * 60}px` : '100%', height: '300px' }}>
+                    <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#d1fae5" />
                     <XAxis dataKey="date" stroke="#059669" />
@@ -265,8 +267,10 @@ function HomeContent() {
                       name="Desperdicio"
                       dot={{ fill: '#ef4444', r: 4 }}
                     />
-                  </LineChart>
-                </ResponsiveContainer>
+                    </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
               </GlassCard>
             )}
           </div>

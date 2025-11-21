@@ -180,27 +180,19 @@ function HarvesterPerformanceContent() {
     if (!chartRef.current) return;
     
     try {
-      const canvas = await html2canvas(chartRef.current, {
-        scale: 3,
+      // Crear un canvas temporal con fondo blanco sólido
+      const tempDiv = document.createElement('div');
+      tempDiv.style.cssText = 'position: absolute; left: -9999px; background: #ffffff; padding: 20px;';
+      tempDiv.innerHTML = chartRef.current.innerHTML;
+      document.body.appendChild(tempDiv);
+      
+      const canvas = await html2canvas(tempDiv, {
+        scale: 2,
         backgroundColor: '#ffffff',
         logging: false,
-        useCORS: true,
-        allowTaint: true,
-        foreignObjectRendering: false,
-        onclone: (clonedDoc) => {
-          // Forzar todos los elementos a usar colores RGB
-          const elements = clonedDoc.querySelectorAll('*');
-          elements.forEach((el: any) => {
-            const computedStyle = window.getComputedStyle(el);
-            if (computedStyle.backgroundColor && computedStyle.backgroundColor !== 'rgba(0, 0, 0, 0)') {
-              el.style.backgroundColor = computedStyle.backgroundColor;
-            }
-            if (computedStyle.color) {
-              el.style.color = computedStyle.color;
-            }
-          });
-        },
       });
+      
+      document.body.removeChild(tempDiv);
       
       // Formato oficio horizontal: 330mm x 216mm
       const pdf = new jsPDF({
@@ -242,18 +234,20 @@ function HarvesterPerformanceContent() {
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
       <div className="container max-w-7xl">
         {/* Header */}
-        <div className="mb-8 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <img src={APP_LOGO} alt="Agratec" className="h-16 w-16" />
-            <div>
-              <h1 className="text-4xl font-bold text-green-900">Rendimiento de Cortadoras</h1>
-              <p className="text-green-700">Análisis detallado del desempeño del personal</p>
+        <div className="mb-8">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-4">
+              <img src={APP_LOGO} alt="Agratec" className="h-12 w-12 md:h-16 md:w-16" />
+              <div>
+                <h1 className="text-2xl font-bold text-green-900 md:text-4xl">Rendimiento de Cortadoras</h1>
+                <p className="text-sm text-green-700 md:text-base">Análisis detallado del desempeño del personal</p>
+              </div>
             </div>
+            <Button onClick={exportToPDF} className="flex items-center gap-2 w-full md:w-auto">
+              <Download className="h-5 w-5" />
+              Exportar Gráfica
+            </Button>
           </div>
-          <Button onClick={exportToPDF} className="flex items-center gap-2">
-            <Download className="h-5 w-5" />
-            Exportar Gráfica
-          </Button>
         </div>
 
         {/* Filtros */}
@@ -301,8 +295,10 @@ function HarvesterPerformanceContent() {
             </p>
           </div>
           {chartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={450}>
-              <BarChart data={chartData}>
+            <div className="w-full overflow-x-auto">
+              <div style={{ minWidth: chartData.length > 5 ? `${chartData.length * 80}px` : '100%', height: '450px' }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#d1fae5" />
                 <XAxis 
                   dataKey="name" 
@@ -330,8 +326,10 @@ function HarvesterPerformanceContent() {
                 />
                 <Bar yAxisId="left" dataKey="cajas" fill="#10b981" name="Total Cajas" radius={[8, 8, 0, 0]} />
                 <Bar yAxisId="right" dataKey="kilos" fill="#f59e0b" name="Total Kilos" radius={[8, 8, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
           ) : (
             <p className="py-12 text-center text-gray-500">No hay datos para mostrar</p>
           )}
@@ -376,18 +374,22 @@ function HarvesterPerformanceContent() {
           
           {startDate && endDate && rangeChartData.length > 0 ? (
             <>
-              <ResponsiveContainer width="100%" height={400}>
-                <BarChart data={rangeChartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#d1fae5" />
-                  <XAxis dataKey="name" stroke="#059669" angle={-45} textAnchor="end" height={100} />
-                  <YAxis yAxisId="left" stroke="#059669" label={{ value: 'Cajas', angle: -90, position: 'insideLeft' }} />
-                  <YAxis yAxisId="right" orientation="right" stroke="#f59e0b" label={{ value: 'Kilogramos', angle: 90, position: 'insideRight' }} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar yAxisId="left" dataKey="cajas" fill="#10b981" name="Total Cajas" />
-                  <Bar yAxisId="right" dataKey="kilos" fill="#f59e0b" name="Total Kilos" />
-                </BarChart>
-              </ResponsiveContainer>
+              <div className="w-full overflow-x-auto">
+                <div style={{ minWidth: rangeChartData.length > 5 ? `${rangeChartData.length * 80}px` : '100%', height: '400px' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={rangeChartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#d1fae5" />
+                      <XAxis dataKey="name" stroke="#059669" angle={-45} textAnchor="end" height={100} />
+                      <YAxis yAxisId="left" stroke="#059669" label={{ value: 'Cajas', angle: -90, position: 'insideLeft' }} />
+                      <YAxis yAxisId="right" orientation="right" stroke="#f59e0b" label={{ value: 'Kilogramos', angle: 90, position: 'insideRight' }} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar yAxisId="left" dataKey="cajas" fill="#10b981" name="Total Cajas" radius={[8, 8, 0, 0]} />
+                      <Bar yAxisId="right" dataKey="kilos" fill="#f59e0b" name="Total Kilos" radius={[8, 8, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
               <p className="mt-4 text-center text-sm text-gray-600">
                 Mostrando {rangeStats.length} cortadoras del {new Date(startDate).toLocaleDateString('es-MX')} al {new Date(endDate).toLocaleDateString('es-MX')}
               </p>
