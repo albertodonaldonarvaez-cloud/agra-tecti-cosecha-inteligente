@@ -17,6 +17,8 @@ interface KoboResult {
   tu_ubicacion: string;
   _attachments?: KoboAttachment[];
   _submission_time: string;
+  start?: string; // Hora de inicio del registro en campo
+  end?: string;   // Hora de fin del registro
 }
 
 interface KoboData {
@@ -74,7 +76,7 @@ export async function processKoboData(data: KoboData) {
           photoUrl: result._attachments?.[0]?.download_url || null,
           latitude,
           longitude,
-          collectedAt: result._submission_time,
+          collectedAt: result.start || result._submission_time,
           rawData: JSON.stringify(result),
         });
         errors.push(`Peso excesivo en caja ${result.escanea_la_caja}: ${weightKg} kg`);
@@ -130,7 +132,7 @@ export async function processKoboData(data: KoboData) {
         photoSmallUrl,
         latitude,
         longitude,
-        submissionTime: (result._submission_time && result._submission_time.trim() !== '') ? new Date(result._submission_time) : new Date(),
+        submissionTime: (result.start && result.start.trim() !== '') ? new Date(result.start) : (result._submission_time && result._submission_time.trim() !== '') ? new Date(result._submission_time) : new Date(),
       }).onDuplicateKeyUpdate({
         set: {
           harvesterId,
@@ -144,7 +146,7 @@ export async function processKoboData(data: KoboData) {
           photoSmallUrl,
           latitude,
           longitude,
-          submissionTime: (result._submission_time && result._submission_time.trim() !== '') ? new Date(result._submission_time) : new Date(),
+          submissionTime: (result.start && result.start.trim() !== '') ? new Date(result.start) : (result._submission_time && result._submission_time.trim() !== '') ? new Date(result._submission_time) : new Date(),
           updatedAt: new Date(),
         },
       });
