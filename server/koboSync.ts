@@ -1,4 +1,4 @@
-import { db } from "./db";
+import { getDb } from "./db";
 import { boxes, harvesters, parcels } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { insertUploadError } from "./db_extended";
