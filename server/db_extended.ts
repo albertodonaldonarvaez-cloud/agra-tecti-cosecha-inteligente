@@ -1,6 +1,6 @@
 import { eq, desc, and, gte, lte } from "drizzle-orm";
 import { getDb } from "./db";
-import { parcels, uploadErrors, uploadBatches, InsertParcel } from "../drizzle/schema";
+import { parcels, uploadErrors, uploadBatches, InsertParcel, InsertUploadError } from "../drizzle/schema";
 
 // ============================================
 // FUNCIONES PARA PARCELAS
@@ -116,6 +116,12 @@ export async function clearAllErrors() {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   await db.delete(uploadErrors);
+}
+
+export async function insertUploadError(error: InsertUploadError) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.insert(uploadErrors).values(error);
 }
 
 // ============================================
