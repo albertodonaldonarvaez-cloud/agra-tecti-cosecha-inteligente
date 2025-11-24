@@ -106,7 +106,10 @@ function BoxesContent() {
     if (!boxes) return [];
     const parcels = new Map<string, string>();
     boxes.forEach(box => {
-      parcels.set(box.parcelCode, box.parcelName);
+      // Solo agregar si el código de parcela no está vacío
+      if (box.parcelCode && box.parcelCode.trim() !== '') {
+        parcels.set(box.parcelCode, box.parcelName);
+      }
     });
     return Array.from(parcels.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [boxes]);
