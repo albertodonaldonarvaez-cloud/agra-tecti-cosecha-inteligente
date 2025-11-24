@@ -1,7 +1,7 @@
 import { db } from "./db";
 import { boxes, harvesters, parcels } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
-import { insertUploadError } from "./db_extended";a";
+import { insertUploadError } from "./db_extended";
 
 interface KoboAttachment {
   download_url: string;
