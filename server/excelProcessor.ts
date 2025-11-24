@@ -304,6 +304,22 @@ export async function processExcelFile(
         set: { updatedAt: new Date() },
       });
 
+      // Verificar si la caja ya existe
+      const { eq } = await import("drizzle-orm");
+      const existingBox = await db.select().from(boxes).where(eq(boxes.boxCode, boxCode)).limit(1);
+      
+      if (existingBox.length > 0) {
+        // Caja duplicada - registrar error
+        errors.push({
+          type: 'caja_duplicada',
+          boxCode,
+          message: `Caja duplicada: ${boxCode}. Ya existe un registro con este código. Valida manualmente cuál es correcto.`,
+          rowData: row
+        });
+        errorRows++;
+        continue;
+      }
+
       // Insertar caja
       await db.insert(boxes).values({
         koboId: row['_id'] || null,

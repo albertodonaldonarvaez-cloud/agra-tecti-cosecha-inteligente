@@ -117,7 +117,34 @@ export async function processKoboData(data: KoboData) {
       // Usar _id como koboId
       const koboId = (result as any)._id || 0;
 
-      // Insertar o actualizar caja
+      // Verificar si la caja ya existe
+      const { eq } = await import("drizzle-orm");
+      const existingBox = await db.select().from(boxes).where(eq(boxes.boxCode, boxCode)).limit(1);
+      
+      if (existingBox.length > 0) {
+        // Caja duplicada - enviar a errores de validación
+        const { insertUploadError } = await import("./db_extended");
+        await insertUploadError({
+          batchId: 'kobo-sync',
+          fileName: 'Sincronización Kobo',
+          rowNumber: 0,
+          errorType: 'caja_duplicada',
+          errorMessage: `Caja duplicada: ${boxCode}. Ya existe un registro con este código. Valida manualmente cuál es correcto.`,
+          boxCode,
+          parcelCode,
+          harvesterId,
+          weightKg,
+          photoUrl: result._attachments?.[0]?.download_url || null,
+          latitude,
+          longitude,
+          collectedAt: result.start || result._submission_time,
+          rawData: JSON.stringify(result),
+        });
+        errors.push(`Caja duplicada: ${boxCode}`);
+        continue; // No insertar, solo registrar error
+      }
+
+      // Insertar caja (sin onDuplicateKeyUpdate)
       await db.insert(boxes).values({
         koboId,
         boxCode,
@@ -133,22 +160,6 @@ export async function processKoboData(data: KoboData) {
         latitude,
         longitude,
         submissionTime: (result.start && result.start.trim() !== '') ? new Date(result.start) : (result._submission_time && result._submission_time.trim() !== '') ? new Date(result._submission_time) : new Date(),
-      }).onDuplicateKeyUpdate({
-        set: {
-          harvesterId,
-          parcelCode,
-          parcelName,
-          weight,
-          photoFilename,
-          photoUrl,
-          photoLargeUrl,
-          photoMediumUrl,
-          photoSmallUrl,
-          latitude,
-          longitude,
-          submissionTime: (result.start && result.start.trim() !== '') ? new Date(result.start) : (result._submission_time && result._submission_time.trim() !== '') ? new Date(result._submission_time) : new Date(),
-          updatedAt: new Date(),
-        },
       });
 
       processedCount++;
