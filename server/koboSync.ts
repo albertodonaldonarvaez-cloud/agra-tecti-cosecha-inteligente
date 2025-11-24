@@ -1,5 +1,7 @@
-import { getDb } from "./db";
+import { db } from "./db";
 import { boxes, harvesters, parcels } from "../drizzle/schema";
+import { eq } from "drizzle-orm";
+import { insertUploadError } from "./db_extended";a";
 
 interface KoboAttachment {
   download_url: string;
@@ -118,12 +120,10 @@ export async function processKoboData(data: KoboData) {
       const koboId = (result as any)._id || 0;
 
       // Verificar si la caja ya existe
-      const { eq } = await import("drizzle-orm");
       const existingBox = await db.select().from(boxes).where(eq(boxes.boxCode, boxCode)).limit(1);
       
       if (existingBox.length > 0) {
         // Caja duplicada - enviar a errores de validación
-        const { insertUploadError } = await import("./db_extended");
         await insertUploadError({
           batchId: 'kobo-sync',
           fileName: 'Sincronización Kobo',
