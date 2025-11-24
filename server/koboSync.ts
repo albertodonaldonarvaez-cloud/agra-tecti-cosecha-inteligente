@@ -48,14 +48,38 @@ export async function processKoboData(data: KoboData) {
       const boxNumber = boxParts[1];
       const boxCode = result.escanea_la_caja;
 
+      // Parsear ubicación (necesario antes de validaciones)
+      const locationParts = result.tu_ubicacion.split(" ");
+      const latitude = locationParts[0] || null;
+      const longitude = locationParts[1] || null;
+
       // Parsear peso (convertir de kg a gramos para almacenar como entero)
       const weightKg = parseFloat(result.peso_de_la_caja);
       const weight = Math.round(weightKg * 1000); // Convertir a gramos
 
-      // Parsear ubicación
-      const locationParts = result.tu_ubicacion.split(" ");
-      const latitude = locationParts[0] || null;
-      const longitude = locationParts[1] || null;
+      // Validar peso máximo (20 kg = 20000 gramos)
+      if (weight > 20000) {
+        // Registrar error de validación
+        const { insertUploadError } = await import("./db_extended");
+        await insertUploadError({
+          batchId: 'kobo-sync',
+          fileName: 'Sincronización Kobo',
+          rowNumber: 0,
+          errorType: 'peso_excesivo',
+          errorMessage: `Peso excesivo: ${weightKg} kg (máximo 20 kg). Probablemente falta punto decimal.`,
+          boxCode: result.escanea_la_caja,
+          parcelCode,
+          harvesterId,
+          weightKg,
+          photoUrl: result._attachments?.[0]?.download_url || null,
+          latitude,
+          longitude,
+          collectedAt: result._submission_time,
+          rawData: JSON.stringify(result),
+        });
+        errors.push(`Peso excesivo en caja ${result.escanea_la_caja}: ${weightKg} kg`);
+        continue; // No insertar la caja, solo el error
+      }
 
        // Extraer URLs de fotos
       let photoFilename = result.foto_de_la_caja || null;

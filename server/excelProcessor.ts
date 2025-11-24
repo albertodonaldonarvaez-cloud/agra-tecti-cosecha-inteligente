@@ -238,6 +238,18 @@ export async function processExcelFile(
         continue;
       }
       const weight = Math.round(weightKg * 1000); // Convertir a gramos
+      
+      // Validar peso máximo (20 kg = 20000 gramos)
+      if (weight > 20000) {
+        errors.push({
+          type: 'peso_excesivo',
+          boxCode,
+          message: `Peso excesivo: ${weightKg} kg (máximo 20 kg). Probablemente falta punto decimal.`,
+          rowData: row
+        });
+        errorRows++;
+        continue;
+      }
 
       // Construir fecha
       let submissionTime: Date;
