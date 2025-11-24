@@ -68,7 +68,8 @@ export const appRouter = router({
       }),
 
     sync: adminProcedure
-      .mutation(async () => {
+      .input(z.object({ date: z.string().optional() }).optional())
+      .mutation(async ({ input }) => {
         const { syncFromKoboAPI } = await import("./koboSync");
         const config = await db.getApiConfig();
         
@@ -79,7 +80,12 @@ export const appRouter = router({
           });
         }
 
-        const result = await syncFromKoboAPI(config.apiUrl, config.apiToken, config.assetId);
+        const result = await syncFromKoboAPI(
+          config.apiUrl, 
+          config.apiToken, 
+          config.assetId,
+          input?.date
+        );
         await db.updateLastSync();
         
         return result;

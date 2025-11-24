@@ -19,6 +19,7 @@ export default function Settings() {
   const [jsonData, setJsonData] = useState("");
   const [excelFile, setExcelFile] = useState<File | null>(null);
   const [downloadPhotos, setDownloadPhotos] = useState(true);
+  const [syncDate, setSyncDate] = useState("");
 
   const { data: config } = trpc.apiConfig.get.useQuery(undefined, {
     enabled: !!user && user.role === "admin",
@@ -122,7 +123,13 @@ export default function Settings() {
   };
 
   const handleSync = () => {
-    syncFromKobo.mutate();
+    if (syncDate) {
+      // Sincronizar solo un día específico
+      syncFromKobo.mutate({ date: syncDate });
+    } else {
+      // Sincronizar todo
+      syncFromKobo.mutate();
+    }
   };
 
   const handleUploadExcel = async () => {
@@ -286,12 +293,29 @@ export default function Settings() {
               Sincroniza los datos más recientes desde KoboToolbox
             </p>
 
+            <div className="mb-4">
+              <Label htmlFor="syncDate">Fecha Específica (Opcional)</Label>
+              <Input
+                id="syncDate"
+                type="date"
+                value={syncDate}
+                onChange={(e) => setSyncDate(e.target.value)}
+                placeholder="Dejar vacío para sincronizar todo"
+                className="mt-1"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                {syncDate 
+                  ? `Sincronizará solo los datos del ${new Date(syncDate + 'T00:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}`
+                  : "Dejar vacío para sincronizar todos los datos disponibles"}
+              </p>
+            </div>
+
             <Button 
               onClick={handleSync} 
               disabled={syncFromKobo.isPending}
               className="w-full"
             >
-              {syncFromKobo.isPending ? "Sincronizando..." : "Sincronizar Datos"}
+              {syncFromKobo.isPending ? "Sincronizando..." : syncDate ? "Sincronizar Día Específico" : "Sincronizar Todos los Datos"}
             </Button>
           </GlassCard>
 

@@ -139,14 +139,35 @@ export async function processKoboData(data: KoboData) {
   };
 }
 
-export async function syncFromKoboAPI(apiUrl: string, apiToken: string, assetId: string) {
+export async function syncFromKoboAPI(apiUrl: string, apiToken: string, assetId: string, date?: string) {
   try {
-    console.log('\ud83d\udd04 Iniciando sincronización con KoboToolbox...');
-    console.log('\ud83c\udf10 API URL:', apiUrl);
-    console.log('\ud83d\udcce Asset ID:', assetId);
+    console.log('🔄 Iniciando sincronización con KoboToolbox...');
+    console.log('🌐 API URL:', apiUrl);
+    console.log('📎 Asset ID:', assetId);
+    if (date) {
+      console.log('📅 Fecha específica:', date);
+    }
     
-    const url = `${apiUrl}/api/v2/assets/${assetId}/data.json`;
-    console.log('\ud83d\udd17 URL completa:', url);
+    let url = `${apiUrl}/api/v2/assets/${assetId}/data.json`;
+    
+    // Si se especifica una fecha, agregar query para filtrar por día
+    if (date) {
+      // Construir rango de fecha en zona horaria de México (UTC-6)
+      const startDate = `${date}T00:00:00`;
+      const endDate = `${date}T23:59:59`;
+      
+      const query = JSON.stringify({
+        "_submission_time": {
+          "$gte": startDate,
+          "$lt": endDate
+        }
+      });
+      
+      url += `?query=${encodeURIComponent(query)}`;
+      console.log('🔍 Query aplicado:', query);
+    }
+    
+    console.log('🔗 URL completa:', url);
     
     const response = await fetch(url, {
       headers: {
