@@ -133,6 +133,45 @@ export const appRouter = router({
         await db.clearAllBoxes();
         return { success: true, message: "Todas las cajas han sido eliminadas" };
       }),
+
+    update: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        boxCode: z.string(),
+        harvesterId: z.number(),
+        parcelCode: z.string(),
+        parcelName: z.string(),
+        weight: z.number(),
+        submissionTime: z.string(),
+      }))
+      .mutation(async ({ input }) => {
+        const database = await getDb();
+        if (!database) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available" });
+        
+        await database.update(boxes)
+          .set({
+            boxCode: input.boxCode,
+            harvesterId: input.harvesterId,
+            parcelCode: input.parcelCode,
+            parcelName: input.parcelName,
+            weight: input.weight,
+            submissionTime: new Date(input.submissionTime),
+            updatedAt: new Date(),
+          })
+          .where(eq(boxes.id, input.id));
+        
+        return { success: true };
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const database = await getDb();
+        if (!database) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available" });
+        
+        await database.delete(boxes).where(eq(boxes.id, input.id));
+        return { success: true };
+      }),
   }),
 
   parcels: router({

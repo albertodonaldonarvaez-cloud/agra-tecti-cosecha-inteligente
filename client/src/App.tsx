@@ -14,6 +14,7 @@ import Harvesters from "./pages/Harvesters";
 import HarvesterPerformance from "./pages/HarvesterPerformance";
 import Parcels from "./pages/Parcels";
 import UploadErrors from "./pages/UploadErrors";
+import BoxEditor from "./pages/BoxEditor";
 import Login from "./pages/Login";
 import { FloatingNav } from "./components/FloatingNav";
 import { useAuth } from "./_core/hooks/useAuth";
@@ -45,6 +46,7 @@ function Router() {
         <Route path="/performance" component={HarvesterPerformance} />
         <Route path="/parcels" component={Parcels} />
         <Route path="/errors" component={UploadErrors} />
+        <Route path="/editor" component={BoxEditor} />
         <Route path="/users" component={Users} />
         <Route path="/settings" component={Settings} />
         <Route path={"/404"} component={NotFound} />

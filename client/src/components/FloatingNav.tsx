@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { BarChart3, Box, Settings, Users, Scissors, LogOut, TrendingUp, Calendar, MapPin, AlertCircle, Target, ChevronLeft, ChevronRight } from "lucide-react";
+import { BarChart3, Box, Settings, Users, Scissors, LogOut, TrendingUp, Calendar, MapPin, AlertCircle, Target, ChevronLeft, ChevronRight, Edit } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
@@ -42,6 +42,7 @@ export function FloatingNav({ isAdmin = false }: FloatingNavProps) {
     { to: "/harvesters", icon: Scissors, label: "Cortadoras", adminOnly: true, permission: "canViewHarvesters" },
     { to: "/parcels", icon: MapPin, label: "Parcelas", adminOnly: true, permission: "canViewParcels" },
     { to: "/errors", icon: AlertCircle, label: "Errores", adminOnly: true, permission: "canViewErrors" },
+    { to: "/editor", icon: Edit, label: "Editor", adminOnly: true },
     { to: "/users", icon: Users, label: "Usuarios", adminOnly: true },
     { to: "/settings", icon: Settings, label: "Configuración", adminOnly: true },
   ];
