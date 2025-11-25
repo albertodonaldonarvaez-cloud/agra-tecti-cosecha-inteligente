@@ -5,7 +5,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Pencil, Trash2, Save, X, Search, Image as ImageIcon } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
-import { useToast } from "@/hooks/use-toast";
+import { toast } from "sonner";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 
@@ -25,28 +25,27 @@ interface EditingBox extends Box {
 }
 
 export default function BoxEditor() {
-  const { toast } = useToast();
   const { data: boxes, isLoading, refetch } = trpc.boxes.list.useQuery();
   const { data: harvesters } = trpc.harvesters.list.useQuery();
   const { data: parcels } = trpc.parcels.list.useQuery();
   
   const updateBox = trpc.boxes.update.useMutation({
     onSuccess: () => {
-      toast({ title: "✅ Caja actualizada correctamente" });
+      toast.success("✅ Caja actualizada correctamente");
       refetch();
     },
     onError: (error) => {
-      toast({ title: "❌ Error al actualizar", description: error.message, variant: "destructive" });
+      toast.error("❌ Error al actualizar", { description: error.message });
     },
   });
 
   const deleteBox = trpc.boxes.delete.useMutation({
     onSuccess: () => {
-      toast({ title: "✅ Caja eliminada correctamente" });
+      toast.success("✅ Caja eliminada correctamente");
       refetch();
     },
     onError: (error) => {
-      toast({ title: "❌ Error al eliminar", description: error.message, variant: "destructive" });
+      toast.error("❌ Error al eliminar", { description: error.message });
     },
   });
 
