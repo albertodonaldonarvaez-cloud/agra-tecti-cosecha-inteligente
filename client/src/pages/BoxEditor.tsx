@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { trpc } from "../lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -29,7 +29,7 @@ export default function BoxEditor() {
   
   const updateBox = trpc.boxes.update.useMutation({
     onSuccess: () => {
-      toast.success("✅ Caja actualizada correctamente");
+      toast.success("✅ Caja actualizada");
       refetch();
     },
     onError: (error) => {
@@ -39,7 +39,7 @@ export default function BoxEditor() {
 
   const deleteBox = trpc.boxes.delete.useMutation({
     onSuccess: () => {
-      toast.success("✅ Caja eliminada correctamente");
+      toast.success("✅ Caja eliminada");
       refetch();
     },
     onError: (error) => {
@@ -50,6 +50,8 @@ export default function BoxEditor() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<Partial<Box>>({});
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState(false);
+  const [photoZoom, setPhotoZoom] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   
   // Filtros por columna
@@ -62,36 +64,35 @@ export default function BoxEditor() {
     date: "",
   });
 
-  // Datos filtrados
+  // Datos filtrados (memoizado)
   const filteredBoxes = useMemo(() => {
     if (!boxes) return [];
     
     return boxes.filter((box) => {
-      const matchBoxCode = box.boxCode.toLowerCase().includes(filters.boxCode.toLowerCase());
-      const matchParcelCode = box.parcelCode.toLowerCase().includes(filters.parcelCode.toLowerCase());
-      const matchParcelName = box.parcelName.toLowerCase().includes(filters.parcelName.toLowerCase());
-      const matchHarvester = filters.harvesterId === "" || box.harvesterId.toString() === filters.harvesterId;
-      const matchWeight = filters.weight === "" || (box.weight / 1000).toString().includes(filters.weight);
-      const matchDate = filters.date === "" || format(new Date(box.submissionTime), "yyyy-MM-dd").includes(filters.date);
-      
-      return matchBoxCode && matchParcelCode && matchParcelName && matchHarvester && matchWeight && matchDate;
+      if (filters.boxCode && !box.boxCode.toLowerCase().includes(filters.boxCode.toLowerCase())) return false;
+      if (filters.parcelCode && !box.parcelCode.toLowerCase().includes(filters.parcelCode.toLowerCase())) return false;
+      if (filters.parcelName && !box.parcelName.toLowerCase().includes(filters.parcelName.toLowerCase())) return false;
+      if (filters.harvesterId && box.harvesterId.toString() !== filters.harvesterId) return false;
+      if (filters.weight && !(box.weight / 1000).toString().includes(filters.weight)) return false;
+      if (filters.date && !format(new Date(box.submissionTime), "yyyy-MM-dd").includes(filters.date)) return false;
+      return true;
     });
   }, [boxes, filters]);
 
-  // Paginación
+  // Paginación (memoizado)
   const totalPages = Math.ceil(filteredBoxes.length / ITEMS_PER_PAGE);
   const paginatedBoxes = useMemo(() => {
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
     return filteredBoxes.slice(startIndex, startIndex + ITEMS_PER_PAGE);
   }, [filteredBoxes, currentPage]);
 
-  // Reset página cuando cambian filtros
-  const updateFilters = (newFilters: typeof filters) => {
+  // Callbacks memoizados
+  const updateFilters = useCallback((newFilters: typeof filters) => {
     setFilters(newFilters);
     setCurrentPage(1);
-  };
+  }, []);
 
-  const startEdit = (box: Box) => {
+  const startEdit = useCallback((box: Box) => {
     setEditingId(box.id);
     setEditForm({
       id: box.id,
@@ -102,14 +103,14 @@ export default function BoxEditor() {
       weight: box.weight,
       submissionTime: box.submissionTime,
     });
-  };
+  }, []);
 
-  const cancelEdit = () => {
+  const cancelEdit = useCallback(() => {
     setEditingId(null);
     setEditForm({});
-  };
+  }, []);
 
-  const saveEdit = async () => {
+  const saveEdit = useCallback(async () => {
     if (!editForm.id) return;
     
     await updateBox.mutateAsync({
@@ -123,15 +124,15 @@ export default function BoxEditor() {
     });
     
     cancelEdit();
-  };
+  }, [editForm, updateBox, cancelEdit]);
 
-  const handleDelete = async (id: number, boxCode: string) => {
-    if (confirm(`¿Estás seguro de eliminar la caja ${boxCode}?`)) {
+  const handleDelete = useCallback(async (id: number, boxCode: string) => {
+    if (confirm(`¿Eliminar caja ${boxCode}?`)) {
       await deleteBox.mutateAsync({ id });
     }
-  };
+  }, [deleteBox]);
 
-  const clearFilters = () => {
+  const clearFilters = useCallback(() => {
     updateFilters({
       boxCode: "",
       parcelCode: "",
@@ -140,28 +141,39 @@ export default function BoxEditor() {
       weight: "",
       date: "",
     });
-  };
+  }, [updateFilters]);
 
-  const getHarvesterName = (harvesterId: number) => {
+  const getHarvesterName = useCallback((harvesterId: number) => {
     const harvester = harvesters?.find((h) => h.number === harvesterId);
     if (harvester?.customName) return harvester.customName;
     if (harvesterId === 97) return "Recolecta";
     if (harvesterId === 98) return "Segunda";
     if (harvesterId === 99) return "Desperdicio";
     return `Cortadora ${harvesterId}`;
-  };
+  }, [harvesters]);
 
-  const getPhotoUrl = (box: Box) => {
-    // Prioridad: photoUrl > construir desde photoFilename
+  const getPhotoUrl = useCallback((box: Box) => {
     if (box.photoUrl) return box.photoUrl;
     if (box.photoFilename) return `/app/photos/${box.photoFilename}`;
     return null;
-  };
+  }, []);
+
+  const openPhoto = useCallback((url: string) => {
+    setSelectedPhoto(url);
+    setPhotoError(false);
+    setPhotoZoom(false);
+  }, []);
+
+  const closePhoto = useCallback(() => {
+    setSelectedPhoto(null);
+    setPhotoError(false);
+    setPhotoZoom(false);
+  }, []);
 
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-lg">Cargando cajas...</div>
+        <div className="text-lg">Cargando...</div>
       </div>
     );
   }
@@ -173,84 +185,61 @@ export default function BoxEditor() {
           <CardTitle className="flex items-center justify-between">
             <span>Editor de Cajas</span>
             <div className="text-sm font-normal text-muted-foreground">
-              {filteredBoxes.length} de {boxes?.length || 0} cajas
+              {filteredBoxes.length} de {boxes?.length || 0}
             </div>
           </CardTitle>
         </CardHeader>
         <CardContent>
           {/* Filtros */}
-          <div className="mb-6 p-4 bg-muted/50 rounded-lg space-y-3">
+          <div className="mb-4 p-4 bg-muted/50 rounded-lg space-y-3">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-semibold flex items-center gap-2">
                 <Search className="h-4 w-4" />
-                Filtros por Columna
+                Filtros
               </h3>
               <Button variant="outline" size="sm" onClick={clearFilters}>
-                Limpiar Filtros
+                Limpiar
               </Button>
             </div>
             
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-              <div>
-                <label className="text-xs font-medium mb-1 block">Código Caja</label>
-                <Input
-                  placeholder="Ej: 01-123456"
-                  value={filters.boxCode}
-                  onChange={(e) => updateFilters({ ...filters, boxCode: e.target.value })}
-                  className="h-9"
-                />
-              </div>
-              
-              <div>
-                <label className="text-xs font-medium mb-1 block">Código Parcela</label>
-                <Input
-                  placeholder="Ej: A1"
-                  value={filters.parcelCode}
-                  onChange={(e) => updateFilters({ ...filters, parcelCode: e.target.value })}
-                  className="h-9"
-                />
-              </div>
-              
-              <div>
-                <label className="text-xs font-medium mb-1 block">Nombre Parcela</label>
-                <Input
-                  placeholder="Buscar..."
-                  value={filters.parcelName}
-                  onChange={(e) => updateFilters({ ...filters, parcelName: e.target.value })}
-                  className="h-9"
-                />
-              </div>
-              
-              <div>
-                <label className="text-xs font-medium mb-1 block">Cortadora</label>
-                <Input
-                  placeholder="Número"
-                  type="number"
-                  value={filters.harvesterId}
-                  onChange={(e) => updateFilters({ ...filters, harvesterId: e.target.value })}
-                  className="h-9"
-                />
-              </div>
-              
-              <div>
-                <label className="text-xs font-medium mb-1 block">Peso (kg)</label>
-                <Input
-                  placeholder="Ej: 15"
-                  value={filters.weight}
-                  onChange={(e) => updateFilters({ ...filters, weight: e.target.value })}
-                  className="h-9"
-                />
-              </div>
-              
-              <div>
-                <label className="text-xs font-medium mb-1 block">Fecha</label>
-                <Input
-                  placeholder="YYYY-MM-DD"
-                  value={filters.date}
-                  onChange={(e) => updateFilters({ ...filters, date: e.target.value })}
-                  className="h-9"
-                />
-              </div>
+              <Input
+                placeholder="Código Caja"
+                value={filters.boxCode}
+                onChange={(e) => updateFilters({ ...filters, boxCode: e.target.value })}
+                className="h-9"
+              />
+              <Input
+                placeholder="Código Parcela"
+                value={filters.parcelCode}
+                onChange={(e) => updateFilters({ ...filters, parcelCode: e.target.value })}
+                className="h-9"
+              />
+              <Input
+                placeholder="Nombre Parcela"
+                value={filters.parcelName}
+                onChange={(e) => updateFilters({ ...filters, parcelName: e.target.value })}
+                className="h-9"
+              />
+              <Input
+                placeholder="Cortadora #"
+                type="number"
+                value={filters.harvesterId}
+                onChange={(e) => updateFilters({ ...filters, harvesterId: e.target.value })}
+                className="h-9"
+              />
+              <Input
+                placeholder="Peso (kg)"
+                value={filters.weight}
+                onChange={(e) => updateFilters({ ...filters, weight: e.target.value })}
+                className="h-9"
+              />
+              <Input
+                placeholder="Fecha"
+                value={filters.date}
+                onChange={(e) => updateFilters({ ...filters, date: e.target.value })}
+                className="h-9"
+              />
             </div>
           </div>
 
@@ -258,7 +247,7 @@ export default function BoxEditor() {
           {totalPages > 1 && (
             <div className="flex items-center justify-between mb-4">
               <div className="text-sm text-muted-foreground">
-                Página {currentPage} de {totalPages}
+                Pág {currentPage} de {totalPages}
               </div>
               <div className="flex gap-2">
                 <Button
@@ -268,15 +257,24 @@ export default function BoxEditor() {
                   disabled={currentPage === 1}
                 >
                   <ChevronLeft className="h-4 w-4" />
-                  Anterior
                 </Button>
+                <Input
+                  type="number"
+                  min={1}
+                  max={totalPages}
+                  value={currentPage}
+                  onChange={(e) => {
+                    const page = parseInt(e.target.value);
+                    if (page >= 1 && page <= totalPages) setCurrentPage(page);
+                  }}
+                  className="h-9 w-16 text-center"
+                />
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                   disabled={currentPage === totalPages}
                 >
-                  Siguiente
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
@@ -288,14 +286,14 @@ export default function BoxEditor() {
             <table className="w-full border-collapse">
               <thead>
                 <tr className="border-b bg-muted/50">
-                  <th className="p-3 text-left text-sm font-semibold">Código Caja</th>
-                  <th className="p-3 text-left text-sm font-semibold">Parcela</th>
-                  <th className="p-3 text-left text-sm font-semibold">Nombre Parcela</th>
-                  <th className="p-3 text-left text-sm font-semibold">Cortadora</th>
-                  <th className="p-3 text-left text-sm font-semibold">Peso (kg)</th>
-                  <th className="p-3 text-left text-sm font-semibold">Fecha/Hora</th>
-                  <th className="p-3 text-left text-sm font-semibold">Foto</th>
-                  <th className="p-3 text-center text-sm font-semibold">Acciones</th>
+                  <th className="p-2 text-left text-xs font-semibold">Código</th>
+                  <th className="p-2 text-left text-xs font-semibold">Parcela</th>
+                  <th className="p-2 text-left text-xs font-semibold">Nombre</th>
+                  <th className="p-2 text-left text-xs font-semibold">Cortadora</th>
+                  <th className="p-2 text-left text-xs font-semibold">Peso</th>
+                  <th className="p-2 text-left text-xs font-semibold">Fecha</th>
+                  <th className="p-2 text-center text-xs font-semibold">Foto</th>
+                  <th className="p-2 text-center text-xs font-semibold">Acciones</th>
                 </tr>
               </thead>
               <tbody>
@@ -305,102 +303,103 @@ export default function BoxEditor() {
                   
                   return (
                     <tr key={box.id} className="border-b hover:bg-muted/30">
-                      <td className="p-3">
+                      <td className="p-2">
                         {isEditing ? (
                           <Input
                             value={editForm.boxCode}
                             onChange={(e) => setEditForm({ ...editForm, boxCode: e.target.value })}
-                            className="h-8"
+                            className="h-8 text-sm"
                           />
                         ) : (
-                          <span className="font-mono">{box.boxCode}</span>
+                          <span className="font-mono text-sm">{box.boxCode}</span>
                         )}
                       </td>
                       
-                      <td className="p-3">
+                      <td className="p-2">
                         {isEditing ? (
                           <Input
                             value={editForm.parcelCode}
                             onChange={(e) => setEditForm({ ...editForm, parcelCode: e.target.value })}
-                            className="h-8"
+                            className="h-8 text-sm"
                           />
                         ) : (
-                          <span className="font-mono">{box.parcelCode}</span>
+                          <span className="text-sm">{box.parcelCode}</span>
                         )}
                       </td>
                       
-                      <td className="p-3">
+                      <td className="p-2">
                         {isEditing ? (
                           <Input
                             value={editForm.parcelName}
                             onChange={(e) => setEditForm({ ...editForm, parcelName: e.target.value })}
-                            className="h-8"
+                            className="h-8 text-sm"
                           />
                         ) : (
-                          <span>{box.parcelName}</span>
+                          <span className="text-sm">{box.parcelName}</span>
                         )}
                       </td>
                       
-                      <td className="p-3">
+                      <td className="p-2">
                         {isEditing ? (
                           <Input
                             type="number"
                             value={editForm.harvesterId}
                             onChange={(e) => setEditForm({ ...editForm, harvesterId: parseInt(e.target.value) })}
-                            className="h-8"
+                            className="h-8 text-sm"
                           />
                         ) : (
-                          <span>{getHarvesterName(box.harvesterId)}</span>
+                          <span className="text-sm">{getHarvesterName(box.harvesterId)}</span>
                         )}
                       </td>
                       
-                      <td className="p-3">
+                      <td className="p-2">
                         {isEditing ? (
                           <Input
                             type="number"
                             step="0.01"
                             value={(editForm.weight! / 1000).toFixed(2)}
                             onChange={(e) => setEditForm({ ...editForm, weight: Math.round(parseFloat(e.target.value) * 1000) })}
-                            className="h-8"
+                            className="h-8 text-sm"
                           />
                         ) : (
-                          <span className={box.weight > 20000 ? "text-red-600 font-bold" : ""}>
+                          <span className={`text-sm ${box.weight > 20000 ? "text-red-600 font-bold" : ""}`}>
                             {(box.weight / 1000).toFixed(2)}
                           </span>
                         )}
                       </td>
                       
-                      <td className="p-3">
+                      <td className="p-2">
                         {isEditing ? (
                           <Input
                             type="datetime-local"
                             value={format(new Date(editForm.submissionTime!), "yyyy-MM-dd'T'HH:mm")}
                             onChange={(e) => setEditForm({ ...editForm, submissionTime: new Date(e.target.value) })}
-                            className="h-8"
+                            className="h-8 text-sm"
                           />
                         ) : (
-                          <span className="text-sm">
-                            {format(new Date(box.submissionTime), "dd/MM/yyyy HH:mm", { locale: es })}
+                          <span className="text-xs">
+                            {format(new Date(box.submissionTime), "dd/MM/yy HH:mm", { locale: es })}
                           </span>
                         )}
                       </td>
                       
-                      <td className="p-3 text-center">
+                      <td className="p-2 text-center">
                         {photoUrl ? (
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => setSelectedPhoto(photoUrl)}
+                            onClick={() => openPhoto(photoUrl)}
+                            className="h-8 w-8 p-0"
                           >
                             <ImageIcon className="h-4 w-4" />
                           </Button>
                         ) : (
-                          <span className="text-xs text-muted-foreground">Sin foto</span>
+                          <span className="text-xs text-muted-foreground">-</span>
                         )}
                       </td>
                       
-                      <td className="p-3">
-                        <div className="flex items-center justify-center gap-2">
+                      <td className="p-2">
+                        <div className="flex items-center justify-center gap-1">
                           {isEditing ? (
                             <>
                               <Button
@@ -408,6 +407,7 @@ export default function BoxEditor() {
                                 size="sm"
                                 onClick={saveEdit}
                                 disabled={updateBox.isPending}
+                                className="h-8 w-8 p-0"
                               >
                                 <Save className="h-4 w-4" />
                               </Button>
@@ -415,6 +415,7 @@ export default function BoxEditor() {
                                 variant="outline"
                                 size="sm"
                                 onClick={cancelEdit}
+                                className="h-8 w-8 p-0"
                               >
                                 <X className="h-4 w-4" />
                               </Button>
@@ -425,6 +426,7 @@ export default function BoxEditor() {
                                 variant="outline"
                                 size="sm"
                                 onClick={() => startEdit(box)}
+                                className="h-8 w-8 p-0"
                               >
                                 <Pencil className="h-4 w-4" />
                               </Button>
@@ -433,6 +435,7 @@ export default function BoxEditor() {
                                 size="sm"
                                 onClick={() => handleDelete(box.id, box.boxCode)}
                                 disabled={deleteBox.isPending}
+                                className="h-8 w-8 p-0"
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
@@ -448,90 +451,61 @@ export default function BoxEditor() {
           </div>
 
           {filteredBoxes.length === 0 && (
-            <div className="text-center py-12 text-muted-foreground">
-              No se encontraron cajas con los filtros aplicados
+            <div className="text-center py-8 text-muted-foreground text-sm">
+              No se encontraron cajas
             </div>
           )}
 
           {/* Paginación inferior */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between mt-4">
-              <div className="text-sm text-muted-foreground">
-                Mostrando {((currentPage - 1) * ITEMS_PER_PAGE) + 1} - {Math.min(currentPage * ITEMS_PER_PAGE, filteredBoxes.length)} de {filteredBoxes.length}
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  Anterior
-                </Button>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm">Página</span>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={totalPages}
-                    value={currentPage}
-                    onChange={(e) => {
-                      const page = parseInt(e.target.value);
-                      if (page >= 1 && page <= totalPages) {
-                        setCurrentPage(page);
-                      }
-                    }}
-                    className="h-8 w-16 text-center"
-                  />
-                  <span className="text-sm">de {totalPages}</span>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                >
-                  Siguiente
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
+            <div className="flex items-center justify-center mt-4 gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-sm">
+                {((currentPage - 1) * ITEMS_PER_PAGE) + 1}-{Math.min(currentPage * ITEMS_PER_PAGE, filteredBoxes.length)} de {filteredBoxes.length}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Modal de foto con zoom */}
-      <Dialog open={!!selectedPhoto} onOpenChange={() => setSelectedPhoto(null)}>
+      {/* Modal de foto */}
+      <Dialog open={!!selectedPhoto} onOpenChange={closePhoto}>
         <DialogContent className="max-w-4xl">
           <DialogHeader>
             <DialogTitle>Foto de la Caja</DialogTitle>
           </DialogHeader>
           <div className="relative overflow-auto max-h-[70vh]">
-            {selectedPhoto && (
-              <img
-                src={selectedPhoto}
-                alt="Foto de caja"
-                className="w-full h-auto rounded-lg cursor-zoom-in transition-transform"
-                onClick={(e) => {
-                  const img = e.currentTarget;
-                  if (img.style.transform === "scale(2)") {
-                    img.style.transform = "scale(1)";
-                    img.style.cursor = "zoom-in";
-                  } else {
-                    img.style.transform = "scale(2)";
-                    img.style.cursor = "zoom-out";
-                  }
-                }}
-                onError={(e) => {
-                  const img = e.currentTarget;
-                  img.style.display = "none";
-                  const parent = img.parentElement;
-                  if (parent) {
-                    parent.innerHTML = '<div class="text-center py-8 text-muted-foreground">Error al cargar la imagen</div>';
-                  }
-                }}
-              />
+            {photoError ? (
+              <div className="text-center py-8 text-muted-foreground">
+                Error al cargar la imagen
+              </div>
+            ) : (
+              selectedPhoto && (
+                <img
+                  src={selectedPhoto}
+                  alt="Foto de caja"
+                  className={`w-full h-auto rounded-lg cursor-pointer transition-transform ${photoZoom ? 'scale-200' : 'scale-100'}`}
+                  style={{ transform: photoZoom ? 'scale(2)' : 'scale(1)' }}
+                  onClick={() => setPhotoZoom(!photoZoom)}
+                  onError={() => setPhotoError(true)}
+                  loading="lazy"
+                />
+              )
             )}
           </div>
         </DialogContent>

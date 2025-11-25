@@ -116,7 +116,18 @@ export async function getAllBoxes() {
   const db = await getDb();
   if (!db) return [];
   const { desc } = await import("drizzle-orm");
-  return await db.select().from(boxes).orderBy(desc(boxes.submissionTime));
+  // Seleccionar solo campos necesarios para mejor rendimiento
+  return await db.select({
+    id: boxes.id,
+    boxCode: boxes.boxCode,
+    harvesterId: boxes.harvesterId,
+    parcelCode: boxes.parcelCode,
+    parcelName: boxes.parcelName,
+    weight: boxes.weight,
+    photoUrl: boxes.photoUrl,
+    photoFilename: boxes.photoFilename,
+    submissionTime: boxes.submissionTime,
+  }).from(boxes).orderBy(desc(boxes.submissionTime));
 }
 
 export async function clearAllBoxes() {
