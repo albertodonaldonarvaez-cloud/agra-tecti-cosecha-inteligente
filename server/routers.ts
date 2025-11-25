@@ -592,6 +592,27 @@ export const appRouter = router({
           };
         });
 
+        // Estadísticas por hora del día
+        const hourlyMap = new Map();
+        boxes.forEach(box => {
+          const date = new Date(box.submissionTime);
+          const hour = date.getHours();
+          
+          if (!hourlyMap.has(hour)) {
+            hourlyMap.set(hour, {
+              hour,
+              totalBoxes: 0,
+              totalWeight: 0,
+            });
+          }
+          const hourData = hourlyMap.get(hour);
+          hourData.totalBoxes++;
+          hourData.totalWeight += box.weight;
+        });
+        
+        // Ordenar por hora y convertir a array
+        const hourlyStats = Array.from(hourlyMap.values()).sort((a, b) => a.hour - b.hour);
+
         return {
           total,
           totalWeight,
@@ -604,6 +625,7 @@ export const appRouter = router({
           wastePercent,
           parcelStats: Array.from(parcelMap.values()),
           harvesterStats,
+          hourlyStats,
         };
       }),
   }),

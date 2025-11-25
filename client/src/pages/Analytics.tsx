@@ -251,6 +251,77 @@ function AnalyticsContent() {
               )}
             </GlassCard>
 
+            {/* Gráfica de Cajas por Hora */}
+            <GlassCard className="p-6">
+              <h2 className="mb-4 text-2xl font-semibold text-green-900">Cajas Entregadas por Hora</h2>
+              <p className="mb-4 text-sm text-green-600">Análisis de productividad por hora del día</p>
+              
+              {stats.hourlyStats && stats.hourlyStats.length > 0 ? (
+                <div className="space-y-3">
+                  {stats.hourlyStats.map((hourData: any) => {
+                    const maxBoxes = Math.max(...stats.hourlyStats.map((h: any) => h.totalBoxes));
+                    const barWidth = maxBoxes > 0 ? (hourData.totalBoxes / maxBoxes) * 100 : 0;
+                    const isLunchTime = hourData.hour >= 12 && hourData.hour <= 14;
+                    const isMorning = hourData.hour >= 6 && hourData.hour < 12;
+                    const isAfternoon = hourData.hour >= 14 && hourData.hour < 18;
+                    
+                    return (
+                      <div key={hourData.hour} className="flex items-center gap-3">
+                        <div className="w-16 text-right text-sm font-semibold text-green-900">
+                          {hourData.hour.toString().padStart(2, '0')}:00
+                        </div>
+                        <div className="flex-1">
+                          <div className="relative h-8 bg-green-50 rounded-lg overflow-hidden">
+                            <div
+                              className={`h-full transition-all duration-300 flex items-center px-3 ${
+                                isLunchTime
+                                  ? 'bg-orange-400'
+                                  : isMorning
+                                  ? 'bg-blue-400'
+                                  : isAfternoon
+                                  ? 'bg-green-400'
+                                  : 'bg-purple-400'
+                              }`}
+                              style={{ width: `${barWidth}%` }}
+                            >
+                              <span className="text-xs font-semibold text-white">
+                                {hourData.totalBoxes} cajas
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="w-24 text-right text-sm text-green-700">
+                          {(hourData.totalWeight / 1000).toFixed(1)} kg
+                        </div>
+                      </div>
+                    );
+                  })}
+                  
+                  {/* Leyenda */}
+                  <div className="mt-6 pt-4 border-t border-green-200 flex flex-wrap gap-4 text-xs">
+                    <div className="flex items-center gap-2">
+                      <div className="w-4 h-4 bg-blue-400 rounded"></div>
+                      <span className="text-green-700">Mañana (6-12h)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-4 h-4 bg-orange-400 rounded"></div>
+                      <span className="text-green-700">Hora de comida (12-14h)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-4 h-4 bg-green-400 rounded"></div>
+                      <span className="text-green-700">Tarde (14-18h)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-4 h-4 bg-purple-400 rounded"></div>
+                      <span className="text-green-700">Otros horarios</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-center text-green-600">No hay datos por hora</p>
+              )}
+            </GlassCard>
+
             {/* Estadísticas por Cortadora */}
             <GlassCard className="p-6">
               <h2 className="mb-4 text-2xl font-semibold text-green-900">Estadísticas por Cortadora</h2>

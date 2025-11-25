@@ -64,6 +64,9 @@ async function startServer() {
   const { proxyKoboImage } = await import("../imageProxy");
   app.get("/api/image-proxy", proxyKoboImage);
   
+  // Servir fotos estáticas desde /app/photos
+  app.use("/app/photos", express.static("/app/photos"));
+  
   // tRPC API
   app.use(
     "/api/trpc",
