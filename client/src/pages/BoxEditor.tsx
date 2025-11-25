@@ -3,7 +3,7 @@ import { trpc } from "../lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
-import { Pencil, Trash2, Save, X, Search, Image as ImageIcon } from "lucide-react";
+import { Pencil, Trash2, Save, X, Search, Image as ImageIcon, ChevronLeft, ChevronRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -17,17 +17,15 @@ interface Box {
   parcelName: string;
   weight: number;
   photoUrl: string | null;
+  photoFilename: string | null;
   submissionTime: Date;
 }
 
-interface EditingBox extends Box {
-  isEditing: boolean;
-}
+const ITEMS_PER_PAGE = 50;
 
 export default function BoxEditor() {
   const { data: boxes, isLoading, refetch } = trpc.boxes.list.useQuery();
   const { data: harvesters } = trpc.harvesters.list.useQuery();
-  const { data: parcels } = trpc.parcels.list.useQuery();
   
   const updateBox = trpc.boxes.update.useMutation({
     onSuccess: () => {
@@ -52,6 +50,7 @@ export default function BoxEditor() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<Partial<Box>>({});
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
   
   // Filtros por columna
   const [filters, setFilters] = useState({
@@ -78,6 +77,19 @@ export default function BoxEditor() {
       return matchBoxCode && matchParcelCode && matchParcelName && matchHarvester && matchWeight && matchDate;
     });
   }, [boxes, filters]);
+
+  // Paginación
+  const totalPages = Math.ceil(filteredBoxes.length / ITEMS_PER_PAGE);
+  const paginatedBoxes = useMemo(() => {
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredBoxes.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [filteredBoxes, currentPage]);
+
+  // Reset página cuando cambian filtros
+  const updateFilters = (newFilters: typeof filters) => {
+    setFilters(newFilters);
+    setCurrentPage(1);
+  };
 
   const startEdit = (box: Box) => {
     setEditingId(box.id);
@@ -120,7 +132,7 @@ export default function BoxEditor() {
   };
 
   const clearFilters = () => {
-    setFilters({
+    updateFilters({
       boxCode: "",
       parcelCode: "",
       parcelName: "",
@@ -137,6 +149,13 @@ export default function BoxEditor() {
     if (harvesterId === 98) return "Segunda";
     if (harvesterId === 99) return "Desperdicio";
     return `Cortadora ${harvesterId}`;
+  };
+
+  const getPhotoUrl = (box: Box) => {
+    // Prioridad: photoUrl > construir desde photoFilename
+    if (box.photoUrl) return box.photoUrl;
+    if (box.photoFilename) return `/app/photos/${box.photoFilename}`;
+    return null;
   };
 
   if (isLoading) {
@@ -177,7 +196,7 @@ export default function BoxEditor() {
                 <Input
                   placeholder="Ej: 01-123456"
                   value={filters.boxCode}
-                  onChange={(e) => setFilters({ ...filters, boxCode: e.target.value })}
+                  onChange={(e) => updateFilters({ ...filters, boxCode: e.target.value })}
                   className="h-9"
                 />
               </div>
@@ -187,7 +206,7 @@ export default function BoxEditor() {
                 <Input
                   placeholder="Ej: A1"
                   value={filters.parcelCode}
-                  onChange={(e) => setFilters({ ...filters, parcelCode: e.target.value })}
+                  onChange={(e) => updateFilters({ ...filters, parcelCode: e.target.value })}
                   className="h-9"
                 />
               </div>
@@ -197,7 +216,7 @@ export default function BoxEditor() {
                 <Input
                   placeholder="Buscar..."
                   value={filters.parcelName}
-                  onChange={(e) => setFilters({ ...filters, parcelName: e.target.value })}
+                  onChange={(e) => updateFilters({ ...filters, parcelName: e.target.value })}
                   className="h-9"
                 />
               </div>
@@ -208,7 +227,7 @@ export default function BoxEditor() {
                   placeholder="Número"
                   type="number"
                   value={filters.harvesterId}
-                  onChange={(e) => setFilters({ ...filters, harvesterId: e.target.value })}
+                  onChange={(e) => updateFilters({ ...filters, harvesterId: e.target.value })}
                   className="h-9"
                 />
               </div>
@@ -218,7 +237,7 @@ export default function BoxEditor() {
                 <Input
                   placeholder="Ej: 15"
                   value={filters.weight}
-                  onChange={(e) => setFilters({ ...filters, weight: e.target.value })}
+                  onChange={(e) => updateFilters({ ...filters, weight: e.target.value })}
                   className="h-9"
                 />
               </div>
@@ -228,12 +247,41 @@ export default function BoxEditor() {
                 <Input
                   placeholder="YYYY-MM-DD"
                   value={filters.date}
-                  onChange={(e) => setFilters({ ...filters, date: e.target.value })}
+                  onChange={(e) => updateFilters({ ...filters, date: e.target.value })}
                   className="h-9"
                 />
               </div>
             </div>
           </div>
+
+          {/* Paginación superior */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-sm text-muted-foreground">
+                Página {currentPage} de {totalPages}
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Anterior
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  Siguiente
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
 
           {/* Tabla */}
           <div className="overflow-x-auto">
@@ -251,8 +299,9 @@ export default function BoxEditor() {
                 </tr>
               </thead>
               <tbody>
-                {filteredBoxes.map((box) => {
+                {paginatedBoxes.map((box) => {
                   const isEditing = editingId === box.id;
+                  const photoUrl = getPhotoUrl(box);
                   
                   return (
                     <tr key={box.id} className="border-b hover:bg-muted/30">
@@ -337,14 +386,16 @@ export default function BoxEditor() {
                       </td>
                       
                       <td className="p-3 text-center">
-                        {box.photoUrl && (
+                        {photoUrl ? (
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => setSelectedPhoto(box.photoUrl)}
+                            onClick={() => setSelectedPhoto(photoUrl)}
                           >
                             <ImageIcon className="h-4 w-4" />
                           </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Sin foto</span>
                         )}
                       </td>
                       
@@ -401,21 +452,67 @@ export default function BoxEditor() {
               No se encontraron cajas con los filtros aplicados
             </div>
           )}
+
+          {/* Paginación inferior */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-4">
+              <div className="text-sm text-muted-foreground">
+                Mostrando {((currentPage - 1) * ITEMS_PER_PAGE) + 1} - {Math.min(currentPage * ITEMS_PER_PAGE, filteredBoxes.length)} de {filteredBoxes.length}
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Anterior
+                </Button>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm">Página</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={totalPages}
+                    value={currentPage}
+                    onChange={(e) => {
+                      const page = parseInt(e.target.value);
+                      if (page >= 1 && page <= totalPages) {
+                        setCurrentPage(page);
+                      }
+                    }}
+                    className="h-8 w-16 text-center"
+                  />
+                  <span className="text-sm">de {totalPages}</span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  Siguiente
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* Modal de foto */}
+      {/* Modal de foto con zoom */}
       <Dialog open={!!selectedPhoto} onOpenChange={() => setSelectedPhoto(null)}>
         <DialogContent className="max-w-4xl">
           <DialogHeader>
             <DialogTitle>Foto de la Caja</DialogTitle>
           </DialogHeader>
-          <div className="relative">
+          <div className="relative overflow-auto max-h-[70vh]">
             {selectedPhoto && (
               <img
                 src={selectedPhoto}
                 alt="Foto de caja"
-                className="w-full h-auto rounded-lg cursor-zoom-in"
+                className="w-full h-auto rounded-lg cursor-zoom-in transition-transform"
                 onClick={(e) => {
                   const img = e.currentTarget;
                   if (img.style.transform === "scale(2)") {
@@ -424,6 +521,14 @@ export default function BoxEditor() {
                   } else {
                     img.style.transform = "scale(2)";
                     img.style.cursor = "zoom-out";
+                  }
+                }}
+                onError={(e) => {
+                  const img = e.currentTarget;
+                  img.style.display = "none";
+                  const parent = img.parentElement;
+                  if (parent) {
+                    parent.innerHTML = '<div class="text-center py-8 text-muted-foreground">Error al cargar la imagen</div>';
                   }
                 }}
               />
