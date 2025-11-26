@@ -28,7 +28,11 @@ export function ParcelMap({ parcels, height = "600px" }: ParcelMapProps) {
   const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
-    if (!mapRef.current || parcels.length === 0) return;
+    console.log('ParcelMap useEffect - parcels:', parcels.length, parcels);
+    if (!mapRef.current || parcels.length === 0) {
+      console.log('Saliendo: mapRef o parcels vacío');
+      return;
+    }
 
     // Limpiar mapa anterior si existe
     if (mapInstanceRef.current) {
@@ -42,6 +46,14 @@ export function ParcelMap({ parcels, height = "600px" }: ParcelMapProps) {
 
       // Crear features de polígonos para cada parcela
       const features = parcels.map((parcel, index) => {
+        console.log(`Procesando parcela ${parcel.code}:`, parcel.coordinates);
+        
+        // Validar que coordinates sea un array
+        if (!Array.isArray(parcel.coordinates) || parcel.coordinates.length === 0) {
+          console.error(`Parcela ${parcel.code} tiene coordenadas inválidas`);
+          return null;
+        }
+        
         // Convertir coordenadas a formato OpenLayers
         const coordinates = parcel.coordinates.map(ring =>
           ring.map(coord => fromLonLat([coord[0], coord[1]]))
@@ -84,7 +96,14 @@ export function ParcelMap({ parcels, height = "600px" }: ParcelMapProps) {
         );
 
         return feature;
-      });
+      }).filter(f => f !== null);
+
+      console.log('Features creados:', features.length);
+
+      if (features.length === 0) {
+        console.error('No se crearon features válidos');
+        return;
+      }
 
       const vectorSource = new VectorSource({
         features: features,
@@ -96,6 +115,7 @@ export function ParcelMap({ parcels, height = "600px" }: ParcelMapProps) {
 
       // Calcular el centro y extent de todas las parcelas
       const extent = vectorSource.getExtent();
+      console.log('Extent calculado:', extent);
 
       // Crear mapa
       const map = new Map({

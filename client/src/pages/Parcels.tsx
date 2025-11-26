@@ -240,11 +240,20 @@ function ParcelsContent() {
             <ParcelMap
               parcels={parcels
                 .filter(p => p.polygon)
-                .map(p => ({
-                  code: p.code,
-                  name: p.name,
-                  coordinates: p.polygon.coordinates,
-                }))}
+                .map(p => {
+                  try {
+                    const polygon = typeof p.polygon === 'string' ? JSON.parse(p.polygon) : p.polygon;
+                    return {
+                      code: p.code,
+                      name: p.name,
+                      coordinates: polygon.coordinates || polygon,
+                    };
+                  } catch (e) {
+                    console.error(`Error parsing polygon for ${p.code}:`, e);
+                    return null;
+                  }
+                })
+                .filter(p => p !== null) as Array<{code: string; name: string; coordinates: number[][][]}>}
               height="600px"
             />
           </GlassCard>
