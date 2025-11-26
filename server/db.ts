@@ -127,6 +127,8 @@ export async function getAllBoxes() {
     photoUrl: boxes.photoUrl,
     photoFilename: boxes.photoFilename,
     submissionTime: boxes.submissionTime,
+    latitude: boxes.latitude,
+    longitude: boxes.longitude,
   }).from(boxes).orderBy(desc(boxes.submissionTime));
 }
 

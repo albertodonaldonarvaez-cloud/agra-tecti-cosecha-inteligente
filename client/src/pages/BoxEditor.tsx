@@ -3,11 +3,12 @@ import { trpc } from "../lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
-import { Pencil, Trash2, Save, X, Search, Image as ImageIcon, ChevronLeft, ChevronRight } from "lucide-react";
+import { Pencil, Trash2, Save, X, Search, Image as ImageIcon, ChevronLeft, ChevronRight, MapPin } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
+import { MapModal } from "../components/MapModal";
 
 interface Box {
   id: number;
@@ -19,6 +20,8 @@ interface Box {
   photoUrl: string | null;
   photoFilename: string | null;
   submissionTime: Date;
+  latitude: string | null;
+  longitude: string | null;
 }
 
 const ITEMS_PER_PAGE = 50;
@@ -52,6 +55,7 @@ export default function BoxEditor() {
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState(false);
   const [photoZoom, setPhotoZoom] = useState(false);
+  const [selectedMap, setSelectedMap] = useState<{ latitude: string | null; longitude: string | null; boxCode: string } | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   
   // Filtros por columna
@@ -293,6 +297,7 @@ export default function BoxEditor() {
                   <th className="p-2 text-left text-xs font-semibold">Peso</th>
                   <th className="p-2 text-left text-xs font-semibold">Fecha</th>
                   <th className="p-2 text-center text-xs font-semibold">Foto</th>
+                  <th className="p-2 text-center text-xs font-semibold">Mapa</th>
                   <th className="p-2 text-center text-xs font-semibold">Acciones</th>
                 </tr>
               </thead>
@@ -392,6 +397,21 @@ export default function BoxEditor() {
                             className="h-8 w-8 p-0"
                           >
                             <ImageIcon className="h-4 w-4" />
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">-</span>
+                        )}
+                      </td>
+                      
+                      <td className="p-2 text-center">
+                        {box.latitude && box.longitude ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setSelectedMap({ latitude: box.latitude, longitude: box.longitude, boxCode: box.boxCode })}
+                            className="h-8 w-8 p-0"
+                          >
+                            <MapPin className="h-4 w-4" />
                           </Button>
                         ) : (
                           <span className="text-xs text-muted-foreground">-</span>
@@ -510,6 +530,15 @@ export default function BoxEditor() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Modal de mapa */}
+      <MapModal
+        open={!!selectedMap}
+        onClose={() => setSelectedMap(null)}
+        latitude={selectedMap?.latitude || null}
+        longitude={selectedMap?.longitude || null}
+        boxCode={selectedMap?.boxCode || ""}
+      />
     </div>
   );
 }
