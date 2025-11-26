@@ -1,0 +1,34 @@
+/* OpenLayers CSS */
+@import 'ol/ol.css';
+
+/* Asegurar que el mapa tenga tamaño */
+.ol-viewport {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+}
+
+.ol-overlaycontainer-stopevent {
+  position: absolute;
+}
+
+.ol-zoom {
+  position: absolute;
+  top: 0.5em;
+  left: 0.5em;
+}
+
+.ol-rotate {
+  position: absolute;
+  top: 0.5em;
+  right: 0.5em;
+}
+
+.ol-attribution {
+  position: absolute;
+  bottom: 0.5em;
+  right: 0.5em;
+  max-width: calc(100% - 1.3em);
+  font-size: 0.7em;
+}
