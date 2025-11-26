@@ -37,17 +37,17 @@ function extractPolygonsFromKML(kmlData: any): ParcelPolygon[] {
   function traverse(obj: any, parentName = '') {
     if (!obj) return;
 
-    // Buscar Placemarks
-    if (obj.Placemark) {
-      const placemarks = Array.isArray(obj.Placemark) ? obj.Placemark : [obj.Placemark];
+    // Buscar Placemarks (tags normalizados a minúsculas)
+    if (obj.placemark) {
+      const placemarks = Array.isArray(obj.placemark) ? obj.placemark : [obj.placemark];
       
       for (const placemark of placemarks) {
         const name = placemark.name?.[0] || parentName || 'Sin nombre';
         
         // Buscar polígonos
-        if (placemark.Polygon) {
-          const polygon = placemark.Polygon[0];
-          const outerBoundary = polygon.outerBoundaryIs?.[0]?.LinearRing?.[0]?.coordinates?.[0];
+        if (placemark.polygon) {
+          const polygon = placemark.polygon[0];
+          const outerBoundary = polygon.outerboundaryis?.[0]?.linearring?.[0]?.coordinates?.[0];
           
           if (outerBoundary) {
             const coordinates = parseCoordinates(outerBoundary);
@@ -66,13 +66,13 @@ function extractPolygonsFromKML(kmlData: any): ParcelPolygon[] {
         }
 
         // Buscar MultiGeometry
-        if (placemark.MultiGeometry) {
-          const multiGeom = placemark.MultiGeometry[0];
-          if (multiGeom.Polygon) {
-            const polygonList = Array.isArray(multiGeom.Polygon) ? multiGeom.Polygon : [multiGeom.Polygon];
+        if (placemark.multigeometry) {
+          const multiGeom = placemark.multigeometry[0];
+          if (multiGeom.polygon) {
+            const polygonList = Array.isArray(multiGeom.polygon) ? multiGeom.polygon : [multiGeom.polygon];
             
             for (const polygon of polygonList) {
-              const outerBoundary = polygon.outerBoundaryIs?.[0]?.LinearRing?.[0]?.coordinates?.[0];
+              const outerBoundary = polygon.outerboundaryis?.[0]?.linearring?.[0]?.coordinates?.[0];
               
               if (outerBoundary) {
                 const coordinates = parseCoordinates(outerBoundary);
@@ -94,13 +94,13 @@ function extractPolygonsFromKML(kmlData: any): ParcelPolygon[] {
     }
 
     // Buscar Document y Folder recursivamente
-    if (obj.Document) {
-      const docs = Array.isArray(obj.Document) ? obj.Document : [obj.Document];
+    if (obj.document) {
+      const docs = Array.isArray(obj.document) ? obj.document : [obj.document];
       docs.forEach((doc: any) => traverse(doc, parentName));
     }
     
-    if (obj.Folder) {
-      const folders = Array.isArray(obj.Folder) ? obj.Folder : [obj.Folder];
+    if (obj.folder) {
+      const folders = Array.isArray(obj.folder) ? obj.folder : [obj.folder];
       folders.forEach((folder: any) => {
         const folderName = folder.name?.[0] || parentName;
         traverse(folder, folderName);
