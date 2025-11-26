@@ -592,11 +592,13 @@ export const appRouter = router({
           };
         });
 
-        // Estadísticas por hora del día
+        // Estadísticas por hora del día (zona horaria de México UTC-6)
         const hourlyMap = new Map();
         boxes.forEach(box => {
+          // Convertir a zona horaria de México (America/Mexico_City)
           const date = new Date(box.submissionTime);
-          const hour = date.getHours();
+          const mexicoTime = new Date(date.toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
+          const hour = mexicoTime.getHours();
           
           if (!hourlyMap.has(hour)) {
             hourlyMap.set(hour, {
