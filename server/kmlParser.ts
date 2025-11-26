@@ -9,22 +9,23 @@ interface Coordinate {
 interface ParcelPolygon {
   name: string;
   code: string;
-  coordinates: Coordinate[];
+  coordinates: number[][][]; // GeoJSON format: [[[lon, lat], [lon, lat], ...]]
 }
 
 /**
  * Extrae coordenadas de un string de coordenadas KML
  * Formato KML: "lng,lat,alt lng,lat,alt ..."
+ * Retorna formato GeoJSON: [[lon, lat], [lon, lat], ...]
  */
-function parseCoordinates(coordString: string): Coordinate[] {
+function parseCoordinates(coordString: string): number[][] {
   const coords = coordString.trim().split(/\s+/);
   return coords
     .map(coord => {
       const [lng, lat] = coord.split(',').map(Number);
       if (isNaN(lat) || isNaN(lng)) return null;
-      return { lat, lng };
+      return [lng, lat]; // GeoJSON format
     })
-    .filter((c): c is Coordinate => c !== null);
+    .filter((c): c is number[] => c !== null);
 }
 
 /**
@@ -58,7 +59,7 @@ function extractPolygonsFromKML(kmlData: any): ParcelPolygon[] {
               polygons.push({
                 name: name.trim(),
                 code: code,
-                coordinates
+                coordinates: [coordinates] // GeoJSON Polygon format: [[[lon, lat], ...]]
               });
             }
           }
@@ -82,7 +83,7 @@ function extractPolygonsFromKML(kmlData: any): ParcelPolygon[] {
                   polygons.push({
                     name: name.trim(),
                     code: code,
-                    coordinates
+                    coordinates: [coordinates] // GeoJSON Polygon format
                   });
                 }
               }

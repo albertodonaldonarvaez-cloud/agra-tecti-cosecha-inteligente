@@ -1,0 +1,227 @@
+From 4ecd6e32c0753d3db183f82afbbc04a949184356 Mon Sep 17 00:00:00 2001
+From: Manus Agent <manus@agent.com>
+Date: Wed, 26 Nov 2025 00:21:43 -0500
+Subject: [PATCH] =?UTF-8?q?Fix:=20Corregir=20visualizaci=C3=B3n=20de=20map?=
+ =?UTF-8?q?a=20OpenLayers=20con=20estilos=20CSS=20y=20mejor=20inicializaci?=
+ =?UTF-8?q?=C3=B3n?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ client/src/components/MapModal.tsx | 125 ++++++++++++++++++-----------
+ client/src/styles/openlayers.css   |  34 ++++++++
+ 2 files changed, 110 insertions(+), 49 deletions(-)
+ create mode 100644 client/src/styles/openlayers.css
+
+diff --git a/client/src/components/MapModal.tsx b/client/src/components/MapModal.tsx
+index d713592..f52b852 100644
+--- a/client/src/components/MapModal.tsx
++++ b/client/src/components/MapModal.tsx
+@@ -1,6 +1,6 @@
+-import { useEffect, useRef } from "react";
++import { useEffect, useRef, useState } from "react";
+ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+-import "ol/ol.css";
++import "../styles/openlayers.css";
+ import Map from "ol/Map";
+ import View from "ol/View";
+ import TileLayer from "ol/layer/Tile";
+@@ -10,7 +10,7 @@ import Feature from "ol/Feature";
+ import Point from "ol/geom/Point";
+ import VectorLayer from "ol/layer/Vector";
+ import VectorSource from "ol/source/Vector";
+-import { Style, Icon } from "ol/style";
++import { Style, Circle, Fill, Stroke } from "ol/style";
+ 
+ interface MapModalProps {
+   open: boolean;
+@@ -23,63 +23,83 @@ interface MapModalProps {
+ export function MapModal({ open, onClose, latitude, longitude, boxCode }: MapModalProps) {
+   const mapRef = useRef<HTMLDivElement>(null);
+   const mapInstanceRef = useRef<Map | null>(null);
++  const [mapReady, setMapReady] = useState(false);
+ 
+   useEffect(() => {
+-    if (!open || !mapRef.current || !latitude || !longitude) return;
++    if (!open) {
++      setMapReady(false);
++      return;
++    }
++
++    if (!latitude || !longitude) return;
+ 
+     const lat = parseFloat(latitude);
+     const lon = parseFloat(longitude);
+ 
+     if (isNaN(lat) || isNaN(lon)) return;
+ 
+-    // Limpiar mapa anterior si existe
+-    if (mapInstanceRef.current) {
+-      mapInstanceRef.current.setTarget(undefined);
+-      mapInstanceRef.current = null;
+-    }
++    // Esperar a que el DOM esté listo
++    const timer = setTimeout(() => {
++      if (!mapRef.current) return;
+ 
+-    // Crear marcador
+-    const marker = new Feature({
+-      geometry: new Point(fromLonLat([lon, lat])),
+-    });
+-
+-    marker.setStyle(
+-      new Style({
+-        image: new Icon({
+-          anchor: [0.5, 1],
+-          src: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSI0MCI+PHBhdGggZmlsbD0iIzIyOGIyMiIgZD0iTTE2IDAgQzguMjggMCAyIDcuMjggMiAxNWMwIDEyIDE0IDI1IDE0IDI1czE0LTEzIDE0LTI1YzAtNy43Mi02LjI4LTE1LTE0LTE1em0wIDIwYy0yLjc2IDAtNS0yLjI0LTUtNXMyLjI0LTUgNS01IDUgMi4yNCA1IDUtMi4yNCA1LTUgNXoiLz48L3N2Zz4=",
+-          scale: 1,
+-        }),
+-      })
+-    );
+-
+-    const vectorSource = new VectorSource({
+-      features: [marker],
+-    });
+-
+-    const vectorLayer = new VectorLayer({
+-      source: vectorSource,
+-    });
+-
+-    // Crear mapa
+-    const map = new Map({
+-      target: mapRef.current,
+-      layers: [
+-        new TileLayer({
+-          source: new OSM(),
++      // Limpiar mapa anterior si existe
++      if (mapInstanceRef.current) {
++        mapInstanceRef.current.setTarget(undefined);
++        mapInstanceRef.current = null;
++      }
++
++      // Crear marcador con estilo simple
++      const marker = new Feature({
++        geometry: new Point(fromLonLat([lon, lat])),
++      });
++
++      marker.setStyle(
++        new Style({
++          image: new Circle({
++            radius: 8,
++            fill: new Fill({ color: '#22c55e' }),
++            stroke: new Stroke({
++              color: '#16a34a',
++              width: 3,
++            }),
++          }),
++        })
++      );
++
++      const vectorSource = new VectorSource({
++        features: [marker],
++      });
++
++      const vectorLayer = new VectorLayer({
++        source: vectorSource,
++      });
++
++      // Crear mapa
++      const map = new Map({
++        target: mapRef.current,
++        layers: [
++          new TileLayer({
++            source: new OSM(),
++          }),
++          vectorLayer,
++        ],
++        view: new View({
++          center: fromLonLat([lon, lat]),
++          zoom: 18,
+         }),
+-        vectorLayer,
+-      ],
+-      view: new View({
+-        center: fromLonLat([lon, lat]),
+-        zoom: 18, // Zoom cercano para ver detalles
+-      }),
+-    });
++      });
++
++      mapInstanceRef.current = map;
++      setMapReady(true);
+ 
+-    mapInstanceRef.current = map;
++      // Forzar actualización del tamaño del mapa
++      setTimeout(() => {
++        map.updateSize();
++      }, 100);
++    }, 100);
+ 
+-    // Limpiar al desmontar
+     return () => {
++      clearTimeout(timer);
+       if (mapInstanceRef.current) {
+         mapInstanceRef.current.setTarget(undefined);
+         mapInstanceRef.current = null;
+@@ -102,8 +122,15 @@ export function MapModal({ open, onClose, latitude, longitude, boxCode }: MapMod
+             </div>
+             <div
+               ref={mapRef}
+-              className="w-full h-[500px] rounded-lg border border-border"
+-            />
++              className="w-full h-[500px] rounded-lg border border-border bg-gray-100"
++              style={{ minHeight: '500px' }}
++            >
++              {!mapReady && (
++                <div className="flex items-center justify-center h-full">
++                  <div className="text-sm text-muted-foreground">Cargando mapa...</div>
++                </div>
++              )}
++            </div>
+           </div>
+         ) : (
+           <div className="text-center py-12 text-muted-foreground">
+diff --git a/client/src/styles/openlayers.css b/client/src/styles/openlayers.css
+new file mode 100644
+index 0000000..3e0e510
+--- /dev/null
++++ b/client/src/styles/openlayers.css
+@@ -0,0 +1,34 @@
++/* OpenLayers CSS */
++@import 'ol/ol.css';
++
++/* Asegurar que el mapa tenga tamaño */
++.ol-viewport {
++  position: relative;
++  overflow: hidden;
++  width: 100%;
++  height: 100%;
++}
++
++.ol-overlaycontainer-stopevent {
++  position: absolute;
++}
++
++.ol-zoom {
++  position: absolute;
++  top: 0.5em;
++  left: 0.5em;
++}
++
++.ol-rotate {
++  position: absolute;
++  top: 0.5em;
++  right: 0.5em;
++}
++
++.ol-attribution {
++  position: absolute;
++  bottom: 0.5em;
++  right: 0.5em;
++  max-width: calc(100% - 1.3em);
++  font-size: 0.7em;
++}
+-- 
+2.34.1
+

@@ -256,12 +256,15 @@ export const appRouter = router({
           polygons = await parseKMZ(buffer);
         }
 
-        // Insertar o actualizar parcelas con polígonos
+        // Insertar o actualizar parcelas con polígonos en formato GeoJSON
         for (const poly of polygons) {
           await dbExt.upsertParcel({
             code: poly.code,
             name: poly.name,
-            polygon: JSON.stringify(poly.coordinates),
+            polygon: JSON.stringify({
+              type: 'Polygon',
+              coordinates: poly.coordinates
+            }),
             isActive: true,
           });
         }

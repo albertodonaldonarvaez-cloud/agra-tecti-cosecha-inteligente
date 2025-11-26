@@ -13,9 +13,10 @@ import {
 } from "@/components/ui/dialog";
 import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { MapPin, Upload, Plus, Edit, Trash2, CheckCircle, XCircle } from "lucide-react";
+import { MapPin, Upload, Plus, Edit, Trash2, CheckCircle, XCircle, Map as MapIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { ParcelMap } from "@/components/ParcelMap";
 
 interface Parcel {
   id: number;
@@ -41,6 +42,7 @@ function ParcelsContent() {
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [kmlFile, setKmlFile] = useState<File | null>(null);
+  const [showMap, setShowMap] = useState(false);
 
   const { data: parcels, isLoading, refetch } = trpc.parcels.list.useQuery(undefined, {
     enabled: !!user && user.role === "admin",
@@ -190,10 +192,16 @@ function ParcelsContent() {
               </p>
             </div>
           </div>
-          <Button onClick={openCreateDialog} className="bg-green-600 hover:bg-green-700">
-            <Plus className="mr-2 h-4 w-4" />
-            Nueva Parcela
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={() => setShowMap(!showMap)} variant="outline" className="border-green-600 text-green-700 hover:bg-green-50">
+              <MapIcon className="mr-2 h-4 w-4" />
+              {showMap ? "Ocultar Mapa" : "Ver Mapa"}
+            </Button>
+            <Button onClick={openCreateDialog} className="bg-green-600 hover:bg-green-700">
+              <Plus className="mr-2 h-4 w-4" />
+              Nueva Parcela
+            </Button>
+          </div>
         </div>
 
         {/* Sección de carga KML/KMZ */}
@@ -224,6 +232,23 @@ function ParcelsContent() {
             </div>
           </div>
         </GlassCard>
+
+        {/* Mapa de parcelas */}
+        {showMap && parcels && parcels.length > 0 && (
+          <GlassCard className="mb-6 p-6">
+            <h3 className="text-lg font-semibold text-green-900 mb-4">Mapa de Parcelas</h3>
+            <ParcelMap
+              parcels={parcels
+                .filter(p => p.polygon)
+                .map(p => ({
+                  code: p.code,
+                  name: p.name,
+                  coordinates: p.polygon.coordinates,
+                }))}
+              height="600px"
+            />
+          </GlassCard>
+        )}
 
         {/* Lista de parcelas */}
         {isLoading ? (
