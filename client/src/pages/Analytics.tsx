@@ -32,6 +32,21 @@ function AnalyticsContent() {
     enabled: !!user,
   });
 
+  // Obtener datos meteorológicos si hay filtro de fechas
+  const { data: weatherData, isLoading: weatherLoading } = trpc.weather.getForDateRange.useQuery(
+    {
+      startDate: filterDates.startDate || "",
+      endDate: filterDates.endDate || "",
+    },
+    {
+      enabled: !!user && !!filterDates.startDate && !!filterDates.endDate,
+    }
+  );
+
+  const { data: locationConfig } = trpc.locationConfig.get.useQuery(undefined, {
+    enabled: !!user,
+  });
+
   useEffect(() => {
     if (!loading && !user) {
       window.location.href = getLoginUrl();
@@ -321,6 +336,62 @@ function AnalyticsContent() {
                 <p className="text-center text-green-600">No hay datos por hora</p>
               )}
             </GlassCard>
+
+            {/* Evolución de Calidad (Kilogramos) con Temperatura */}
+            {stats.dailyStats && stats.dailyStats.length > 0 && (
+              <GlassCard className="p-6 mb-6">
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="text-2xl font-semibold text-green-900">Evolución de Calidad (Kilogramos)</h2>
+                  {!locationConfig && (
+                    <span className="text-xs text-orange-600">
+                      ⚠️ Configure ubicación en Ajustes
+                    </span>
+                  )}
+                </div>
+                <p className="mb-4 text-sm text-green-700">
+                  🌡️ Se recomienda usar estaciones meteorológicas locales para mejorar la precisión de los datos de temperatura
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-green-200">
+                        <th className="pb-2 text-left text-sm font-semibold text-green-900">Fecha</th>
+                        <th className="pb-2 text-right text-sm font-semibold text-green-900">Peso Total (kg)</th>
+                        <th className="pb-2 text-right text-sm font-semibold text-green-900">1ra Calidad (kg)</th>
+                        <th className="pb-2 text-right text-sm font-semibold text-green-900">Temp. Máx (°C)</th>
+                        <th className="pb-2 text-right text-sm font-semibold text-green-900">Temp. Mín (°C)</th>
+                        <th className="pb-2 text-right text-sm font-semibold text-green-900">Temp. Prom (°C)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stats.dailyStats.map((day: any) => {
+                        const weather = weatherData?.find((w: any) => w.date === day.date);
+                        return (
+                          <tr key={day.date} className="border-b border-green-100">
+                            <td className="py-3 text-green-900">{day.date}</td>
+                            <td className="py-3 text-right font-semibold text-green-900">
+                              {(day.totalWeight / 1000).toFixed(2)}
+                            </td>
+                            <td className="py-3 text-right text-green-900">
+                              {(day.firstQualityWeight / 1000).toFixed(2)}
+                            </td>
+                            <td className="py-3 text-right text-green-700">
+                              {weather ? `${weather.temperatureMax.toFixed(1)}` : weatherLoading ? '...' : '-'}
+                            </td>
+                            <td className="py-3 text-right text-blue-700">
+                              {weather ? `${weather.temperatureMin.toFixed(1)}` : weatherLoading ? '...' : '-'}
+                            </td>
+                            <td className="py-3 text-right text-orange-700">
+                              {weather ? `${weather.temperatureMean.toFixed(1)}` : weatherLoading ? '...' : '-'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </GlassCard>
+            )}
 
             {/* Estadísticas por Cortadora */}
             <GlassCard className="p-6">

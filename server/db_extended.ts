@@ -1,6 +1,6 @@
 import { eq, desc, and, gte, lte } from "drizzle-orm";
 import { getDb } from "./db";
-import { parcels, uploadErrors, uploadBatches, InsertParcel, InsertUploadError } from "../drizzle/schema";
+import { parcels, uploadErrors, uploadBatches, locationConfig, InsertParcel, InsertUploadError, InsertLocationConfig } from "../drizzle/schema";
 
 // ============================================
 // FUNCIONES PARA PARCELAS
@@ -183,4 +183,37 @@ export async function getErrorStatsByBatch(batchId: string) {
   }
   
   return stats;
+}
+
+
+// ============================================
+// FUNCIONES PARA CONFIGURACIÓN DE UBICACIÓN
+// ============================================
+
+export async function getLocationConfig() {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(locationConfig).limit(1);
+  return result.length > 0 ? result[0] : null;
+}
+
+export async function upsertLocationConfig(config: InsertLocationConfig) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  const existing = await getLocationConfig();
+  
+  if (existing) {
+    await db.update(locationConfig)
+      .set({
+        locationName: config.locationName,
+        latitude: config.latitude,
+        longitude: config.longitude,
+        timezone: config.timezone || "America/Mexico_City",
+        updatedAt: new Date(),
+      })
+      .where(eq(locationConfig.id, existing.id));
+  } else {
+    await db.insert(locationConfig).values(config);
+  }
 }

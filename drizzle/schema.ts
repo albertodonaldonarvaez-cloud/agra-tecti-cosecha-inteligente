@@ -130,3 +130,17 @@ export const uploadBatches = mysqlTable("uploadBatches", {
 
 export type UploadBatch = typeof uploadBatches.$inferSelect;
 export type InsertUploadBatch = typeof uploadBatches.$inferInsert;
+
+// Tabla de configuración de ubicación para datos meteorológicos
+export const locationConfig = mysqlTable("locationConfig", {
+  id: int("id").autoincrement().primaryKey(),
+  locationName: varchar("locationName", { length: 255 }).notNull(), // Ej: "Santa Rosa Treinta"
+  latitude: varchar("latitude", { length: 64 }).notNull(), // Ej: "18.693"
+  longitude: varchar("longitude", { length: 64 }).notNull(), // Ej: "-99.182"
+  timezone: varchar("timezone", { length: 64 }).default("America/Mexico_City").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type LocationConfig = typeof locationConfig.$inferSelect;
+export type InsertLocationConfig = typeof locationConfig.$inferInsert;

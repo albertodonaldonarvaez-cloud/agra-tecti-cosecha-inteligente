@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet } from "lucide-react";
+import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -20,8 +20,16 @@ export default function Settings() {
   const [excelFile, setExcelFile] = useState<File | null>(null);
   const [downloadPhotos, setDownloadPhotos] = useState(true);
   const [syncDate, setSyncDate] = useState("");
+  const [locationName, setLocationName] = useState("");
+  const [latitude, setLatitude] = useState("");
+  const [longitude, setLongitude] = useState("");
+  const [timezone, setTimezone] = useState("America/Mexico_City");
 
   const { data: config } = trpc.apiConfig.get.useQuery(undefined, {
+    enabled: !!user && user.role === "admin",
+  });
+
+  const { data: locationConfig, refetch: refetchLocation } = trpc.locationConfig.get.useQuery(undefined, {
     enabled: !!user && user.role === "admin",
   });
 
@@ -31,6 +39,16 @@ export default function Settings() {
     },
     onError: (error) => {
       toast.error(error.message);
+    },
+  });
+
+  const saveLocation = trpc.locationConfig.save.useMutation({
+    onSuccess: () => {
+      toast.success("Configuración de ubicación guardada");
+      refetchLocation();
+    },
+    onError: (error) => {
+      toast.error(`Error: ${error.message}`);
     },
   });
 
@@ -103,6 +121,15 @@ export default function Settings() {
     }
   }, [config]);
 
+  useEffect(() => {
+    if (locationConfig) {
+      setLocationName(locationConfig.locationName);
+      setLatitude(locationConfig.latitude);
+      setLongitude(locationConfig.longitude);
+      setTimezone(locationConfig.timezone);
+    }
+  }, [locationConfig]);
+
   if (loading || !user) {
     return <Loading />;
   }
@@ -120,6 +147,33 @@ export default function Settings() {
 
   const handleSaveConfig = () => {
     saveConfig.mutate({ apiUrl, apiToken, assetId });
+  };
+
+  const handleSaveLocation = () => {
+    if (!locationName || !latitude || !longitude) {
+      toast.error("Por favor completa todos los campos");
+      return;
+    }
+
+    const lat = parseFloat(latitude);
+    const lng = parseFloat(longitude);
+    
+    if (isNaN(lat) || lat < -90 || lat > 90) {
+      toast.error("Latitud inválida (debe estar entre -90 y 90)");
+      return;
+    }
+    
+    if (isNaN(lng) || lng < -180 || lng > 180) {
+      toast.error("Longitud inválida (debe estar entre -180 y 180)");
+      return;
+    }
+
+    saveLocation.mutate({
+      locationName,
+      latitude,
+      longitude,
+      timezone,
+    });
   };
 
   const handleSync = () => {
@@ -345,6 +399,89 @@ export default function Settings() {
                 className="w-full"
               >
                 {uploadJson.isPending ? "Cargando..." : "Cargar JSON"}
+              </Button>
+            </div>
+          </GlassCard>
+
+          {/* Configuración de Ubicación */}
+          <GlassCard className="p-6">
+            <div className="mb-4 flex items-center gap-2">
+              <MapPin className="h-6 w-6 text-green-600" />
+              <h2 className="text-2xl font-semibold text-green-900">Ubicación para Datos Meteorológicos</h2>
+            </div>
+
+            <p className="mb-4 text-sm text-green-600">
+              Configure la ubicación de su zona para obtener datos de temperatura en Analytics
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="locationName">Nombre de la Ubicación</Label>
+                <Input
+                  id="locationName"
+                  value={locationName}
+                  onChange={(e) => setLocationName(e.target.value)}
+                  placeholder="Ej: Santa Rosa Treinta"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <Label htmlFor="latitude">Latitud</Label>
+                  <Input
+                    id="latitude"
+                    value={latitude}
+                    onChange={(e) => setLatitude(e.target.value)}
+                    placeholder="Ej: 18.693"
+                    type="number"
+                    step="0.000001"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="longitude">Longitud</Label>
+                  <Input
+                    id="longitude"
+                    value={longitude}
+                    onChange={(e) => setLongitude(e.target.value)}
+                    placeholder="Ej: -99.182"
+                    type="number"
+                    step="0.000001"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="timezone">Zona Horaria</Label>
+                <select
+                  id="timezone"
+                  value={timezone}
+                  onChange={(e) => setTimezone(e.target.value)}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="America/Mexico_City">América/Ciudad de México (UTC-6)</option>
+                  <option value="America/Cancun">América/Cancún (UTC-5)</option>
+                  <option value="America/Tijuana">América/Tijuana (UTC-8)</option>
+                </select>
+              </div>
+
+              <div className="rounded-lg bg-green-50 p-4">
+                <h3 className="mb-2 font-semibold text-green-900">🌡️ Fuente de Datos</h3>
+                <p className="text-sm text-green-800">
+                  Los datos de temperatura se obtienen de <strong>Open-Meteo</strong>, una API gratuita que proporciona datos meteorológicos históricos.
+                </p>
+                <p className="mt-2 text-xs text-green-700">
+                  ⚠️ Se recomienda usar estaciones meteorológicas locales para mejorar la precisión.
+                </p>
+              </div>
+
+              <Button
+                onClick={handleSaveLocation}
+                disabled={saveLocation.isPending}
+                className="w-full"
+              >
+                <Save className="mr-2 h-4 w-4" />
+                {saveLocation.isPending ? "Guardando..." : "Guardar Ubicación"}
               </Button>
             </div>
           </GlassCard>

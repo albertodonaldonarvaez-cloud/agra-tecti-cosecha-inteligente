@@ -498,6 +498,50 @@ export const appRouter = router({
       }),
   }),
 
+  locationConfig: router({
+    get: protectedProcedure.query(async () => {
+      return await dbExt.getLocationConfig();
+    }),
+
+    save: adminProcedure
+      .input(z.object({
+        locationName: z.string(),
+        latitude: z.string(),
+        longitude: z.string(),
+        timezone: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        await dbExt.upsertLocationConfig(input);
+        return { success: true };
+      }),
+  }),
+
+  weather: router({
+    getForDateRange: protectedProcedure
+      .input(z.object({
+        startDate: z.string(),
+        endDate: z.string(),
+      }))
+      .query(async ({ input }) => {
+        const { getWeatherData } = await import("./weatherService");
+        const locationConfig = await dbExt.getLocationConfig();
+        
+        if (!locationConfig) {
+          throw new Error("Configuración de ubicación no encontrada. Configure la ubicación en Ajustes.");
+        }
+        
+        const weatherData = await getWeatherData(
+          locationConfig.latitude,
+          locationConfig.longitude,
+          input.startDate,
+          input.endDate,
+          locationConfig.timezone
+        );
+        
+        return weatherData;
+      }),
+  }),
+
   analytics: router({
     getAvailableDates: protectedProcedure
       .query(async () => {
