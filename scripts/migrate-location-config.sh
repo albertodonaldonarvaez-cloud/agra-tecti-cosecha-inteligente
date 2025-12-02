@@ -5,8 +5,8 @@
 
 echo "🔄 Ejecutando migración de locationConfig..."
 
-# Ejecutar SQL en el contenedor de MySQL
-docker compose exec -T db mysql -u root -p"$MYSQL_ROOT_PASSWORD" agratec << 'EOF'
+# Ejecutar SQL en el contenedor de MySQL sin contraseña (el contenedor ya tiene acceso)
+docker compose exec -T db mysql -u root agratec << 'EOF'
 CREATE TABLE IF NOT EXISTS `locationConfig` (
 	`id` int AUTO_INCREMENT NOT NULL,
 	`locationName` varchar(255) NOT NULL,
@@ -22,8 +22,12 @@ EOF
 if [ $? -eq 0 ]; then
     echo "✅ Migración completada exitosamente"
     echo "📋 Verificando tabla..."
-    docker compose exec -T db mysql -u root -p"$MYSQL_ROOT_PASSWORD" agratec -e "DESC locationConfig;"
+    docker compose exec -T db mysql -u root agratec -e "DESC locationConfig;"
 else
     echo "❌ Error en la migración"
+    echo ""
+    echo "💡 Intenta ejecutar manualmente:"
+    echo "   docker compose exec db mysql -u root agratec"
+    echo "   Luego ejecuta el SQL de la migración"
     exit 1
 fi
