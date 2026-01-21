@@ -2,8 +2,16 @@
 
 echo "🔄 Recreando tabla locationConfig..."
 
-# Ejecutar SQL para eliminar y recrear la tabla (usar -T para no requerir TTY)
-docker compose exec -T db mysql -u root agratec << 'EOF'
+# Obtener la contraseña de root desde las variables de entorno
+source .env 2>/dev/null || true
+
+if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
+    echo "⚠️  MYSQL_ROOT_PASSWORD no encontrada en .env, usando valor por defecto"
+    MYSQL_ROOT_PASSWORD="rootpassword"
+fi
+
+# Ejecutar SQL para eliminar y recrear la tabla
+docker compose exec -T db mysql -u root -p"$MYSQL_ROOT_PASSWORD" agratec << 'EOF'
 
 -- Eliminar tabla si existe
 DROP TABLE IF EXISTS `locationConfig`;
@@ -31,5 +39,7 @@ if [ $? -eq 0 ]; then
     echo "✅ Tabla locationConfig recreada exitosamente"
 else
     echo "❌ Error al recrear la tabla"
+    echo "💡 Intenta ejecutar manualmente:"
+    echo "   docker compose exec -T db mysql -u root -p\$MYSQL_ROOT_PASSWORD agratec"
     exit 1
 fi
