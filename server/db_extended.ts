@@ -201,23 +201,37 @@ export async function upsertLocationConfig(config: InsertLocationConfig) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   
-  // Usar INSERT ON DUPLICATE KEY UPDATE para evitar SELECT previo
-  // Como solo debe haber un registro, siempre usamos id=1
-  await db.insert(locationConfig)
-    .values({
-      id: 1,
-      locationName: config.locationName,
-      latitude: config.latitude,
-      longitude: config.longitude,
-      timezone: config.timezone || "America/Mexico_City",
-    })
-    .onDuplicateKeyUpdate({
-      set: {
+  // Primero intentar obtener el registro existente
+  try {
+    const existing = await db.select().from(locationConfig).limit(1);
+    
+    if (existing && existing.length > 0) {
+      // Si existe, actualizar
+      await db.update(locationConfig)
+        .set({
+          locationName: config.locationName,
+          latitude: config.latitude,
+          longitude: config.longitude,
+          timezone: config.timezone || "America/Mexico_City",
+          updatedAt: new Date(),
+        })
+        .where(eq(locationConfig.id, existing[0].id));
+    } else {
+      // Si no existe, insertar (sin especificar id para que sea autoincrement)
+      await db.insert(locationConfig).values({
         locationName: config.locationName,
         latitude: config.latitude,
         longitude: config.longitude,
         timezone: config.timezone || "America/Mexico_City",
-        updatedAt: new Date(),
-      },
+      });
+    }
+  } catch (error) {
+    // Si falla el SELECT (tabla vacía o error), intentar INSERT directo
+    await db.insert(locationConfig).values({
+      locationName: config.locationName,
+      latitude: config.latitude,
+      longitude: config.longitude,
+      timezone: config.timezone || "America/Mexico_City",
     });
+  }
 }
