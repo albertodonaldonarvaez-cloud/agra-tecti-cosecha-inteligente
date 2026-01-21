@@ -201,19 +201,23 @@ export async function upsertLocationConfig(config: InsertLocationConfig) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   
-  const existing = await getLocationConfig();
-  
-  if (existing) {
-    await db.update(locationConfig)
-      .set({
+  // Usar INSERT ON DUPLICATE KEY UPDATE para evitar SELECT previo
+  // Como solo debe haber un registro, siempre usamos id=1
+  await db.insert(locationConfig)
+    .values({
+      id: 1,
+      locationName: config.locationName,
+      latitude: config.latitude,
+      longitude: config.longitude,
+      timezone: config.timezone || "America/Mexico_City",
+    })
+    .onDuplicateKeyUpdate({
+      set: {
         locationName: config.locationName,
         latitude: config.latitude,
         longitude: config.longitude,
         timezone: config.timezone || "America/Mexico_City",
         updatedAt: new Date(),
-      })
-      .where(eq(locationConfig.id, existing.id));
-  } else {
-    await db.insert(locationConfig).values(config);
-  }
+      },
+    });
 }
