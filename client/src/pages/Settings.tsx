@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save } from "lucide-react";
+import LocationMapPicker from "@/components/LocationMapPicker";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -147,6 +148,11 @@ export default function Settings() {
 
   const handleSaveConfig = () => {
     saveConfig.mutate({ apiUrl, apiToken, assetId });
+  };
+
+  const handleLocationChange = (lat: string, lng: string) => {
+    setLatitude(lat);
+    setLongitude(lng);
   };
 
   const handleSaveLocation = () => {
@@ -424,6 +430,12 @@ export default function Settings() {
                   placeholder="Ej: Santa Rosa Treinta"
                 />
               </div>
+
+              <LocationMapPicker
+                latitude={latitude}
+                longitude={longitude}
+                onLocationChange={handleLocationChange}
+              />
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
