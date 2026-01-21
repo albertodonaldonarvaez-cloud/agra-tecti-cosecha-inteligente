@@ -2,8 +2,8 @@
 
 echo "🔄 Recreando tabla locationConfig..."
 
-# Ejecutar SQL para eliminar y recrear la tabla
-docker compose exec db mysql -u root agratec << 'EOF'
+# Ejecutar SQL para eliminar y recrear la tabla (usar -T para no requerir TTY)
+docker compose exec -T db mysql -u root agratec << 'EOF'
 
 -- Eliminar tabla si existe
 DROP TABLE IF EXISTS `locationConfig`;
