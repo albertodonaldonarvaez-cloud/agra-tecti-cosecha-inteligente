@@ -1,14 +1,14 @@
 -- Índices para optimizar consultas de cajas
--- Para MySQL 8.0
+-- Para MySQL 8.0 - Nombres de columnas en camelCase
 
 -- Índice para ordenar por fecha de envío (usado en paginación)
-ALTER TABLE boxes ADD INDEX idx_boxes_submission_time (submission_time DESC);
+ALTER TABLE boxes ADD INDEX idx_boxes_submissionTime (submissionTime DESC);
 
 -- Índice para filtrar por parcela
-ALTER TABLE boxes ADD INDEX idx_boxes_parcel_code (parcel_code);
+ALTER TABLE boxes ADD INDEX idx_boxes_parcelCode (parcelCode);
 
 -- Índice para filtrar por cortadora
-ALTER TABLE boxes ADD INDEX idx_boxes_harvester_id (harvester_id);
+ALTER TABLE boxes ADD INDEX idx_boxes_harvesterId (harvesterId);
 
 -- Índice compuesto para filtros combinados
-ALTER TABLE boxes ADD INDEX idx_boxes_filters (submission_time, parcel_code, harvester_id);
+ALTER TABLE boxes ADD INDEX idx_boxes_filters (submissionTime, parcelCode, harvesterId);
