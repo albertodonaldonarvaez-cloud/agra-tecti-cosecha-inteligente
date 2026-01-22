@@ -107,7 +107,16 @@ function HomeContent() {
 
   // Preparar datos para la gráfica de líneas (en kilogramos) con temperatura
   const chartData = useMemo(() => {
-    if (!boxes || boxes.length === 0) return [];
+    console.log('🔄 ChartData useMemo ejecutándose...');
+    console.log('📦 boxes:', boxes?.length || 0, 'cajas');
+    console.log('🌡️ weatherData tipo:', typeof weatherData, 'valor:', weatherData);
+    console.log('📅 selectedMonth:', selectedMonth);
+    console.log('⏳ weatherLoading:', weatherLoading);
+    
+    if (!boxes || boxes.length === 0) {
+      console.log('❌ No hay cajas, retornando array vacío');
+      return [];
+    }
     
     // Calcular rango de fechas del mes seleccionado
     const [year, month] = selectedMonth.split('-').map(Number);
@@ -146,6 +155,10 @@ function HomeContent() {
     console.log('📊 ChartData - weatherData:', weatherArray.length, 'registros');
     console.log('📊 ChartData - sortedEntries:', sortedEntries.length, 'días');
     
+    if (weatherArray.length > 0) {
+      console.log('🌡️ Primeros 3 registros de weatherData:', weatherArray.slice(0, 3));
+    }
+    
     return sortedEntries.map(entry => {
       const weather = weatherArray.find((w: any) => w.date === entry.dateKey);
       if (weather) {
@@ -164,7 +177,7 @@ function HomeContent() {
         tempProm: weather ? Number(weather.temperatureMean.toFixed(1)) : null,
       };
     });
-  }, [boxes, weatherData, selectedMonth]);
+  }, [boxes, weatherData, selectedMonth, weatherLoading]);
 
   // Obtener últimas 5 cajas con imágenes
   const recentBoxesWithImages = useMemo(() => {
