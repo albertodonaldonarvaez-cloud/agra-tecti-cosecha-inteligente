@@ -107,16 +107,7 @@ function HomeContent() {
 
   // Preparar datos para la gráfica de líneas (en kilogramos) con temperatura
   const chartData = useMemo(() => {
-    console.log('🔄 ChartData useMemo ejecutándose...');
-    console.log('📦 boxes:', boxes?.length || 0, 'cajas');
-    console.log('🌡️ weatherData tipo:', typeof weatherData, 'valor:', weatherData);
-    console.log('📅 selectedMonth:', selectedMonth);
-    console.log('⏳ weatherLoading:', weatherLoading);
-    
-    if (!boxes || boxes.length === 0) {
-      console.log('❌ No hay cajas, retornando array vacío');
-      return [];
-    }
+    if (!boxes || boxes.length === 0) return [];
     
     // Calcular rango de fechas del mes seleccionado
     const [year, month] = selectedMonth.split('-').map(Number);
@@ -152,23 +143,11 @@ function HomeContent() {
     
     // Agregar datos de temperatura si están disponibles
     const weatherArray = Array.isArray(weatherData) ? weatherData : [];
-    console.log('📊 ChartData - weatherData:', weatherArray.length, 'registros');
-    console.log('📊 ChartData - sortedEntries:', sortedEntries.length, 'días');
-    
-    if (weatherArray.length > 0) {
-      console.log('🌡️ Primeros 3 registros de weatherData:', weatherArray.slice(0, 3));
-    }
     
     return sortedEntries.map(entry => {
       const weather = weatherArray.find((w: any) => w.date === entry.dateKey);
-      if (weather) {
-        console.log(`✅ Match encontrado para ${entry.dateKey}:`, weather);
-      } else {
-        console.log(`❌ No match para ${entry.dateKey}`);
-      }
       return {
         date: entry.date,
-        dateKey: entry.dateKey, // Agregar para depuración
         primera: Number(entry.primera.toFixed(2)),
         segunda: Number(entry.segunda.toFixed(2)),
         desperdicio: Number(entry.desperdicio.toFixed(2)),
@@ -337,7 +316,10 @@ function HomeContent() {
                 <div className="w-full overflow-x-auto">
                   <div style={{ minWidth: chartData.length > 7 ? `${chartData.length * 60}px` : '100%', height: '300px' }}>
                     <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData}>
+                  <LineChart 
+                    key={`chart-${selectedMonth}-${weatherData?.length || 0}`}
+                    data={chartData}
+                  >
                     <CartesianGrid strokeDasharray="3 3" stroke="#d1fae5" />
                     <XAxis dataKey="date" stroke="#059669" />
                     <YAxis yAxisId="left" label={{ value: 'Kilogramos', angle: -90, position: 'insideLeft' }} stroke="#059669" />
