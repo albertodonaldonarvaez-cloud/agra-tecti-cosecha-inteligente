@@ -139,21 +139,26 @@ export async function getBoxesPaginated(params: {
   filterDate?: string;
   filterParcel?: string;
   filterHarvester?: number;
+  search?: string;
 }) {
   const db = await getDb();
   if (!db) return { boxes: [], total: 0, page: params.page, pageSize: params.pageSize, totalPages: 0 };
   
-  const { desc, sql, and, eq, gte, lt, count } = await import("drizzle-orm");
+  const { desc, and, eq, gte, lt, count, like } = await import("drizzle-orm");
   const offset = (params.page - 1) * params.pageSize;
   
   // Construir condiciones de filtro
   const conditions = [];
   
+  // Búsqueda por código de caja
+  if (params.search && params.search.trim() !== '') {
+    conditions.push(like(boxes.boxCode, `%${params.search.trim()}%`));
+  }
+  
   if (params.filterDate) {
     // Filtrar por fecha (formato YYYY-MM-DD)
-    const startDate = new Date(params.filterDate);
-    const endDate = new Date(params.filterDate);
-    endDate.setDate(endDate.getDate() + 1);
+    const startDate = new Date(params.filterDate + 'T00:00:00');
+    const endDate = new Date(params.filterDate + 'T23:59:59');
     conditions.push(gte(boxes.submissionTime, startDate));
     conditions.push(lt(boxes.submissionTime, endDate));
   }
@@ -207,27 +212,28 @@ export async function getBoxFilterOptions() {
   
   const { sql } = await import("drizzle-orm");
   
-  // Obtener fechas únicas (solo los últimos 30 días para rapidez)
+  // Obtener fechas únicas (solo los últimos 60 días para rapidez)
+  // Usar nombres de columnas en camelCase
   const datesResult = await db.execute(sql`
-    SELECT DISTINCT DATE(submission_time) as date 
+    SELECT DISTINCT DATE(submissionTime) as date 
     FROM boxes 
-    WHERE submission_time >= DATE_SUB(NOW(), INTERVAL 60 DAY)
+    WHERE submissionTime >= DATE_SUB(NOW(), INTERVAL 60 DAY)
     ORDER BY date DESC
   `);
   
   // Obtener parcelas únicas
   const parcelsResult = await db.execute(sql`
-    SELECT DISTINCT parcel_code as code, parcel_name as name 
+    SELECT DISTINCT parcelCode as code, parcelName as name 
     FROM boxes 
-    WHERE parcel_code IS NOT NULL AND parcel_code != ''
-    ORDER BY parcel_code
+    WHERE parcelCode IS NOT NULL AND parcelCode != ''
+    ORDER BY parcelCode
   `);
   
   // Obtener cortadoras únicas
   const harvestersResult = await db.execute(sql`
-    SELECT DISTINCT harvester_id as id 
+    SELECT DISTINCT harvesterId as id 
     FROM boxes 
-    ORDER BY harvester_id
+    ORDER BY harvesterId
   `);
   
   return {

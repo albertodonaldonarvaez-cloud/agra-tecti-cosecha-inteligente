@@ -69,6 +69,7 @@ export const appRouter = router({
         filterDate: z.string().optional(),
         filterParcel: z.string().optional(),
         filterHarvester: z.number().optional(),
+        search: z.string().optional(),
       }))
       .query(async ({ input }) => {
         return await db.getBoxesPaginated(input);

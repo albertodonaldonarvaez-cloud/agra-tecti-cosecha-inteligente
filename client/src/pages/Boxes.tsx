@@ -3,6 +3,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { ProtectedPage } from "@/components/ProtectedPage";
 import { GlassCard } from "@/components/GlassCard";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { getProxiedImageUrl } from "@/lib/imageProxy";
 import {
   Dialog,
@@ -19,9 +20,10 @@ import {
 } from "@/components/ui/select";
 import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Package, X, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { Package, X, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Search } from "lucide-react";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { useDebouncedCallback } from "use-debounce";
 
 interface Box {
   id: number;
@@ -70,6 +72,20 @@ function BoxesContent() {
   const [filterDate, setFilterDate] = useState<string>("all");
   const [filterParcel, setFilterParcel] = useState<string>("all");
   const [filterHarvester, setFilterHarvester] = useState<string>("all");
+  const [searchInput, setSearchInput] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  
+  // Debounce para búsqueda (espera 300ms después de dejar de escribir)
+  const debouncedSearch = useDebouncedCallback((value: string) => {
+    setSearchQuery(value);
+    setPage(1);
+  }, 300);
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setSearchInput(value);
+    debouncedSearch(value);
+  };
   
   // Obtener opciones de filtro (carga rápida)
   const { data: filterOptions } = trpc.boxes.filterOptions.useQuery(undefined, {
@@ -85,6 +101,7 @@ function BoxesContent() {
       filterDate: filterDate !== "all" ? filterDate : undefined,
       filterParcel: filterParcel !== "all" ? filterParcel : undefined,
       filterHarvester: filterHarvester !== "all" ? parseInt(filterHarvester) : undefined,
+      search: searchQuery || undefined,
     },
     {
       enabled: !!user,
@@ -133,6 +150,8 @@ function BoxesContent() {
     setFilterDate("all");
     setFilterParcel("all");
     setFilterHarvester("all");
+    setSearchInput("");
+    setSearchQuery("");
     setPage(1);
   };
 
@@ -142,7 +161,7 @@ function BoxesContent() {
 
   // Formatear fecha para mostrar
   const formatDateDisplay = (dateStr: string) => {
-    const date = new Date(dateStr + 'T00:00:00');
+    const date = new Date(dateStr + 'T12:00:00');
     return date.toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' });
   };
 
@@ -163,8 +182,23 @@ function BoxesContent() {
           </div>
         </div>
 
-        {/* Filtros */}
+        {/* Buscador y Filtros */}
         <GlassCard className="mb-6 p-6">
+          {/* Buscador */}
+          <div className="mb-6">
+            <label className="mb-2 block text-sm font-medium text-green-900">Buscar por código de caja</label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-green-500" />
+              <Input
+                type="text"
+                placeholder="Ej: 01-123456"
+                value={searchInput}
+                onChange={handleSearchChange}
+                className="pl-10 border-green-200 focus:border-green-500 focus:ring-green-500"
+              />
+            </div>
+          </div>
+
           <div className="mb-4 flex items-center gap-2">
             <Filter className="h-5 w-5 text-green-600" />
             <h2 className="text-lg font-semibold text-green-900">Filtros</h2>
@@ -351,7 +385,7 @@ function BoxesContent() {
             <div className="py-12 text-center">
               <Package className="mx-auto mb-4 h-16 w-16 text-green-300" />
               <h3 className="mb-2 text-xl font-semibold text-green-900">No hay cajas que coincidan</h3>
-              <p className="text-green-600">Intenta ajustar los filtros</p>
+              <p className="text-green-600">Intenta ajustar los filtros o la búsqueda</p>
             </div>
           )}
         </GlassCard>
