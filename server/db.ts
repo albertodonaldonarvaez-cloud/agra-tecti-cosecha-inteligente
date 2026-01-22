@@ -132,6 +132,111 @@ export async function getAllBoxes() {
   }).from(boxes).orderBy(desc(boxes.submissionTime));
 }
 
+// Paginación optimizada para carga rápida
+export async function getBoxesPaginated(params: {
+  page: number;
+  pageSize: number;
+  filterDate?: string;
+  filterParcel?: string;
+  filterHarvester?: number;
+}) {
+  const db = await getDb();
+  if (!db) return { boxes: [], total: 0, page: params.page, pageSize: params.pageSize, totalPages: 0 };
+  
+  const { desc, sql, and, eq, gte, lt, count } = await import("drizzle-orm");
+  const offset = (params.page - 1) * params.pageSize;
+  
+  // Construir condiciones de filtro
+  const conditions = [];
+  
+  if (params.filterDate) {
+    // Filtrar por fecha (formato YYYY-MM-DD)
+    const startDate = new Date(params.filterDate);
+    const endDate = new Date(params.filterDate);
+    endDate.setDate(endDate.getDate() + 1);
+    conditions.push(gte(boxes.submissionTime, startDate));
+    conditions.push(lt(boxes.submissionTime, endDate));
+  }
+  
+  if (params.filterParcel && params.filterParcel !== 'all') {
+    conditions.push(eq(boxes.parcelCode, params.filterParcel));
+  }
+  
+  if (params.filterHarvester && params.filterHarvester > 0) {
+    conditions.push(eq(boxes.harvesterId, params.filterHarvester));
+  }
+  
+  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+  
+  // Obtener total de registros
+  const totalResult = await db.select({ count: count() })
+    .from(boxes)
+    .where(whereClause);
+  const total = totalResult[0]?.count || 0;
+  
+  // Obtener página de datos
+  const data = await db.select({
+    id: boxes.id,
+    boxCode: boxes.boxCode,
+    harvesterId: boxes.harvesterId,
+    parcelCode: boxes.parcelCode,
+    parcelName: boxes.parcelName,
+    weight: boxes.weight,
+    photoUrl: boxes.photoUrl,
+    submissionTime: boxes.submissionTime,
+  })
+    .from(boxes)
+    .where(whereClause)
+    .orderBy(desc(boxes.submissionTime))
+    .limit(params.pageSize)
+    .offset(offset);
+  
+  return {
+    boxes: data,
+    total,
+    page: params.page,
+    pageSize: params.pageSize,
+    totalPages: Math.ceil(total / params.pageSize),
+  };
+}
+
+// Obtener opciones de filtro (fechas, parcelas, cortadoras únicas)
+export async function getBoxFilterOptions() {
+  const db = await getDb();
+  if (!db) return { dates: [], parcels: [], harvesters: [] };
+  
+  const { sql } = await import("drizzle-orm");
+  
+  // Obtener fechas únicas (solo los últimos 30 días para rapidez)
+  const datesResult = await db.execute(sql`
+    SELECT DISTINCT DATE(submission_time) as date 
+    FROM boxes 
+    WHERE submission_time >= DATE_SUB(NOW(), INTERVAL 60 DAY)
+    ORDER BY date DESC
+  `);
+  
+  // Obtener parcelas únicas
+  const parcelsResult = await db.execute(sql`
+    SELECT DISTINCT parcel_code as code, parcel_name as name 
+    FROM boxes 
+    WHERE parcel_code IS NOT NULL AND parcel_code != ''
+    ORDER BY parcel_code
+  `);
+  
+  // Obtener cortadoras únicas
+  const harvestersResult = await db.execute(sql`
+    SELECT DISTINCT harvester_id as id 
+    FROM boxes 
+    ORDER BY harvester_id
+  `);
+  
+  return {
+    dates: (datesResult[0] as any[]).map(r => r.date),
+    parcels: (parcelsResult[0] as any[]).map(r => ({ code: r.code, name: r.name })),
+    harvesters: (harvestersResult[0] as any[]).map(r => r.id),
+  };
+}
+
 export async function clearAllBoxes() {
   const db = await getDb();
   if (!db) throw new Error("Database not available");

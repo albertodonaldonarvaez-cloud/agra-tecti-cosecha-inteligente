@@ -61,6 +61,24 @@ export const appRouter = router({
       return await db.getAllBoxes();
     }),
 
+    // Endpoint paginado para carga rápida
+    listPaginated: protectedProcedure
+      .input(z.object({
+        page: z.number().min(1).default(1),
+        pageSize: z.number().min(10).max(100).default(50),
+        filterDate: z.string().optional(),
+        filterParcel: z.string().optional(),
+        filterHarvester: z.number().optional(),
+      }))
+      .query(async ({ input }) => {
+        return await db.getBoxesPaginated(input);
+      }),
+
+    // Opciones de filtro (carga rápida)
+    filterOptions: protectedProcedure.query(async () => {
+      return await db.getBoxFilterOptions();
+    }),
+
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
