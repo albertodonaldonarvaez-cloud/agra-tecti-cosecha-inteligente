@@ -54,12 +54,6 @@ function HomeContent() {
     { enabled: !!user && !!locationConfig }
   );
 
-  // Obtener pronóstico de 2 días
-  const { data: forecastData } = trpc.weather.getForecast.useQuery(undefined, {
-    enabled: !!user,
-  });
-
-
 
   useEffect(() => {
     if (!loading && !user) {
@@ -322,8 +316,7 @@ function HomeContent() {
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="#d1fae5" />
                     <XAxis dataKey="date" stroke="#059669" />
-                    <YAxis yAxisId="left" label={{ value: 'Kilogramos', angle: -90, position: 'insideLeft' }} stroke="#059669" />
-                    <YAxis yAxisId="right" orientation="right" label={{ value: 'Temperatura (°C)', angle: 90, position: 'insideRight' }} stroke="#ff6b6b" />
+                    <YAxis label={{ value: 'Kilogramos', angle: -90, position: 'insideLeft' }} stroke="#059669" />
                     <Tooltip 
                       contentStyle={{ 
                         backgroundColor: 'rgba(255, 255, 255, 0.95)', 
@@ -333,7 +326,6 @@ function HomeContent() {
                     />
                     <Legend />
                     <Line 
-                      yAxisId="left"
                       type="monotone" 
                       dataKey="primera" 
                       stroke="#10b981" 
@@ -342,7 +334,6 @@ function HomeContent() {
                       dot={{ fill: '#10b981', r: 4 }}
                     />
                     <Line 
-                      yAxisId="left"
                       type="monotone" 
                       dataKey="segunda" 
                       stroke="#f59e0b" 
@@ -351,7 +342,6 @@ function HomeContent() {
                       dot={{ fill: '#f59e0b', r: 4 }}
                     />
                     <Line 
-                      yAxisId="left"
                       type="monotone" 
                       dataKey="desperdicio" 
                       stroke="#ef4444" 
@@ -359,43 +349,6 @@ function HomeContent() {
                       name="Desperdicio"
                       dot={{ fill: '#ef4444', r: 4 }}
                     />
-                    {locationConfig && (
-                      <>
-                        <Line 
-                          yAxisId="right"
-                          type="monotone" 
-                          dataKey="tempMax" 
-                          stroke="#dc2626" 
-                          strokeWidth={3}
-                          name="🌡️ Temp. Máxima (°C)"
-                          dot={{ fill: '#dc2626', r: 5, strokeWidth: 2, stroke: '#fff' }}
-                          activeDot={{ r: 7 }}
-                          connectNulls
-                        />
-                        <Line 
-                          yAxisId="right"
-                          type="monotone" 
-                          dataKey="tempProm" 
-                          stroke="#ea580c" 
-                          strokeWidth={3}
-                          name="🌡️ Temp. Promedio (°C)"
-                          dot={{ fill: '#ea580c', r: 5, strokeWidth: 2, stroke: '#fff' }}
-                          activeDot={{ r: 7 }}
-                          connectNulls
-                        />
-                        <Line 
-                          yAxisId="right"
-                          type="monotone" 
-                          dataKey="tempMin" 
-                          stroke="#2563eb" 
-                          strokeWidth={3}
-                          name="🌡️ Temp. Mínima (°C)"
-                          dot={{ fill: '#2563eb', r: 5, strokeWidth: 2, stroke: '#fff' }}
-                          activeDot={{ r: 7 }}
-                          connectNulls
-                        />
-                      </>
-                    )}
                     </LineChart>
                     </ResponsiveContainer>
                   </div>
@@ -420,7 +373,7 @@ function HomeContent() {
               <div className="flex items-center gap-3">
                 <Cloud className="h-8 w-8 text-green-600" />
                 <div>
-                  <h2 className="text-2xl font-semibold text-green-900">Temperatura y Cosecha</h2>
+                  <h2 className="text-2xl font-semibold text-green-900">Temperatura y Cosecha - Datos Históricos</h2>
                   <p className="text-sm text-green-600">{locationConfig.locationName}</p>
                 </div>
               </div>
@@ -489,28 +442,7 @@ function HomeContent() {
                       </tr>
                     );
                   })}
-                  {/* Pronóstico de próximos 2 días */}
-                  {forecastData && forecastData.map((forecast: any) => (
-                    <tr key={forecast.date} className="border-b border-green-100 bg-blue-50">
-                      <td className="py-3 text-green-900">
-                        <div className="flex items-center gap-2">
-                          {forecast.date}
-                          <span className="rounded-full bg-blue-500 px-2 py-0.5 text-xs text-white">Pronóstico</span>
-                        </div>
-                      </td>
-                      <td className="py-3 text-right font-semibold text-gray-400">-</td>
-                      <td className="py-3 text-right text-gray-400">-</td>
-                      <td className="py-3 text-right text-green-700">
-                        {forecast.temperatureMax.toFixed(1)}
-                      </td>
-                      <td className="py-3 text-right text-blue-700">
-                        {forecast.temperatureMin.toFixed(1)}
-                      </td>
-                      <td className="py-3 text-right text-orange-700">
-                        {forecast.temperatureMean.toFixed(1)}
-                      </td>
-                    </tr>
-                  ))}
+
                   {weatherLoading && (
                     <tr>
                       <td colSpan={6} className="py-8 text-center text-green-600">
