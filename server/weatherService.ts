@@ -26,38 +26,79 @@ export async function getWeatherData(
   timezone: string = "America/Mexico_City"
 ): Promise<WeatherData[]> {
   try {
-    const url = `https://archive-api.open-meteo.com/v1/archive?` +
-      `latitude=${latitude}&` +
-      `longitude=${longitude}&` +
-      `start_date=${startDate}&` +
-      `end_date=${endDate}&` +
-      `daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean&` +
-      `timezone=${encodeURIComponent(timezone)}`;
-
-    const response = await fetch(url);
+    // Calcular si necesitamos datos recientes (últimos 7 días)
+    const today = new Date();
+    const sevenDaysAgo = new Date(today);
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const endDateObj = new Date(endDate);
     
-    if (!response.ok) {
-      throw new Error(`Open-Meteo API error: ${response.statusText}`);
+    let allData: WeatherData[] = [];
+    
+    // Si la fecha final es reciente, usar forecast API para datos recientes
+    if (endDateObj >= sevenDaysAgo) {
+      const forecastUrl = `https://api.open-meteo.com/v1/forecast?` +
+        `latitude=${latitude}&` +
+        `longitude=${longitude}&` +
+        `daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean&` +
+        `past_days=7&` +
+        `forecast_days=7&` +
+        `timezone=${encodeURIComponent(timezone)}`;
+      
+      const forecastResponse = await fetch(forecastUrl);
+      if (forecastResponse.ok) {
+        const forecastData = await forecastResponse.json();
+        if (forecastData.daily) {
+          for (let i = 0; i < forecastData.daily.time.length; i++) {
+            const date = forecastData.daily.time[i];
+            if (date >= startDate && date <= endDate) {
+              allData.push({
+                date,
+                temperatureMax: forecastData.daily.temperature_2m_max[i],
+                temperatureMin: forecastData.daily.temperature_2m_min[i],
+                temperatureMean: forecastData.daily.temperature_2m_mean[i],
+              });
+            }
+          }
+        }
+      }
     }
+    
+    // Si necesitamos datos más antiguos, usar archive API
+    const startDateObj = new Date(startDate);
+    if (startDateObj < sevenDaysAgo) {
+      const archiveEndDate = endDateObj < sevenDaysAgo ? endDate : sevenDaysAgo.toISOString().split('T')[0];
+      
+      const archiveUrl = `https://archive-api.open-meteo.com/v1/archive?` +
+        `latitude=${latitude}&` +
+        `longitude=${longitude}&` +
+        `start_date=${startDate}&` +
+        `end_date=${archiveEndDate}&` +
+        `daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean&` +
+        `timezone=${encodeURIComponent(timezone)}`;
 
-    const data = await response.json();
-
-    if (!data.daily) {
-      return [];
+      const archiveResponse = await fetch(archiveUrl);
+      if (archiveResponse.ok) {
+        const archiveData = await archiveResponse.json();
+        if (archiveData.daily) {
+          for (let i = 0; i < archiveData.daily.time.length; i++) {
+            allData.push({
+              date: archiveData.daily.time[i],
+              temperatureMax: archiveData.daily.temperature_2m_max[i],
+              temperatureMin: archiveData.daily.temperature_2m_min[i],
+              temperatureMean: archiveData.daily.temperature_2m_mean[i],
+            });
+          }
+        }
+      }
     }
-
-    // Convertir respuesta a formato más manejable
-    const weatherData: WeatherData[] = [];
-    for (let i = 0; i < data.daily.time.length; i++) {
-      weatherData.push({
-        date: data.daily.time[i],
-        temperatureMax: data.daily.temperature_2m_max[i],
-        temperatureMin: data.daily.temperature_2m_min[i],
-        temperatureMean: data.daily.temperature_2m_mean[i],
-      });
-    }
-
-    return weatherData;
+    
+    // Ordenar por fecha y eliminar duplicados
+    const uniqueData = new Map<string, WeatherData>();
+    allData.forEach(item => {
+      uniqueData.set(item.date, item);
+    });
+    
+    return Array.from(uniqueData.values()).sort((a, b) => a.date.localeCompare(b.date));
   } catch (error) {
     console.error('Error fetching weather data:', error);
     throw error;

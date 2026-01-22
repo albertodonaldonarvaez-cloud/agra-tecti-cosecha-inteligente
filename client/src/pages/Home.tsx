@@ -106,11 +106,20 @@ function HomeContent() {
   const chartData = useMemo(() => {
     if (!boxes || boxes.length === 0) return [];
     
+    // Calcular rango de fechas del mes seleccionado
+    const [year, month] = selectedMonth.split('-').map(Number);
+    const monthStart = new Date(year, month - 1, 1);
+    const monthEnd = new Date(year, month, 0);
+    
     // Usar un Map con fecha completa como clave para ordenar correctamente
     const dateMap = new Map<string, { fullDate: Date; dateKey: string; date: string; primera: number; segunda: number; desperdicio: number }>();
     
     boxes.forEach(box => {
       const fullDate = new Date(box.submissionTime);
+      
+      // Filtrar solo cajas del mes seleccionado
+      if (fullDate < monthStart || fullDate > monthEnd) return;
+      
       const dateKey = fullDate.toISOString().split('T')[0]; // YYYY-MM-DD
       const displayDate = fullDate.toLocaleDateString('es-MX', { month: 'short', day: 'numeric' });
       
@@ -142,7 +151,7 @@ function HomeContent() {
         tempProm: weather ? Number(weather.temperatureMean.toFixed(1)) : null,
       };
     });
-  }, [boxes, weatherData]);
+  }, [boxes, weatherData, selectedMonth]);
 
   // Obtener últimas 5 cajas con imágenes
   const recentBoxesWithImages = useMemo(() => {
@@ -264,7 +273,25 @@ function HomeContent() {
             {/* Gráfica de evolución temporal */}
             {chartData.length > 0 && (
                <GlassCard className="p-6">
-                <h3 className="mb-4 text-lg font-semibold text-green-900">Evolución de Calidad (Kilogramos)</h3>
+                <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <h3 className="text-lg font-semibold text-green-900">Evolución de Calidad (Kilogramos)</h3>
+                  <div className="flex items-center gap-2">
+                    <CalendarIcon className="h-5 w-5 text-green-600" />
+                    <select
+                      value={selectedMonth}
+                      onChange={(e) => setSelectedMonth(e.target.value)}
+                      className="rounded-lg border border-green-200 bg-white px-4 py-2 text-sm text-green-900 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
+                    >
+                      {Array.from({ length: 12 }, (_, i) => {
+                        const date = new Date();
+                        date.setMonth(date.getMonth() - i);
+                        const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                        const label = date.toLocaleDateString('es-MX', { year: 'numeric', month: 'long' });
+                        return <option key={value} value={value}>{label}</option>;
+                      })}
+                    </select>
+                  </div>
+                </div>
                 <div className="w-full overflow-x-auto">
                   <div style={{ minWidth: chartData.length > 7 ? `${chartData.length * 60}px` : '100%', height: '300px' }}>
                     <ResponsiveContainer width="100%" height="100%">
