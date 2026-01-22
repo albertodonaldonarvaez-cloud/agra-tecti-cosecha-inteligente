@@ -7,7 +7,7 @@ import { getProxiedImageUrl } from "@/lib/imageProxy";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Package, TrendingUp, AlertCircle, CheckCircle, Image as ImageIcon, X } from "lucide-react";
+import { Package, TrendingUp, AlertCircle, CheckCircle, Image as ImageIcon, X, Cloud, Calendar as CalendarIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
@@ -23,8 +23,38 @@ function HomeContent() {
   const { user, loading } = useAuth();
   const [selectedBox, setSelectedBox] = useState<any>(null);
   const [showImageModal, setShowImageModal] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
   
   const { data: boxes } = trpc.boxes.list.useQuery(undefined, {
+    enabled: !!user,
+  });
+
+  // Calcular rango de fechas del mes seleccionado
+  const monthDateRange = useMemo(() => {
+    const [year, month] = selectedMonth.split('-').map(Number);
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0);
+    return {
+      startDate: startDate.toISOString().split('T')[0],
+      endDate: endDate.toISOString().split('T')[0],
+    };
+  }, [selectedMonth]);
+
+  // Obtener datos meteorológicos del mes
+  const { data: weatherData, isLoading: weatherLoading } = trpc.weather.getForDateRange.useQuery(
+    monthDateRange,
+    { enabled: !!user }
+  );
+
+  // Obtener pronóstico de 2 días
+  const { data: forecastData } = trpc.weather.getForecast.useQuery(undefined, {
+    enabled: !!user,
+  });
+
+  const { data: locationConfig } = trpc.locationConfig.get.useQuery(undefined, {
     enabled: !!user,
   });
 
@@ -283,6 +313,119 @@ function HomeContent() {
           </GlassCard>
         )}
       </div>
+
+      {/* Tabla de Temperatura y Cosecha */}
+      {locationConfig && (
+        <div className="container mt-8">
+          <GlassCard className="p-6">
+            <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <Cloud className="h-8 w-8 text-green-600" />
+                <div>
+                  <h2 className="text-2xl font-semibold text-green-900">Temperatura y Cosecha</h2>
+                  <p className="text-sm text-green-600">{locationConfig.locationName}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <CalendarIcon className="h-5 w-5 text-green-600" />
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className="rounded-lg border border-green-200 bg-white px-4 py-2 text-green-900 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
+                >
+                  {Array.from({ length: 12 }, (_, i) => {
+                    const date = new Date();
+                    date.setMonth(date.getMonth() - i);
+                    const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                    const label = date.toLocaleDateString('es-MX', { year: 'numeric', month: 'long' });
+                    return <option key={value} value={value}>{label}</option>;
+                  })}
+                </select>
+              </div>
+            </div>
+            <p className="mb-4 text-sm text-green-700">
+              🌡️ Se recomienda usar estaciones meteorológicas locales para mejorar la precisión de los datos de temperatura
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-green-200">
+                    <th className="pb-2 text-left text-sm font-semibold text-green-900">Fecha</th>
+                    <th className="pb-2 text-right text-sm font-semibold text-green-900">Peso Total (kg)</th>
+                    <th className="pb-2 text-right text-sm font-semibold text-green-900">1ra Calidad (kg)</th>
+                    <th className="pb-2 text-right text-sm font-semibold text-green-900">Temp. Máx (°C)</th>
+                    <th className="pb-2 text-right text-sm font-semibold text-green-900">Temp. Mín (°C)</th>
+                    <th className="pb-2 text-right text-sm font-semibold text-green-900">Temp. Prom (°C)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {/* Datos históricos del mes */}
+                  {weatherData && weatherData.map((weather: any) => {
+                    const dayBoxes = boxes?.filter(b => {
+                      const boxDate = new Date(b.submissionTime).toISOString().split('T')[0];
+                      return boxDate === weather.date;
+                    }) || [];
+                    const totalWeight = dayBoxes.reduce((sum, b) => sum + b.weight, 0) / 1000;
+                    const firstQualityWeight = dayBoxes
+                      .filter(b => b.harvesterId !== 98 && b.harvesterId !== 99)
+                      .reduce((sum, b) => sum + b.weight, 0) / 1000;
+                    
+                    return (
+                      <tr key={weather.date} className="border-b border-green-100">
+                        <td className="py-3 text-green-900">{weather.date}</td>
+                        <td className="py-3 text-right font-semibold text-green-900">
+                          {totalWeight > 0 ? totalWeight.toFixed(2) : '-'}
+                        </td>
+                        <td className="py-3 text-right text-green-900">
+                          {firstQualityWeight > 0 ? firstQualityWeight.toFixed(2) : '-'}
+                        </td>
+                        <td className="py-3 text-right text-green-700">
+                          {weather.temperatureMax.toFixed(1)}
+                        </td>
+                        <td className="py-3 text-right text-blue-700">
+                          {weather.temperatureMin.toFixed(1)}
+                        </td>
+                        <td className="py-3 text-right text-orange-700">
+                          {weather.temperatureMean.toFixed(1)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {/* Pronóstico de próximos 2 días */}
+                  {forecastData && forecastData.map((forecast: any) => (
+                    <tr key={forecast.date} className="border-b border-green-100 bg-blue-50">
+                      <td className="py-3 text-green-900">
+                        <div className="flex items-center gap-2">
+                          {forecast.date}
+                          <span className="rounded-full bg-blue-500 px-2 py-0.5 text-xs text-white">Pronóstico</span>
+                        </div>
+                      </td>
+                      <td className="py-3 text-right font-semibold text-gray-400">-</td>
+                      <td className="py-3 text-right text-gray-400">-</td>
+                      <td className="py-3 text-right text-green-700">
+                        {forecast.temperatureMax.toFixed(1)}
+                      </td>
+                      <td className="py-3 text-right text-blue-700">
+                        {forecast.temperatureMin.toFixed(1)}
+                      </td>
+                      <td className="py-3 text-right text-orange-700">
+                        {forecast.temperatureMean.toFixed(1)}
+                      </td>
+                    </tr>
+                  ))}
+                  {weatherLoading && (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-green-600">
+                        Cargando datos meteorológicos...
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </GlassCard>
+        </div>
+      )}
 
       {/* Modal de detalle de imagen */}
       <Dialog open={showImageModal} onOpenChange={setShowImageModal}>

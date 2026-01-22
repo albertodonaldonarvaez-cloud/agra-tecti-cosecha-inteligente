@@ -540,6 +540,25 @@ export const appRouter = router({
         
         return weatherData;
       }),
+    
+    getForecast: protectedProcedure
+      .query(async () => {
+        const { getWeatherForecast } = await import("./weatherService");
+        const locationConfig = await dbExt.getLocationConfig();
+        
+        if (!locationConfig) {
+          throw new Error("Configuración de ubicación no encontrada. Configure la ubicación en Ajustes.");
+        }
+        
+        const forecastData = await getWeatherForecast(
+          locationConfig.latitude,
+          locationConfig.longitude,
+          2, // próximos 2 días
+          locationConfig.timezone
+        );
+        
+        return forecastData;
+      }),
   }),
 
   analytics: router({
