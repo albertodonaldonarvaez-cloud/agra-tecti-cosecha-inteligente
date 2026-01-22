@@ -13,7 +13,7 @@ import Users from "./pages/Users";
 import Harvesters from "./pages/Harvesters";
 import HarvesterPerformance from "./pages/HarvesterPerformance";
 import Parcels from "./pages/Parcels";
-import UploadErrors from "./pages/UploadErrors";
+
 import BoxEditor from "./pages/BoxEditor";
 import Login from "./pages/Login";
 import { FloatingNav } from "./components/FloatingNav";
@@ -45,7 +45,7 @@ function Router() {
         <Route path="/harvesters" component={Harvesters} />
         <Route path="/performance" component={HarvesterPerformance} />
         <Route path="/parcels" component={Parcels} />
-        <Route path="/errors" component={UploadErrors} />
+
         <Route path="/editor" component={BoxEditor} />
         <Route path="/users" component={Users} />
         <Route path="/settings" component={Settings} />

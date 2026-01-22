@@ -41,7 +41,7 @@ export function FloatingNav({ isAdmin = false }: FloatingNavProps) {
     { to: "/performance", icon: Target, label: "Rendimiento", permission: "canViewAnalytics" },
     { to: "/harvesters", icon: Scissors, label: "Cortadoras", adminOnly: true, permission: "canViewHarvesters" },
     { to: "/parcels", icon: MapPin, label: "Parcelas", adminOnly: true, permission: "canViewParcels" },
-    { to: "/errors", icon: AlertCircle, label: "Errores", adminOnly: true, permission: "canViewErrors" },
+
     { to: "/editor", icon: Edit, label: "Editor", adminOnly: true },
     { to: "/users", icon: Users, label: "Usuarios", adminOnly: true },
     { to: "/settings", icon: Settings, label: "Configuración", adminOnly: true },
