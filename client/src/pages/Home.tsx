@@ -139,10 +139,20 @@ function HomeContent() {
       .sort((a, b) => a.fullDate.getTime() - b.fullDate.getTime());
     
     // Agregar datos de temperatura si están disponibles
+    const weatherArray = Array.isArray(weatherData) ? weatherData : [];
+    console.log('📊 ChartData - weatherData:', weatherArray.length, 'registros');
+    console.log('📊 ChartData - sortedEntries:', sortedEntries.length, 'días');
+    
     return sortedEntries.map(entry => {
-      const weather = weatherData?.find((w: any) => w.date === entry.dateKey);
+      const weather = weatherArray.find((w: any) => w.date === entry.dateKey);
+      if (weather) {
+        console.log(`✅ Match encontrado para ${entry.dateKey}:`, weather);
+      } else {
+        console.log(`❌ No match para ${entry.dateKey}`);
+      }
       return {
         date: entry.date,
+        dateKey: entry.dateKey, // Agregar para depuración
         primera: Number(entry.primera.toFixed(2)),
         segunda: Number(entry.segunda.toFixed(2)),
         desperdicio: Number(entry.desperdicio.toFixed(2)),
