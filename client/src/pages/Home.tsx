@@ -102,12 +102,12 @@ function HomeContent() {
     };
   }, [boxes]);
 
-  // Preparar datos para la gráfica de líneas (en kilogramos)
+  // Preparar datos para la gráfica de líneas (en kilogramos) con temperatura
   const chartData = useMemo(() => {
     if (!boxes || boxes.length === 0) return [];
     
     // Usar un Map con fecha completa como clave para ordenar correctamente
-    const dateMap = new Map<string, { fullDate: Date; date: string; primera: number; segunda: number; desperdicio: number }>();
+    const dateMap = new Map<string, { fullDate: Date; dateKey: string; date: string; primera: number; segunda: number; desperdicio: number }>();
     
     boxes.forEach(box => {
       const fullDate = new Date(box.submissionTime);
@@ -115,7 +115,7 @@ function HomeContent() {
       const displayDate = fullDate.toLocaleDateString('es-MX', { month: 'short', day: 'numeric' });
       
       if (!dateMap.has(dateKey)) {
-        dateMap.set(dateKey, { fullDate, date: displayDate, primera: 0, segunda: 0, desperdicio: 0 });
+        dateMap.set(dateKey, { fullDate, dateKey, date: displayDate, primera: 0, segunda: 0, desperdicio: 0 });
       }
       
       const entry = dateMap.get(dateKey)!;
@@ -129,14 +129,20 @@ function HomeContent() {
     const sortedEntries = Array.from(dateMap.values())
       .sort((a, b) => a.fullDate.getTime() - b.fullDate.getTime());
     
-    // Redondear a 2 decimales y eliminar fullDate del resultado
-    return sortedEntries.map(entry => ({
-      date: entry.date,
-      primera: Number(entry.primera.toFixed(2)),
-      segunda: Number(entry.segunda.toFixed(2)),
-      desperdicio: Number(entry.desperdicio.toFixed(2))
-    }));
-  }, [boxes]);
+    // Agregar datos de temperatura si están disponibles
+    return sortedEntries.map(entry => {
+      const weather = weatherData?.find((w: any) => w.date === entry.dateKey);
+      return {
+        date: entry.date,
+        primera: Number(entry.primera.toFixed(2)),
+        segunda: Number(entry.segunda.toFixed(2)),
+        desperdicio: Number(entry.desperdicio.toFixed(2)),
+        tempMax: weather ? Number(weather.temperatureMax.toFixed(1)) : null,
+        tempMin: weather ? Number(weather.temperatureMin.toFixed(1)) : null,
+        tempProm: weather ? Number(weather.temperatureMean.toFixed(1)) : null,
+      };
+    });
+  }, [boxes, weatherData]);
 
   // Obtener últimas 5 cajas con imágenes
   const recentBoxesWithImages = useMemo(() => {
@@ -265,7 +271,8 @@ function HomeContent() {
                   <LineChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#d1fae5" />
                     <XAxis dataKey="date" stroke="#059669" />
-                    <YAxis label={{ value: 'Kilogramos', angle: -90, position: 'insideLeft' }} stroke="#059669" />
+                    <YAxis yAxisId="left" label={{ value: 'Kilogramos', angle: -90, position: 'insideLeft' }} stroke="#059669" />
+                    <YAxis yAxisId="right" orientation="right" label={{ value: 'Temperatura (°C)', angle: 90, position: 'insideRight' }} stroke="#ff6b6b" />
                     <Tooltip 
                       contentStyle={{ 
                         backgroundColor: 'rgba(255, 255, 255, 0.95)', 
@@ -275,6 +282,7 @@ function HomeContent() {
                     />
                     <Legend />
                     <Line 
+                      yAxisId="left"
                       type="monotone" 
                       dataKey="primera" 
                       stroke="#10b981" 
@@ -283,6 +291,7 @@ function HomeContent() {
                       dot={{ fill: '#10b981', r: 4 }}
                     />
                     <Line 
+                      yAxisId="left"
                       type="monotone" 
                       dataKey="segunda" 
                       stroke="#f59e0b" 
@@ -291,6 +300,7 @@ function HomeContent() {
                       dot={{ fill: '#f59e0b', r: 4 }}
                     />
                     <Line 
+                      yAxisId="left"
                       type="monotone" 
                       dataKey="desperdicio" 
                       stroke="#ef4444" 
@@ -298,6 +308,43 @@ function HomeContent() {
                       name="Desperdicio"
                       dot={{ fill: '#ef4444', r: 4 }}
                     />
+                    {locationConfig && (
+                      <>
+                        <Line 
+                          yAxisId="right"
+                          type="monotone" 
+                          dataKey="tempMax" 
+                          stroke="#ff6b6b" 
+                          strokeWidth={2}
+                          strokeDasharray="5 5"
+                          name="Temp. Máxima (°C)"
+                          dot={{ fill: '#ff6b6b', r: 3 }}
+                          connectNulls
+                        />
+                        <Line 
+                          yAxisId="right"
+                          type="monotone" 
+                          dataKey="tempProm" 
+                          stroke="#ffa500" 
+                          strokeWidth={2}
+                          strokeDasharray="5 5"
+                          name="Temp. Promedio (°C)"
+                          dot={{ fill: '#ffa500', r: 3 }}
+                          connectNulls
+                        />
+                        <Line 
+                          yAxisId="right"
+                          type="monotone" 
+                          dataKey="tempMin" 
+                          stroke="#4dabf7" 
+                          strokeWidth={2}
+                          strokeDasharray="5 5"
+                          name="Temp. Mínima (°C)"
+                          dot={{ fill: '#4dabf7', r: 3 }}
+                          connectNulls
+                        />
+                      </>
+                    )}
                     </LineChart>
                     </ResponsiveContainer>
                   </div>
