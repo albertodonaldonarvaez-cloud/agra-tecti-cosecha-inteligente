@@ -43,10 +43,15 @@ function HomeContent() {
     };
   }, [selectedMonth]);
 
-  // Obtener datos meteorológicos del mes
+  // Obtener configuración de ubicación primero
+  const { data: locationConfig } = trpc.locationConfig.get.useQuery(undefined, {
+    enabled: !!user,
+  });
+
+  // Obtener datos meteorológicos del mes (solo si hay ubicación configurada)
   const { data: weatherData, isLoading: weatherLoading } = trpc.weather.getForDateRange.useQuery(
     monthDateRange,
-    { enabled: !!user }
+    { enabled: !!user && !!locationConfig }
   );
 
   // Obtener pronóstico de 2 días
@@ -54,9 +59,7 @@ function HomeContent() {
     enabled: !!user,
   });
 
-  const { data: locationConfig } = trpc.locationConfig.get.useQuery(undefined, {
-    enabled: !!user,
-  });
+
 
   useEffect(() => {
     if (!loading && !user) {
@@ -185,6 +188,9 @@ function HomeContent() {
     return <Loading />;
   }
 
+  // Mostrar skeleton loader mientras cargan los datos
+  const isLoadingData = !stats || !boxes;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
       <div className="container">
@@ -197,7 +203,20 @@ function HomeContent() {
           </div>
         </div>
 
-        {stats ? (
+        {isLoadingData ? (
+          <div className="space-y-6 animate-pulse">
+            {/* Skeleton de estadísticas */}
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="bg-white/50 backdrop-blur-sm rounded-lg p-6 h-24"></div>
+              ))}
+            </div>
+            {/* Skeleton de gráfica */}
+            <div className="bg-white/50 backdrop-blur-sm rounded-lg p-6 h-96"></div>
+            {/* Skeleton de tabla */}
+            <div className="bg-white/50 backdrop-blur-sm rounded-lg p-6 h-64"></div>
+          </div>
+        ) : stats ? (
           <div className="space-y-6">
             {/* Estadísticas principales */}
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
