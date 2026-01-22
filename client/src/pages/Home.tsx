@@ -341,33 +341,33 @@ function HomeContent() {
                           yAxisId="right"
                           type="monotone" 
                           dataKey="tempMax" 
-                          stroke="#ff6b6b" 
-                          strokeWidth={2}
-                          strokeDasharray="5 5"
-                          name="Temp. Máxima (°C)"
-                          dot={{ fill: '#ff6b6b', r: 3 }}
+                          stroke="#dc2626" 
+                          strokeWidth={3}
+                          name="🌡️ Temp. Máxima (°C)"
+                          dot={{ fill: '#dc2626', r: 5, strokeWidth: 2, stroke: '#fff' }}
+                          activeDot={{ r: 7 }}
                           connectNulls
                         />
                         <Line 
                           yAxisId="right"
                           type="monotone" 
                           dataKey="tempProm" 
-                          stroke="#ffa500" 
-                          strokeWidth={2}
-                          strokeDasharray="5 5"
-                          name="Temp. Promedio (°C)"
-                          dot={{ fill: '#ffa500', r: 3 }}
+                          stroke="#ea580c" 
+                          strokeWidth={3}
+                          name="🌡️ Temp. Promedio (°C)"
+                          dot={{ fill: '#ea580c', r: 5, strokeWidth: 2, stroke: '#fff' }}
+                          activeDot={{ r: 7 }}
                           connectNulls
                         />
                         <Line 
                           yAxisId="right"
                           type="monotone" 
                           dataKey="tempMin" 
-                          stroke="#4dabf7" 
-                          strokeWidth={2}
-                          strokeDasharray="5 5"
-                          name="Temp. Mínima (°C)"
-                          dot={{ fill: '#4dabf7', r: 3 }}
+                          stroke="#2563eb" 
+                          strokeWidth={3}
+                          name="🌡️ Temp. Mínima (°C)"
+                          dot={{ fill: '#2563eb', r: 5, strokeWidth: 2, stroke: '#fff' }}
+                          activeDot={{ r: 7 }}
                           connectNulls
                         />
                       </>
