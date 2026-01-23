@@ -178,7 +178,7 @@ export default function ClimateAnalysis() {
       <WeatherBackground weatherCondition={weatherCondition} temperature={currentWeather?.temperature} />
 
       {/* Contenido */}
-      <div className="relative z-10 p-4 md:p-6 space-y-6">
+      <div className="relative z-10 px-4 md:px-8 lg:px-16 py-6 md:py-10 space-y-8 max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
@@ -199,7 +199,7 @@ export default function ClimateAnalysis() {
 
         {/* Clima Actual */}
         {currentWeather && (
-          <GlassCard className="p-6">
+          <GlassCard className="p-6 md:p-8">
             <div className="flex flex-col md:flex-row items-center justify-between gap-6">
               <div className="flex items-center gap-6">
                 <div className="text-center">
@@ -235,7 +235,7 @@ export default function ClimateAnalysis() {
         )}
 
         {/* Pronóstico Extendido */}
-        <GlassCard className="p-6">
+        <GlassCard className="p-6 md:p-8">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
               <Calendar className="w-5 h-5" />
@@ -280,22 +280,22 @@ export default function ClimateAnalysis() {
         {/* Estadísticas de Correlación */}
         {correlationStats && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <GlassCard className="p-4 text-center">
+            <GlassCard className="p-4 md:p-6 text-center">
               <Thermometer className="w-8 h-8 mx-auto text-orange-500 mb-2" />
               <p className="text-3xl font-bold text-gray-800">{correlationStats.avgTemp}°C</p>
               <p className="text-sm text-gray-500">Temp. Promedio</p>
             </GlassCard>
-            <GlassCard className="p-4 text-center">
+            <GlassCard className="p-4 md:p-6 text-center">
               <TrendingUp className="w-8 h-8 mx-auto text-green-500 mb-2" />
               <p className="text-3xl font-bold text-gray-800">{correlationStats.avgBoxes}</p>
               <p className="text-sm text-gray-500">Cajas/Día Promedio</p>
             </GlassCard>
-            <GlassCard className="p-4 text-center">
+            <GlassCard className="p-4 md:p-6 text-center">
               <Sun className="w-8 h-8 mx-auto text-yellow-500 mb-2" />
               <p className="text-3xl font-bold text-gray-800">{correlationStats.avgBoxesDry}</p>
               <p className="text-sm text-gray-500">Cajas/Día Seco</p>
             </GlassCard>
-            <GlassCard className="p-4 text-center">
+            <GlassCard className="p-4 md:p-6 text-center">
               <CloudRain className="w-8 h-8 mx-auto text-blue-500 mb-2" />
               <p className="text-3xl font-bold text-gray-800">{correlationStats.avgBoxesRainy}</p>
               <p className="text-sm text-gray-500">Cajas/Día Lluvioso</p>
@@ -304,7 +304,7 @@ export default function ClimateAnalysis() {
         )}
 
         {/* Gráfica de Correlación Temperatura vs Cosecha */}
-        <GlassCard className="p-6">
+        <GlassCard className="p-6 md:p-8">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
               <TrendingUp className="w-5 h-5" />
@@ -363,7 +363,7 @@ export default function ClimateAnalysis() {
         </GlassCard>
 
         {/* Gráfica de Precipitación vs Cosecha */}
-        <GlassCard className="p-6">
+        <GlassCard className="p-6 md:p-8">
           <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2 mb-4">
             <Droplets className="w-5 h-5" />
             Precipitación vs Cosecha
@@ -401,7 +401,7 @@ export default function ClimateAnalysis() {
 
         {/* Gráfica de Dispersión: Temperatura vs Cajas */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <GlassCard className="p-6">
+          <GlassCard className="p-6 md:p-8">
             <h2 className="text-xl font-bold text-gray-800 mb-4">Dispersión: Temperatura vs Cajas</h2>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
@@ -435,7 +435,7 @@ export default function ClimateAnalysis() {
             </p>
           </GlassCard>
 
-          <GlassCard className="p-6">
+          <GlassCard className="p-6 md:p-8">
             <h2 className="text-xl font-bold text-gray-800 mb-4">Dispersión: Lluvia vs Cajas</h2>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
@@ -472,7 +472,7 @@ export default function ClimateAnalysis() {
         </div>
 
         {/* Tabla de Datos Históricos */}
-        <GlassCard className="p-6">
+        <GlassCard className="p-6 md:p-8">
           <h2 className="text-xl font-bold text-gray-800 mb-4">Datos Históricos Detallados</h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
