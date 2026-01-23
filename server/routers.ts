@@ -274,6 +274,54 @@ export const appRouter = router({
         await database.delete(boxes).where(eq(boxes.id, input.id));
         return { success: true };
       }),
+
+    // Archivar una caja (en lugar de eliminar)
+    archive: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        await db.archiveBox(input.id);
+        return { success: true };
+      }),
+
+    // Archivar múltiples cajas
+    archiveBatch: adminProcedure
+      .input(z.object({
+        boxIds: z.array(z.number()),
+      }))
+      .mutation(async ({ input }) => {
+        const result = await db.archiveBoxesBatch(input.boxIds);
+        return { success: true, archived: result.archived };
+      }),
+
+    // Restaurar una caja archivada
+    restore: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        await db.restoreBox(input.id);
+        return { success: true };
+      }),
+
+    // Obtener cajas archivadas
+    listArchived: adminProcedure
+      .input(z.object({
+        page: z.number().min(1).default(1),
+        pageSize: z.number().min(10).max(100).default(50),
+        search: z.string().optional(),
+      }))
+      .query(async ({ input }) => {
+        return await db.getArchivedBoxes(input);
+      }),
+
+    // Actualizar código de caja
+    updateCode: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        boxCode: z.string(),
+      }))
+      .mutation(async ({ input }) => {
+        await db.updateBoxCode(input.id, input.boxCode);
+        return { success: true };
+      }),
   }),
 
   parcels: router({

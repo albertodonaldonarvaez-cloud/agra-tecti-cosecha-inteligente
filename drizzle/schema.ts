@@ -70,6 +70,8 @@ export const boxes = mysqlTable("boxes", {
   latitude: varchar("latitude", { length: 64 }),
   longitude: varchar("longitude", { length: 64 }),
   submissionTime: timestamp("submissionTime").notNull(),
+  archived: boolean("archived").default(false).notNull(), // Cajas archivadas no aparecen en dashboard
+  archivedAt: timestamp("archivedAt"), // Fecha de archivado
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

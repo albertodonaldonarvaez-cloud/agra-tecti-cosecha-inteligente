@@ -15,7 +15,7 @@ import {
   Pencil, Trash2, Save, X, Search, Image as ImageIcon, 
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, 
   MapPin, AlertTriangle, Filter, ArrowUpDown, ArrowUp, ArrowDown,
-  CheckSquare, Square, Edit3, Images, ZoomIn, ZoomOut
+  CheckSquare, Square, Edit3, Images, ZoomIn, ZoomOut, Archive, RotateCcw
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { toast } from "sonner";
@@ -126,6 +126,10 @@ export default function BoxEditor() {
   // Estado para comparación de fotos
   const [showCompareDialog, setShowCompareDialog] = useState(false);
   const [compareZoom, setCompareZoom] = useState<number[]>([1, 1, 1]);
+  
+  // Estado para edición de código en modal
+  const [editingCodeId, setEditingCodeId] = useState<number | null>(null);
+  const [editingCodeValue, setEditingCodeValue] = useState("");
 
   // Debounce para búsqueda
   const debouncedSearch = useDebouncedCallback((value: string) => {
@@ -201,6 +205,40 @@ export default function BoxEditor() {
     },
     onError: (error) => {
       toast.error("❌ Error al eliminar", { description: error.message });
+    },
+  });
+
+  const archiveBatch = trpc.boxes.archiveBatch.useMutation({
+    onSuccess: (data) => {
+      toast.success(`📦 ${data.archived} cajas archivadas`);
+      setSelectedIds(new Set());
+      setShowCompareDialog(false);
+      refetch();
+    },
+    onError: (error) => {
+      toast.error("❌ Error al archivar", { description: error.message });
+    },
+  });
+
+  const archiveBox = trpc.boxes.archive.useMutation({
+    onSuccess: () => {
+      toast.success("📦 Caja archivada");
+      refetch();
+    },
+    onError: (error) => {
+      toast.error("❌ Error al archivar", { description: error.message });
+    },
+  });
+
+  const updateBoxCode = trpc.boxes.updateCode.useMutation({
+    onSuccess: () => {
+      toast.success("✅ Código actualizado");
+      setEditingCodeId(null);
+      setEditingCodeValue("");
+      refetch();
+    },
+    onError: (error) => {
+      toast.error("❌ Error al actualizar", { description: error.message });
     },
   });
 
@@ -548,6 +586,20 @@ export default function BoxEditor() {
                 >
                   <Edit3 className="h-4 w-4 mr-2" />
                   Cambiar Parcela
+                </Button>
+                <Button
+                  onClick={() => {
+                    const ids = Array.from(selectedIds);
+                    if (confirm(`¿Archivar ${ids.length} cajas seleccionadas?`)) {
+                      archiveBatch.mutate({ boxIds: ids });
+                    }
+                  }}
+                  variant="outline"
+                  disabled={archiveBatch.isPending}
+                  className="border-orange-300 text-orange-700 hover:bg-orange-50"
+                >
+                  <Archive className="h-4 w-4 mr-2" />
+                  Archivar
                 </Button>
                 <Button
                   onClick={handleBatchDelete}
@@ -961,49 +1013,45 @@ export default function BoxEditor() {
         boxCode={selectedMap?.boxCode || ""}
       />
 
-      {/* Modal de comparación de fotos - Pantalla completa */}
+      {/* Modal de comparación de fotos - Responsivo */}
       <Dialog open={showCompareDialog} onOpenChange={setShowCompareDialog}>
-        <DialogContent className="w-[95vw] max-w-[1800px] h-[90vh] flex flex-col p-0 gap-0">
+        <DialogContent className="w-[98vw] max-w-[1900px] h-[95vh] max-h-[95vh] flex flex-col p-0 gap-0 overflow-hidden">
           {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 bg-purple-50 border-b flex-shrink-0">
+          <div className="flex items-center justify-between px-4 py-3 bg-purple-50 border-b flex-shrink-0">
             <div className="flex items-center gap-3">
-              <Images className="h-6 w-6 text-purple-600" />
-              <span className="font-semibold text-lg text-purple-900">
-                Comparar Fotos
-              </span>
-              <span className="text-sm text-purple-600 bg-purple-100 px-2 py-1 rounded">
-                {selectedBoxesForCompare.filter(b => b.photoUrl).length} de 3 cajas
+              <Images className="h-5 w-5 text-purple-600" />
+              <span className="font-semibold text-purple-900">
+                Comparar Fotos ({selectedBoxesForCompare.length})
               </span>
             </div>
-            <div className="flex items-center gap-4">
-              <span className="text-sm text-gray-500">
-                Clic en la foto para hacer zoom
-              </span>
+            <div className="flex items-center gap-2">
               <Button 
                 variant="outline" 
+                size="sm"
                 onClick={() => setShowCompareDialog(false)}
                 className="border-purple-300 hover:bg-purple-100"
               >
-                <X className="h-4 w-4 mr-2" />
+                <X className="h-4 w-4 mr-1" />
                 Cerrar
               </Button>
             </div>
           </div>
           
-          {/* Grid de 3 columnas fijo */}
-          <div className="flex-1 grid grid-cols-3 gap-4 p-4 bg-gray-100 overflow-hidden">
+          {/* Grid responsivo: horizontal=3cols, vertical=scroll */}
+          <div className="flex-1 grid grid-cols-1 landscape:grid-cols-3 gap-3 p-3 bg-gray-100 overflow-auto">
             {[0, 1, 2].map((slotIndex) => {
               const box = selectedBoxesForCompare[slotIndex];
+              const isEditingThis = editingCodeId === box?.id;
               
               if (!box) {
                 // Slot vacío
                 return (
                   <div 
                     key={`empty-${slotIndex}`}
-                    className="flex flex-col items-center justify-center bg-white rounded-xl border-2 border-dashed border-gray-300"
+                    className="flex flex-col items-center justify-center bg-white rounded-xl border-2 border-dashed border-gray-300 min-h-[200px] landscape:min-h-0"
                   >
-                    <ImageIcon className="h-16 w-16 text-gray-300 mb-3" />
-                    <p className="text-gray-400 text-lg">Espacio {slotIndex + 1}</p>
+                    <ImageIcon className="h-12 w-12 text-gray-300 mb-2" />
+                    <p className="text-gray-400">Espacio {slotIndex + 1}</p>
                     <p className="text-gray-300 text-sm">Selecciona otra caja</p>
                   </div>
                 );
@@ -1012,39 +1060,105 @@ export default function BoxEditor() {
               return (
                 <div 
                   key={box.id} 
-                  className="flex flex-col bg-white rounded-xl shadow-md overflow-hidden"
+                  className="flex flex-col bg-white rounded-xl shadow-md overflow-hidden min-h-[400px] landscape:min-h-0"
                 >
-                  {/* Header de la caja */}
-                  <div className="px-4 py-3 bg-gray-50 border-b flex-shrink-0">
+                  {/* Header de la caja con acciones */}
+                  <div className="px-3 py-2 bg-gray-50 border-b flex-shrink-0">
+                    {/* Código de caja - editable */}
                     <div className="flex items-center justify-between mb-2">
-                      <span className="font-mono font-bold text-xl text-gray-900">
-                        {box.boxCode}
-                      </span>
-                      <Button
-                        variant={compareZoom[slotIndex] > 1 ? "default" : "outline"}
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleCompareZoom(slotIndex);
-                        }}
-                        className={compareZoom[slotIndex] > 1 ? "bg-purple-600 hover:bg-purple-700" : ""}
-                      >
-                        {compareZoom[slotIndex] > 1 ? (
-                          <><ZoomOut className="h-4 w-4 mr-1" /> Alejar</>
-                        ) : (
-                          <><ZoomIn className="h-4 w-4 mr-1" /> Zoom</>
-                        )}
-                      </Button>
+                      {isEditingThis ? (
+                        <div className="flex items-center gap-2 flex-1 mr-2">
+                          <Input
+                            value={editingCodeValue}
+                            onChange={(e) => setEditingCodeValue(e.target.value)}
+                            className="font-mono font-bold text-lg h-8"
+                            autoFocus
+                          />
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              if (editingCodeValue.trim()) {
+                                updateBoxCode.mutate({ id: box.id, boxCode: editingCodeValue.trim() });
+                              }
+                            }}
+                            disabled={updateBoxCode.isPending}
+                            className="bg-green-600 hover:bg-green-700 h-8"
+                          >
+                            <Save className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setEditingCodeId(null);
+                              setEditingCodeValue("");
+                            }}
+                            className="h-8"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-lg text-gray-900">
+                            {box.boxCode}
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setEditingCodeId(box.id);
+                              setEditingCodeValue(box.boxCode);
+                            }}
+                            className="h-7 w-7 p-0"
+                            title="Editar código"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleCompareZoom(slotIndex);
+                          }}
+                          className="h-7 w-7 p-0"
+                          title="Zoom"
+                        >
+                          {compareZoom[slotIndex] > 1 ? (
+                            <ZoomOut className="h-4 w-4" />
+                          ) : (
+                            <ZoomIn className="h-4 w-4" />
+                          )}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirm(`¿Archivar caja ${box.boxCode}?`)) {
+                              archiveBox.mutate({ id: box.id });
+                            }
+                          }}
+                          className="h-7 w-7 p-0 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                          title="Archivar esta caja"
+                        >
+                          <Archive className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
-                    <div className="text-sm text-gray-600 space-y-1">
+                    <div className="text-xs text-gray-600">
                       <p><strong>Parcela:</strong> {box.parcelCode} - {box.parcelName}</p>
-                      <p><strong>Peso:</strong> {((box.weight || 0) / 1000).toFixed(2)} kg &nbsp;|&nbsp; <strong>Fecha:</strong> {format(new Date(box.submissionTime), "dd/MM/yy HH:mm", { locale: es })}</p>
+                      <p><strong>Peso:</strong> {((box.weight || 0) / 1000).toFixed(2)} kg | <strong>Fecha:</strong> {format(new Date(box.submissionTime), "dd/MM/yy HH:mm", { locale: es })}</p>
                     </div>
                   </div>
                   
                   {/* Contenedor de foto */}
                   <div 
-                    className="flex-1 overflow-auto bg-gray-100 cursor-pointer min-h-0"
+                    className="flex-1 overflow-auto bg-gray-100 cursor-pointer min-h-[250px]"
                     onClick={() => toggleCompareZoom(slotIndex)}
                   >
                     {box.photoUrl ? (
@@ -1071,6 +1185,30 @@ export default function BoxEditor() {
                 </div>
               );
             })}
+          </div>
+          
+          {/* Footer con acciones */}
+          <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-t flex-shrink-0">
+            <span className="text-sm text-gray-500">
+              Clic en la foto para zoom | Lápiz para editar código | Caja para archivar
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const idsToArchive = selectedBoxesForCompare.map(b => b.id);
+                  if (idsToArchive.length > 0 && confirm(`¿Archivar ${idsToArchive.length} cajas seleccionadas?`)) {
+                    archiveBatch.mutate({ boxIds: idsToArchive });
+                  }
+                }}
+                disabled={archiveBatch.isPending}
+                className="border-orange-300 text-orange-700 hover:bg-orange-50"
+              >
+                <Archive className="h-4 w-4 mr-1" />
+                Archivar Todas ({selectedBoxesForCompare.length})
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

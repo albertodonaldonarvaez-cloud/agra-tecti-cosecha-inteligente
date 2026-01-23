@@ -115,8 +115,9 @@ export async function upsertBox(box: InsertBox) {
 export async function getAllBoxes() {
   const db = await getDb();
   if (!db) return [];
-  const { desc } = await import("drizzle-orm");
+  const { desc, eq } = await import("drizzle-orm");
   // Seleccionar solo campos necesarios para mejor rendimiento
+  // Excluir cajas archivadas
   return await db.select({
     id: boxes.id,
     boxCode: boxes.boxCode,
@@ -129,7 +130,7 @@ export async function getAllBoxes() {
     submissionTime: boxes.submissionTime,
     latitude: boxes.latitude,
     longitude: boxes.longitude,
-  }).from(boxes).orderBy(desc(boxes.submissionTime));
+  }).from(boxes).where(eq(boxes.archived, false)).orderBy(desc(boxes.submissionTime));
 }
 
 // Paginación optimizada para carga rápida
@@ -149,6 +150,9 @@ export async function getBoxesPaginated(params: {
   
   // Construir condiciones de filtro
   const conditions = [];
+  
+  // Siempre excluir cajas archivadas
+  conditions.push(eq(boxes.archived, false));
   
   // Búsqueda por código de caja
   if (params.search && params.search.trim() !== '') {
@@ -351,6 +355,7 @@ export async function getDuplicateBoxCodes() {
   const result = await db.execute(sql`
     SELECT boxCode, COUNT(*) as count 
     FROM boxes 
+    WHERE archived = 0
     GROUP BY boxCode 
     HAVING COUNT(*) > 1
   `);
@@ -366,11 +371,13 @@ export async function getParcelsWithoutPolygon() {
   const { sql } = await import("drizzle-orm");
   
   // Obtener códigos de parcela de cajas que no tienen polígono en la tabla parcels
+  // Excluir cajas archivadas
   const result = await db.execute(sql`
     SELECT DISTINCT b.parcelCode 
     FROM boxes b 
     LEFT JOIN parcels p ON b.parcelCode = p.code 
-    WHERE p.polygon IS NULL OR p.polygon = '' OR p.id IS NULL
+    WHERE (p.polygon IS NULL OR p.polygon = '' OR p.id IS NULL)
+    AND b.archived = 0
   `);
   
   return (result[0] as any[]).map(r => r.parcelCode);
@@ -407,11 +414,14 @@ export async function getBoxesForEditor(params: {
   const db = await getDb();
   if (!db) return { boxes: [], total: 0, page: params.page, pageSize: params.pageSize, totalPages: 0 };
   
-  const { desc, asc, and, like, count, inArray } = await import("drizzle-orm");
+  const { desc, asc, and, like, count, inArray, eq } = await import("drizzle-orm");
   const offset = (params.page - 1) * params.pageSize;
   
   // Construir condiciones de filtro
   const conditions = [];
+  
+  // Siempre excluir cajas archivadas
+  conditions.push(eq(boxes.archived, false));
   
   // Búsqueda por código de caja
   if (params.search && params.search.trim() !== '') {
@@ -475,4 +485,107 @@ export async function getBoxesForEditor(params: {
     pageSize: params.pageSize,
     totalPages: Math.ceil(total / params.pageSize),
   };
+}
+
+
+// Archivar una caja (en lugar de eliminar)
+export async function archiveBox(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  await db.update(boxes).set({ 
+    archived: true, 
+    archivedAt: new Date(),
+    updatedAt: new Date() 
+  }).where(eq(boxes.id, id));
+}
+
+// Archivar múltiples cajas
+export async function archiveBoxesBatch(boxIds: number[]) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  const { inArray } = await import("drizzle-orm");
+  
+  await db.update(boxes).set({ 
+    archived: true, 
+    archivedAt: new Date(),
+    updatedAt: new Date() 
+  }).where(inArray(boxes.id, boxIds));
+  
+  return { archived: boxIds.length };
+}
+
+// Restaurar una caja archivada
+export async function restoreBox(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  await db.update(boxes).set({ 
+    archived: false, 
+    archivedAt: null,
+    updatedAt: new Date() 
+  }).where(eq(boxes.id, id));
+}
+
+// Obtener cajas archivadas (para vista de archivo)
+export async function getArchivedBoxes(params: {
+  page: number;
+  pageSize: number;
+  search?: string;
+}) {
+  const db = await getDb();
+  if (!db) return { boxes: [], total: 0, page: params.page, pageSize: params.pageSize, totalPages: 0 };
+  
+  const { desc, and, eq, count, like } = await import("drizzle-orm");
+  const offset = (params.page - 1) * params.pageSize;
+  
+  const conditions = [eq(boxes.archived, true)];
+  
+  if (params.search && params.search.trim() !== '') {
+    conditions.push(like(boxes.boxCode, `%${params.search.trim()}%`));
+  }
+  
+  const whereClause = and(...conditions);
+  
+  const totalResult = await db.select({ count: count() })
+    .from(boxes)
+    .where(whereClause);
+  const total = totalResult[0]?.count || 0;
+  
+  const data = await db.select({
+    id: boxes.id,
+    boxCode: boxes.boxCode,
+    harvesterId: boxes.harvesterId,
+    parcelCode: boxes.parcelCode,
+    parcelName: boxes.parcelName,
+    weight: boxes.weight,
+    photoUrl: boxes.photoUrl,
+    submissionTime: boxes.submissionTime,
+    archivedAt: boxes.archivedAt,
+  })
+    .from(boxes)
+    .where(whereClause)
+    .orderBy(desc(boxes.archivedAt))
+    .limit(params.pageSize)
+    .offset(offset);
+  
+  return {
+    boxes: data,
+    total,
+    page: params.page,
+    pageSize: params.pageSize,
+    totalPages: Math.ceil(total / params.pageSize),
+  };
+}
+
+// Actualizar código de caja
+export async function updateBoxCode(id: number, newBoxCode: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  await db.update(boxes).set({ 
+    boxCode: newBoxCode,
+    updatedAt: new Date() 
+  }).where(eq(boxes.id, id));
 }
