@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import { WeatherBackground } from "@/components/WeatherBackground";
-import { GlassCard } from "@/components/ui/glass-card";
+import { GlassCard } from "@/components/GlassCard";
 import {
   LineChart,
   Line,
