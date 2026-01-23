@@ -119,30 +119,34 @@ export async function processKoboData(data: KoboData) {
       // Usar _id como koboId
       const koboId = (result as any)._id || 0;
 
-      // Verificar si la caja ya existe
-      const existingBox = await db.select().from(boxes).where(eq(boxes.boxCode, boxCode)).limit(1);
+      // Calcular la fecha/hora de la caja actual
+      const submissionTime = (result.start && result.start.trim() !== '') 
+        ? new Date(result.start) 
+        : (result._submission_time && result._submission_time.trim() !== '') 
+          ? new Date(result._submission_time) 
+          : new Date();
+
+      // Verificar si existe un duplicado EXACTO (mismo código + misma fecha/hora)
+      // Solo bloqueamos si coincide código Y fecha/hora exacta (para evitar re-importar el mismo registro)
+      const { and } = await import("drizzle-orm");
+      const existingExactDuplicate = await db.select()
+        .from(boxes)
+        .where(
+          and(
+            eq(boxes.boxCode, boxCode),
+            eq(boxes.submissionTime, submissionTime)
+          )
+        )
+        .limit(1);
       
-      if (existingBox.length > 0) {
-        // Caja duplicada - enviar a errores de validación
-        await insertUploadError({
-          batchId: 'kobo-sync',
-          fileName: 'Sincronización Kobo',
-          rowNumber: 0,
-          errorType: 'caja_duplicada',
-          errorMessage: `Caja duplicada: ${boxCode}. Ya existe un registro con este código. Valida manualmente cuál es correcto.`,
-          boxCode,
-          parcelCode,
-          harvesterId,
-          weightKg,
-          photoUrl: result._attachments?.[0]?.download_url || null,
-          latitude,
-          longitude,
-          collectedAt: result.start || result._submission_time,
-          rawData: JSON.stringify(result),
-        });
-        errors.push(`Caja duplicada: ${boxCode}`);
-        continue; // No insertar, solo registrar error
+      if (existingExactDuplicate.length > 0) {
+        // Duplicado exacto (mismo código Y misma fecha/hora) - este es el mismo registro, saltar
+        errors.push(`Registro duplicado exacto (ya importado): ${boxCode} del ${submissionTime.toISOString()}`);
+        continue; // No insertar, ya existe este registro exacto
       }
+
+      // NOTA: Si el código existe pero con diferente fecha/hora, SE PERMITE LA INSERCIÓN
+      // El usuario decidirá manualmente en el Editor de Cajas si es un duplicado real o una caja diferente
 
       // Insertar caja (sin onDuplicateKeyUpdate)
       await db.insert(boxes).values({
@@ -159,7 +163,7 @@ export async function processKoboData(data: KoboData) {
         photoSmallUrl,
         latitude,
         longitude,
-        submissionTime: (result.start && result.start.trim() !== '') ? new Date(result.start) : (result._submission_time && result._submission_time.trim() !== '') ? new Date(result._submission_time) : new Date(),
+        submissionTime, // Usar la variable ya calculada arriba
       });
 
       processedCount++;

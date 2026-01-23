@@ -156,18 +156,43 @@ export async function processExcelFile(
       const boxCode = row['Escanea la caja'];
       const harvesterId = boxValidation.harvesterId!;
 
-      // Verificar si la caja ya existe
-      const existingBox = await db.select().from(boxes).where(eq(boxes.boxCode, boxCode)).limit(1);
-      if (existingBox.length > 0) {
+      // Construir fecha primero para poder verificar duplicados exactos
+      let submissionTime: Date;
+      if (row['año'] && row['mes'] && row['dia']) {
+        submissionTime = new Date(row['año'], row['mes'] - 1, row['dia'], 12, 0, 0);
+      } else if (row['_submission_time']) {
+        submissionTime = new Date(row['_submission_time']);
+      } else {
+        submissionTime = new Date();
+      }
+
+      // Verificar si existe un duplicado EXACTO (mismo código + misma fecha/hora)
+      // Solo bloqueamos si coincide código Y fecha/hora exacta (para evitar re-importar el mismo registro)
+      const { and } = await import("drizzle-orm");
+      const existingExactDuplicate = await db.select()
+        .from(boxes)
+        .where(
+          and(
+            eq(boxes.boxCode, boxCode),
+            eq(boxes.submissionTime, submissionTime)
+          )
+        )
+        .limit(1);
+      
+      if (existingExactDuplicate.length > 0) {
+        // Duplicado exacto (mismo código Y misma fecha/hora) - este es el mismo registro, saltar
         errors.push({
           type: 'duplicate_box',
           boxCode,
-          message: `La caja ${boxCode} ya existe en la base de datos`,
+          message: `Registro duplicado exacto (ya importado): ${boxCode} del ${submissionTime.toISOString()}`,
           rowData: row
         });
         errorRows++;
         continue;
       }
+
+      // NOTA: Si el código existe pero con diferente fecha/hora, SE PERMITE LA INSERCIÓN
+      // El usuario decidirá manualmente en el Editor de Cajas si es un duplicado real o una caja diferente
 
       // Parsear y validar parcela
       let parcelCode = '';
@@ -251,17 +276,7 @@ export async function processExcelFile(
         continue;
       }
 
-      // Construir fecha
-      let submissionTime: Date;
-      if (row['año'] && row['mes'] && row['dia']) {
-        submissionTime = new Date(row['año'], row['mes'] - 1, row['dia'], 12, 0, 0);
-      } else if (row['_submission_time']) {
-        submissionTime = new Date(row['_submission_time']);
-      } else {
-        submissionTime = new Date();
-      }
-
-      // Coordenadas
+      // Coordenadas (submissionTime ya fue calculado arriba para validación de duplicados)
       const latitude = row['_Pon tu ubicación_latitude'] ? String(row['_Pon tu ubicación_latitude']) : null;
       const longitude = row['_Pon tu ubicación_longitude'] ? String(row['_Pon tu ubicación_longitude']) : null;
 
