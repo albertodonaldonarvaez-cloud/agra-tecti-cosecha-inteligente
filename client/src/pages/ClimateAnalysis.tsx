@@ -1,23 +1,18 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { WeatherBackground } from "@/components/WeatherBackground";
 import { GlassCard } from "@/components/GlassCard";
 import {
-  LineChart,
-  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   Legend,
   ResponsiveContainer,
-  BarChart,
   Bar,
   ComposedChart,
   Area,
-  ScatterChart,
-  Scatter,
-  ReferenceLine,
+  Line,
 } from "recharts";
 import {
   Sun,
@@ -32,6 +27,8 @@ import {
   TrendingUp,
   BarChart3,
   RefreshCw,
+  ChevronUp,
+  ChevronDown,
 } from "lucide-react";
 
 // Icono según condición del clima
@@ -68,13 +65,31 @@ function formatDateShort(dateStr: string) {
 export default function ClimateAnalysis() {
   const [historicalDays, setHistoricalDays] = useState(-1); // -1 = desde inicio de cosecha
   const [forecastDays, setForecastDays] = useState(7);
+  const [tableDays, setTableDays] = useState(14); // Filtro para la tabla
+  const [tableSortField, setTableSortField] = useState<string>("date");
+  const [tableSortOrder, setTableSortOrder] = useState<"asc" | "desc">("desc");
 
-  // Queries
-  const { data: currentWeather, isLoading: loadingCurrent, refetch: refetchCurrent } = trpc.weather.getCurrent.useQuery();
-  const { data: forecast, isLoading: loadingForecast } = trpc.weather.getExtendedForecast.useQuery({ days: forecastDays });
+  // Queries con refetch automático
+  const { data: currentWeather, isLoading: loadingCurrent, refetch: refetchCurrent } = trpc.weather.getCurrent.useQuery(
+    undefined,
+    {
+      refetchInterval: 5 * 60 * 1000, // Refetch cada 5 minutos
+      refetchOnWindowFocus: true,
+    }
+  );
+  const { data: forecast, isLoading: loadingForecast } = trpc.weather.getExtendedForecast.useQuery(
+    { days: forecastDays },
+    {
+      refetchInterval: 10 * 60 * 1000, // Refetch cada 10 minutos
+      refetchOnWindowFocus: true,
+    }
+  );
   
   // Datos de cajas por día (mover antes para calcular fecha de inicio)
-  const { data: boxesByDay } = trpc.boxes.list.useQuery();
+  const { data: boxesByDay } = trpc.boxes.list.useQuery(undefined, {
+    refetchInterval: 5 * 60 * 1000,
+    refetchOnWindowFocus: true,
+  });
 
   // Calcular fecha de inicio de cosecha (primera caja registrada)
   const harvestStartInfo = useMemo(() => {
@@ -117,7 +132,13 @@ export default function ClimateAnalysis() {
     };
   }, [historicalDays, harvestStartInfo.daysAgo]);
 
-  const { data: historicalWeather, isLoading: loadingHistorical } = trpc.weather.getHistoricalDetailed.useQuery(historicalDates);
+  const { data: historicalWeather, isLoading: loadingHistorical } = trpc.weather.getHistoricalDetailed.useQuery(
+    historicalDates,
+    {
+      refetchInterval: 10 * 60 * 1000,
+      refetchOnWindowFocus: true,
+    }
+  );
   
   // Datos de cosecha para el mismo período
   const { data: harvestData } = trpc.analytics.getStats.useQuery({
@@ -198,6 +219,70 @@ export default function ClimateAnalysis() {
     };
   }, [correlationData]);
 
+  // Datos filtrados y ordenados para la tabla
+  const tableData = useMemo(() => {
+    if (!correlationData.length) return [];
+    
+    // Filtrar por días seleccionados
+    let filtered = correlationData;
+    if (tableDays > 0) {
+      filtered = correlationData.slice(-tableDays);
+    }
+    
+    // Ordenar
+    const sorted = [...filtered].sort((a, b) => {
+      let comparison = 0;
+      switch (tableSortField) {
+        case "date":
+          comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
+          break;
+        case "tempMax":
+          comparison = a.tempMax - b.tempMax;
+          break;
+        case "tempMin":
+          comparison = a.tempMin - b.tempMin;
+          break;
+        case "tempMean":
+          comparison = a.tempMean - b.tempMean;
+          break;
+        case "precipitation":
+          comparison = a.precipitation - b.precipitation;
+          break;
+        case "boxes":
+          comparison = a.boxes - b.boxes;
+          break;
+        case "weight":
+          comparison = a.weight - b.weight;
+          break;
+        default:
+          comparison = 0;
+      }
+      return tableSortOrder === "asc" ? comparison : -comparison;
+    });
+    
+    return sorted;
+  }, [correlationData, tableDays, tableSortField, tableSortOrder]);
+
+  // Función para cambiar ordenamiento de la tabla
+  const handleTableSort = (field: string) => {
+    if (tableSortField === field) {
+      setTableSortOrder(tableSortOrder === "asc" ? "desc" : "asc");
+    } else {
+      setTableSortField(field);
+      setTableSortOrder("desc");
+    }
+  };
+
+  // Icono de ordenamiento
+  const SortIcon = ({ field }: { field: string }) => {
+    if (tableSortField !== field) return null;
+    return tableSortOrder === "asc" ? (
+      <ChevronUp className="w-4 h-4 inline ml-1" />
+    ) : (
+      <ChevronDown className="w-4 h-4 inline ml-1" />
+    );
+  };
+
   const weatherCondition = currentWeather?.condition || "sunny";
   const isLoading = loadingCurrent || loadingForecast || loadingHistorical;
 
@@ -265,7 +350,7 @@ export default function ClimateAnalysis() {
 
         {/* Pronóstico Extendido */}
         <GlassCard className="p-6 md:p-8">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
               <Calendar className="w-5 h-5" />
               Pronóstico Próximos Días
@@ -372,7 +457,7 @@ export default function ClimateAnalysis() {
                 <Tooltip
                   contentStyle={{ backgroundColor: "rgba(255,255,255,0.95)", borderRadius: "8px" }}
                   formatter={(value: number, name: string) => {
-                    if (name === "Temp. Máx" || name === "Temp. Mín") return [`${value.toFixed(1)}°C`, name];
+                    if (name === "Temp. Máx" || name === "Temp. Mín" || name === "Temp. Promedio") return [`${value.toFixed(1)}°C`, name];
                     if (name === "Cajas") return [value, name];
                     return [value, name];
                   }}
@@ -386,6 +471,16 @@ export default function ClimateAnalysis() {
                   fill="rgba(255, 99, 71, 0.2)"
                   stroke="#ff6347"
                   strokeWidth={2}
+                />
+                <Line
+                  yAxisId="temp"
+                  type="monotone"
+                  dataKey="tempMean"
+                  name="Temp. Promedio"
+                  stroke="#f59e0b"
+                  strokeWidth={2}
+                  strokeDasharray="5 5"
+                  dot={false}
                 />
                 <Area
                   yAxisId="temp"
@@ -449,99 +544,26 @@ export default function ClimateAnalysis() {
           </div>
         </GlassCard>
 
-        {/* Gráfica de Dispersión: Temperatura vs Cajas */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <GlassCard className="p-6 md:p-8">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">Dispersión: Temperatura vs Cajas</h2>
-            <div className="h-64">
-              {loadingHistorical ? (
-                <div className="flex items-center justify-center h-full">
-                  <div className="text-center">
-                    <RefreshCw className="w-8 h-8 animate-spin text-green-500 mx-auto mb-2" />
-                    <p className="text-gray-500">Cargando...</p>
-                  </div>
-                </div>
-              ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <ScatterChart>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis
-                    dataKey="tempMean"
-                    name="Temperatura"
-                    unit="°C"
-                    domain={["dataMin - 2", "dataMax + 2"]}
-                    tick={{ fontSize: 11 }}
-                  />
-                  <YAxis dataKey="boxes" name="Cajas" tick={{ fontSize: 11 }} />
-                  <Tooltip
-                    cursor={{ strokeDasharray: "3 3" }}
-                    formatter={(value: number, name: string) => {
-                      if (name === "Temperatura") return [`${value.toFixed(1)}°C`, name];
-                      return [value, name];
-                    }}
-                  />
-                  <Scatter
-                    name="Días"
-                    data={correlationData.filter((d) => d.boxes > 0)}
-                    fill="#22c55e"
-                  />
-                </ScatterChart>
-              </ResponsiveContainer>
-              )}
-            </div>
-            <p className="text-sm text-gray-500 mt-2 text-center">
-              Cada punto representa un día de cosecha
-            </p>
-          </GlassCard>
-
-          <GlassCard className="p-6 md:p-8">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">Dispersión: Lluvia vs Cajas</h2>
-            <div className="h-64">
-              {loadingHistorical ? (
-                <div className="flex items-center justify-center h-full">
-                  <div className="text-center">
-                    <RefreshCw className="w-8 h-8 animate-spin text-blue-500 mx-auto mb-2" />
-                    <p className="text-gray-500">Cargando...</p>
-                  </div>
-                </div>
-              ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <ScatterChart>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis
-                    dataKey="precipitation"
-                    name="Precipitación"
-                    unit=" mm"
-                    domain={[0, "dataMax + 5"]}
-                    tick={{ fontSize: 11 }}
-                  />
-                  <YAxis dataKey="boxes" name="Cajas" tick={{ fontSize: 11 }} />
-                  <Tooltip
-                    cursor={{ strokeDasharray: "3 3" }}
-                    formatter={(value: number, name: string) => {
-                      if (name === "Precipitación") return [`${value.toFixed(1)} mm`, name];
-                      return [value, name];
-                    }}
-                  />
-                  <ReferenceLine x={1} stroke="#3b82f6" strokeDasharray="3 3" label="Lluvia" />
-                  <Scatter
-                    name="Días"
-                    data={correlationData.filter((d) => d.boxes > 0)}
-                    fill="#3b82f6"
-                  />
-                </ScatterChart>
-              </ResponsiveContainer>
-              )}
-            </div>
-            <p className="text-sm text-gray-500 mt-2 text-center">
-              Analiza cómo la lluvia afecta la producción
-            </p>
-          </GlassCard>
-        </div>
-
-        {/* Tabla de Datos Históricos */}
+        {/* Tabla de Datos Históricos con Filtro */}
         <GlassCard className="p-6 md:p-8">
-          <h2 className="text-xl font-bold text-gray-800 mb-4">Datos Históricos Detallados</h2>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+            <h2 className="text-xl font-bold text-gray-800">Datos Históricos Detallados</h2>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-500">Mostrar:</span>
+              <select
+                value={tableDays}
+                onChange={(e) => setTableDays(Number(e.target.value))}
+                className="px-3 py-2 border rounded-lg text-sm bg-white shadow-sm"
+              >
+                <option value={-1}>Todo el historial</option>
+                <option value={90}>Últimos 90 días</option>
+                <option value={60}>Últimos 60 días</option>
+                <option value={30}>Últimos 30 días</option>
+                <option value={14}>Últimas 2 semanas</option>
+                <option value={7}>Última semana</option>
+              </select>
+            </div>
+          </div>
           {loadingHistorical ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
@@ -554,17 +576,53 @@ export default function ClimateAnalysis() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-100">
-                  <th className="px-4 py-2 text-left">Fecha</th>
+                  <th 
+                    className="px-4 py-2 text-left cursor-pointer hover:bg-gray-200 transition-colors"
+                    onClick={() => handleTableSort("date")}
+                  >
+                    Fecha <SortIcon field="date" />
+                  </th>
                   <th className="px-4 py-2 text-center">Clima</th>
-                  <th className="px-4 py-2 text-right">Temp. Máx</th>
-                  <th className="px-4 py-2 text-right">Temp. Mín</th>
-                  <th className="px-4 py-2 text-right">Lluvia</th>
-                  <th className="px-4 py-2 text-right">Cajas</th>
-                  <th className="px-4 py-2 text-right">Peso (kg)</th>
+                  <th 
+                    className="px-4 py-2 text-right cursor-pointer hover:bg-gray-200 transition-colors"
+                    onClick={() => handleTableSort("tempMax")}
+                  >
+                    Temp. Máx <SortIcon field="tempMax" />
+                  </th>
+                  <th 
+                    className="px-4 py-2 text-right cursor-pointer hover:bg-gray-200 transition-colors"
+                    onClick={() => handleTableSort("tempMin")}
+                  >
+                    Temp. Mín <SortIcon field="tempMin" />
+                  </th>
+                  <th 
+                    className="px-4 py-2 text-right cursor-pointer hover:bg-gray-200 transition-colors"
+                    onClick={() => handleTableSort("tempMean")}
+                  >
+                    Temp. Prom <SortIcon field="tempMean" />
+                  </th>
+                  <th 
+                    className="px-4 py-2 text-right cursor-pointer hover:bg-gray-200 transition-colors"
+                    onClick={() => handleTableSort("precipitation")}
+                  >
+                    Lluvia <SortIcon field="precipitation" />
+                  </th>
+                  <th 
+                    className="px-4 py-2 text-right cursor-pointer hover:bg-gray-200 transition-colors"
+                    onClick={() => handleTableSort("boxes")}
+                  >
+                    Cajas <SortIcon field="boxes" />
+                  </th>
+                  <th 
+                    className="px-4 py-2 text-right cursor-pointer hover:bg-gray-200 transition-colors"
+                    onClick={() => handleTableSort("weight")}
+                  >
+                    Peso (kg) <SortIcon field="weight" />
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {correlationData.slice(-14).reverse().map((row) => (
+                {tableData.map((row) => (
                   <tr key={row.date} className="border-b hover:bg-gray-50">
                     <td className="px-4 py-2">{formatDate(row.date)}</td>
                     <td className="px-4 py-2 text-center">
@@ -572,6 +630,7 @@ export default function ClimateAnalysis() {
                     </td>
                     <td className="px-4 py-2 text-right text-red-600">{row.tempMax.toFixed(1)}°</td>
                     <td className="px-4 py-2 text-right text-blue-600">{row.tempMin.toFixed(1)}°</td>
+                    <td className="px-4 py-2 text-right text-orange-500 font-medium">{row.tempMean.toFixed(1)}°</td>
                     <td className="px-4 py-2 text-right">
                       {row.precipitation > 0 ? (
                         <span className="text-blue-600">{row.precipitation.toFixed(1)} mm</span>
@@ -585,6 +644,16 @@ export default function ClimateAnalysis() {
                 ))}
               </tbody>
             </table>
+            {tableData.length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                No hay datos para el período seleccionado
+              </div>
+            )}
+            {tableData.length > 0 && (
+              <div className="text-sm text-gray-500 mt-4 text-right">
+                Mostrando {tableData.length} registros
+              </div>
+            )}
           </div>
           )}
         </GlassCard>
