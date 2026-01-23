@@ -15,7 +15,7 @@ import {
   Pencil, Trash2, Save, X, Search, Image as ImageIcon, 
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, 
   MapPin, AlertTriangle, Filter, ArrowUpDown, ArrowUp, ArrowDown,
-  CheckSquare, Square, Edit3
+  CheckSquare, Square, Edit3, Images, ZoomIn, ZoomOut
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { toast } from "sonner";
@@ -122,6 +122,10 @@ export default function BoxEditor() {
   const [photoError, setPhotoError] = useState(false);
   const [photoZoom, setPhotoZoom] = useState(false);
   const [selectedMap, setSelectedMap] = useState<{ latitude: string | null; longitude: string | null; boxCode: string } | null>(null);
+  
+  // Estado para comparación de fotos
+  const [showCompareDialog, setShowCompareDialog] = useState(false);
+  const [compareZoom, setCompareZoom] = useState<number[]>([1, 1, 1]);
 
   // Debounce para búsqueda
   const debouncedSearch = useDebouncedCallback((value: string) => {
@@ -375,6 +379,32 @@ export default function BoxEditor() {
   const allSelected = boxes.length > 0 && selectedIds.size === boxes.length;
   const someSelected = selectedIds.size > 0;
 
+  // Obtener cajas seleccionadas con fotos para comparar (máximo 3)
+  const selectedBoxesForCompare = useMemo(() => {
+    return boxes
+      .filter(box => selectedIds.has(box.id))
+      .slice(0, 3)
+      .map(box => ({
+        ...box,
+        photoUrl: getPhotoUrl(box as Box)
+      }));
+  }, [boxes, selectedIds, getPhotoUrl]);
+
+  const canComparePhotos = selectedBoxesForCompare.filter(b => b.photoUrl).length >= 2;
+
+  const handleOpenCompare = useCallback(() => {
+    setCompareZoom([1, 1, 1]);
+    setShowCompareDialog(true);
+  }, []);
+
+  const toggleCompareZoom = useCallback((index: number) => {
+    setCompareZoom(prev => {
+      const newZoom = [...prev];
+      newZoom[index] = newZoom[index] === 1 ? 2 : 1;
+      return newZoom;
+    });
+  }, []);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
       <div className="container">
@@ -502,7 +532,16 @@ export default function BoxEditor() {
                   {selectedIds.size} caja{selectedIds.size !== 1 ? 's' : ''} seleccionada{selectedIds.size !== 1 ? 's' : ''}
                 </span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                {canComparePhotos && (
+                  <Button
+                    onClick={handleOpenCompare}
+                    className="bg-purple-600 hover:bg-purple-700"
+                  >
+                    <Images className="h-4 w-4 mr-2" />
+                    Comparar Fotos ({Math.min(selectedBoxesForCompare.filter(b => b.photoUrl).length, 3)})
+                  </Button>
+                )}
                 <Button
                   onClick={() => setShowBatchDialog(true)}
                   className="bg-blue-600 hover:bg-blue-700"
@@ -921,6 +960,80 @@ export default function BoxEditor() {
         longitude={selectedMap?.longitude || null}
         boxCode={selectedMap?.boxCode || ""}
       />
+
+      {/* Modal de comparación de fotos */}
+      <Dialog open={showCompareDialog} onOpenChange={setShowCompareDialog}>
+        <DialogContent className="max-w-7xl max-h-[95vh] overflow-hidden">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Images className="h-5 w-5 text-purple-600" />
+              Comparar Fotos ({selectedBoxesForCompare.filter(b => b.photoUrl).length} cajas)
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 overflow-y-auto max-h-[75vh] p-2">
+            {selectedBoxesForCompare.map((box, index) => (
+              <div key={box.id} className="flex flex-col border rounded-lg overflow-hidden bg-white shadow-sm">
+                {/* Info de la caja */}
+                <div className="p-3 bg-gray-50 border-b">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono font-bold text-lg text-gray-900">{box.boxCode}</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => toggleCompareZoom(index)}
+                      className="h-8 w-8 p-0"
+                    >
+                      {compareZoom[index] > 1 ? (
+                        <ZoomOut className="h-4 w-4" />
+                      ) : (
+                        <ZoomIn className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                  <div className="mt-1 text-sm text-gray-600 space-y-1">
+                    <p><strong>Parcela:</strong> {box.parcelCode} - {box.parcelName}</p>
+                    <p><strong>Peso:</strong> {((box.weight || 0) / 1000).toFixed(2)} kg</p>
+                    <p><strong>Fecha:</strong> {format(new Date(box.submissionTime), "dd/MM/yyyy HH:mm", { locale: es })}</p>
+                  </div>
+                </div>
+                
+                {/* Foto */}
+                <div className="relative overflow-auto flex-1" style={{ minHeight: '300px', maxHeight: '400px' }}>
+                  {box.photoUrl ? (
+                    <img
+                      src={box.photoUrl}
+                      alt={`Foto de caja ${box.boxCode}`}
+                      className="w-full h-auto cursor-pointer transition-transform duration-200"
+                      style={{ transform: `scale(${compareZoom[index]})`, transformOrigin: 'top left' }}
+                      onClick={() => toggleCompareZoom(index)}
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-full bg-gray-100 text-gray-400">
+                      <div className="text-center">
+                        <ImageIcon className="h-12 w-12 mx-auto mb-2" />
+                        <p>Sin foto</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          <DialogFooter className="border-t pt-4">
+            <div className="flex items-center justify-between w-full">
+              <p className="text-sm text-gray-500">
+                Haz clic en las fotos o en <ZoomIn className="h-4 w-4 inline" /> para hacer zoom
+              </p>
+              <Button variant="outline" onClick={() => setShowCompareDialog(false)}>
+                Cerrar
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
