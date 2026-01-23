@@ -126,6 +126,11 @@ export default function BoxEditor() {
   // Estado para comparación de fotos
   const [showCompareDialog, setShowCompareDialog] = useState(false);
   const [compareZoom, setCompareZoom] = useState<number[]>([1, 1, 1]);
+  const [dragState, setDragState] = useState<{ [key: number]: { x: number; y: number; isDragging: boolean; startX: number; startY: number } }>({
+    0: { x: 0, y: 0, isDragging: false, startX: 0, startY: 0 },
+    1: { x: 0, y: 0, isDragging: false, startX: 0, startY: 0 },
+    2: { x: 0, y: 0, isDragging: false, startX: 0, startY: 0 },
+  });
   
   // Estado para edición de código en modal
   const [editingCodeId, setEditingCodeId] = useState<number | null>(null);
@@ -223,6 +228,8 @@ export default function BoxEditor() {
   const archiveBox = trpc.boxes.archive.useMutation({
     onSuccess: () => {
       toast.success("📦 Caja archivada");
+      setShowCompareDialog(false);
+      setSelectedIds(new Set());
       refetch();
     },
     onError: (error) => {
@@ -441,9 +448,51 @@ export default function BoxEditor() {
   const toggleCompareZoom = useCallback((index: number) => {
     setCompareZoom(prev => {
       const newZoom = [...prev];
-      newZoom[index] = newZoom[index] === 1 ? 2 : 1;
+      const wasZoomed = newZoom[index] > 1;
+      newZoom[index] = wasZoomed ? 1 : 2.5;
       return newZoom;
     });
+    // Resetear posición de drag al cambiar zoom
+    setDragState(prev => ({
+      ...prev,
+      [index]: { x: 0, y: 0, isDragging: false, startX: 0, startY: 0 }
+    }));
+  }, []);
+
+  // Handlers para drag de imágenes
+  const handleDragStart = useCallback((index: number, clientX: number, clientY: number) => {
+    if (compareZoom[index] <= 1) return;
+    setDragState(prev => ({
+      ...prev,
+      [index]: {
+        ...prev[index],
+        isDragging: true,
+        startX: clientX - prev[index].x,
+        startY: clientY - prev[index].y,
+      }
+    }));
+  }, [compareZoom]);
+
+  const handleDragMove = useCallback((index: number, clientX: number, clientY: number) => {
+    if (!dragState[index]?.isDragging) return;
+    setDragState(prev => ({
+      ...prev,
+      [index]: {
+        ...prev[index],
+        x: clientX - prev[index].startX,
+        y: clientY - prev[index].startY,
+      }
+    }));
+  }, [dragState]);
+
+  const handleDragEnd = useCallback((index: number) => {
+    setDragState(prev => ({
+      ...prev,
+      [index]: {
+        ...prev[index],
+        isDragging: false,
+      }
+    }));
   }, []);
 
   return (
@@ -1161,20 +1210,44 @@ export default function BoxEditor() {
                     </div>
                   </div>
                   
-                  {/* Contenedor de foto */}
+                  {/* Contenedor de foto con drag */}
                   <div 
-                    className="flex-1 overflow-auto bg-gray-100 cursor-pointer min-h-[250px]"
-                    onClick={() => toggleCompareZoom(slotIndex)}
+                    className={`flex-1 overflow-hidden bg-gray-100 min-h-[250px] relative ${
+                      compareZoom[slotIndex] > 1 ? 'cursor-grab' : 'cursor-zoom-in'
+                    } ${dragState[slotIndex]?.isDragging ? 'cursor-grabbing' : ''}`}
+                    onMouseDown={(e) => {
+                      if (compareZoom[slotIndex] > 1) {
+                        e.preventDefault();
+                        handleDragStart(slotIndex, e.clientX, e.clientY);
+                      }
+                    }}
+                    onMouseMove={(e) => handleDragMove(slotIndex, e.clientX, e.clientY)}
+                    onMouseUp={() => handleDragEnd(slotIndex)}
+                    onMouseLeave={() => handleDragEnd(slotIndex)}
+                    onTouchStart={(e) => {
+                      if (compareZoom[slotIndex] > 1 && e.touches.length === 1) {
+                        handleDragStart(slotIndex, e.touches[0].clientX, e.touches[0].clientY);
+                      }
+                    }}
+                    onTouchMove={(e) => {
+                      if (e.touches.length === 1) {
+                        handleDragMove(slotIndex, e.touches[0].clientX, e.touches[0].clientY);
+                      }
+                    }}
+                    onTouchEnd={() => handleDragEnd(slotIndex)}
+                    onDoubleClick={() => toggleCompareZoom(slotIndex)}
                   >
                     {box.photoUrl ? (
                       <img
                         src={box.photoUrl}
                         alt={`Foto de caja ${box.boxCode}`}
-                        className="w-full h-full transition-transform duration-300"
+                        className="w-full h-full select-none"
+                        draggable={false}
                         style={{ 
-                          transform: `scale(${compareZoom[slotIndex]})`, 
-                          transformOrigin: 'top left',
-                          objectFit: compareZoom[slotIndex] > 1 ? 'none' : 'contain'
+                          transform: `scale(${compareZoom[slotIndex]}) translate(${dragState[slotIndex]?.x / compareZoom[slotIndex] || 0}px, ${dragState[slotIndex]?.y / compareZoom[slotIndex] || 0}px)`,
+                          transformOrigin: 'center center',
+                          objectFit: compareZoom[slotIndex] > 1 ? 'none' : 'contain',
+                          transition: dragState[slotIndex]?.isDragging ? 'none' : 'transform 0.2s ease-out'
                         }}
                         loading="lazy"
                       />
@@ -1186,6 +1259,12 @@ export default function BoxEditor() {
                         </div>
                       </div>
                     )}
+                    {/* Indicador de zoom */}
+                    {compareZoom[slotIndex] > 1 && (
+                      <div className="absolute bottom-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded">
+                        {compareZoom[slotIndex].toFixed(1)}x - Arrastra para mover
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -1195,7 +1274,7 @@ export default function BoxEditor() {
           {/* Footer con acciones */}
           <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-t flex-shrink-0">
             <span className="text-sm text-gray-500">
-              Clic en la foto para zoom | Lápiz para editar código | Caja para archivar
+              Doble clic para zoom | Arrastra para mover | Lápiz para editar código
             </span>
             <div className="flex items-center gap-2">
               <Button
