@@ -57,7 +57,7 @@ export type InsertHarvester = typeof harvesters.$inferInsert;
 export const boxes = mysqlTable("boxes", {
   id: int("id").autoincrement().primaryKey(),
   koboId: int("koboId"), // ID desde KoboToolbox (puede ser null o duplicado)
-  boxCode: varchar("boxCode", { length: 64 }).notNull().unique(), // Formato: XX-XXXXXX
+  boxCode: varchar("boxCode", { length: 64 }).notNull(), // Formato: XX-XXXXXX (sin UNIQUE para permitir códigos repetidos de diferentes días)
   harvesterId: int("harvesterId").notNull(),
   parcelCode: varchar("parcelCode", { length: 64 }).notNull(),
   parcelName: varchar("parcelName", { length: 255 }).notNull(),
