@@ -66,24 +66,56 @@ function formatDateShort(dateStr: string) {
 }
 
 export default function ClimateAnalysis() {
-  const [historicalDays, setHistoricalDays] = useState(365);
+  const [historicalDays, setHistoricalDays] = useState(-1); // -1 = desde inicio de cosecha
   const [forecastDays, setForecastDays] = useState(7);
 
   // Queries
   const { data: currentWeather, isLoading: loadingCurrent, refetch: refetchCurrent } = trpc.weather.getCurrent.useQuery();
   const { data: forecast, isLoading: loadingForecast } = trpc.weather.getExtendedForecast.useQuery({ days: forecastDays });
   
+  // Datos de cajas por día (mover antes para calcular fecha de inicio)
+  const { data: boxesByDay } = trpc.boxes.list.useQuery();
+
+  // Calcular fecha de inicio de cosecha (primera caja registrada)
+  const harvestStartInfo = useMemo(() => {
+    if (!boxesByDay || boxesByDay.length === 0) return { date: null, daysAgo: 365 };
+    
+    // Encontrar la fecha más antigua
+    let oldestDate: Date | null = null;
+    boxesByDay.forEach((box: any) => {
+      const boxDate = new Date(box.submissionTime);
+      if (!oldestDate || boxDate < oldestDate) {
+        oldestDate = boxDate;
+      }
+    });
+    
+    if (!oldestDate) return { date: null, daysAgo: 365 };
+    
+    const today = new Date();
+    const diffTime = Math.abs(today.getTime() - oldestDate.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    return {
+      date: oldestDate.toISOString().split("T")[0],
+      daysAgo: diffDays + 1 // +1 para incluir el día de inicio
+    };
+  }, [boxesByDay]);
+
   // Calcular fechas para históricos
   const historicalDates = useMemo(() => {
     const end = new Date();
     end.setDate(end.getDate() - 1); // Ayer
     const start = new Date();
-    start.setDate(start.getDate() - historicalDays);
+    
+    // Si historicalDays es -1, usar desde inicio de cosecha
+    const daysToUse = historicalDays === -1 ? harvestStartInfo.daysAgo : historicalDays;
+    start.setDate(start.getDate() - daysToUse);
+    
     return {
       startDate: start.toISOString().split("T")[0],
       endDate: end.toISOString().split("T")[0],
     };
-  }, [historicalDays]);
+  }, [historicalDays, harvestStartInfo.daysAgo]);
 
   const { data: historicalWeather, isLoading: loadingHistorical } = trpc.weather.getHistoricalDetailed.useQuery(historicalDates);
   
@@ -92,9 +124,6 @@ export default function ClimateAnalysis() {
     startDate: historicalDates.startDate,
     endDate: historicalDates.endDate,
   });
-
-  // Datos de cajas por día
-  const { data: boxesByDay } = trpc.boxes.list.useQuery();
 
   // Combinar datos de clima y cosecha para correlación
   const correlationData = useMemo(() => {
@@ -305,17 +334,19 @@ export default function ClimateAnalysis() {
 
         {/* Gráfica de Correlación Temperatura vs Cosecha */}
         <GlassCard className="p-6 md:p-8">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
             <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
               <TrendingUp className="w-5 h-5" />
-              Temperatura vs Cosecha {historicalDays === 365 ? '(Todo el historial)' : `(Últimos ${historicalDays} días)`}
+              Temperatura vs Cosecha {historicalDays === -1 
+                ? `(Desde inicio: ${harvestStartInfo.date ? formatDateShort(harvestStartInfo.date) : 'cargando...'})` 
+                : `(Últimos ${historicalDays} días)`}
             </h2>
             <select
               value={historicalDays}
               onChange={(e) => setHistoricalDays(Number(e.target.value))}
-              className="px-3 py-1 border rounded-lg text-sm"
+              className="px-3 py-2 border rounded-lg text-sm bg-white shadow-sm"
             >
-              <option value={365}>Todo</option>
+              <option value={-1}>Desde inicio cosecha</option>
               <option value={90}>90 días</option>
               <option value={60}>60 días</option>
               <option value={30}>30 días</option>
