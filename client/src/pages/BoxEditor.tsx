@@ -1028,7 +1028,10 @@ export default function BoxEditor() {
 
       {/* Modal de comparación de fotos - Pantalla completa */}
       <Dialog open={showCompareDialog} onOpenChange={setShowCompareDialog}>
-        <DialogContent className="w-[95vw] md:w-[80vw] h-[90vh] max-w-none flex flex-col p-0 gap-0 overflow-hidden">
+        <DialogContent 
+          showCloseButton={false}
+          className="!w-[95vw] !max-w-[95vw] !h-[85vh] !max-h-[85vh] flex flex-col !p-0 !gap-0 overflow-hidden"
+        >
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-2 bg-purple-50 border-b flex-shrink-0">
             <div className="flex items-center gap-3">
@@ -1051,7 +1054,7 @@ export default function BoxEditor() {
           </div>
           
           {/* Grid responsivo: columnas en pantalla ancha, lista en pantalla angosta */}
-          <div className={`flex-1 grid gap-2 p-2 bg-gray-100 overflow-auto
+          <div className={`flex-1 min-h-0 grid gap-3 p-3 bg-gray-100 overflow-auto
             grid-cols-1
             ${selectedBoxesForCompare.length === 2 ? 'md:grid-cols-2' : ''}
             ${selectedBoxesForCompare.length === 3 ? 'md:grid-cols-3' : ''}
