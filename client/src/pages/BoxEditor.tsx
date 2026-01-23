@@ -1,14 +1,24 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { trpc } from "../lib/trpc";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { GlassCard } from "../components/GlassCard";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
-import { Pencil, Trash2, Save, X, Search, Image as ImageIcon, ChevronLeft, ChevronRight, MapPin } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
+import { Pencil, Trash2, Save, X, Search, Image as ImageIcon, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, MapPin, AlertTriangle, Filter } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { MapModal } from "../components/MapModal";
+import { APP_LOGO } from "../const";
+import { getProxiedImageUrl } from "../lib/imageProxy";
+import { useDebouncedCallback } from "use-debounce";
 
 interface Box {
   id: number;
@@ -24,12 +34,70 @@ interface Box {
   longitude: string | null;
 }
 
-const ITEMS_PER_PAGE = 50;
+// Skeleton para tabla
+function TableSkeleton() {
+  return (
+    <div className="animate-pulse">
+      <div className="space-y-3">
+        {Array.from({ length: 10 }).map((_, i) => (
+          <div key={i} className="flex gap-4 py-3 border-b border-green-100">
+            <div className="h-4 bg-green-200 rounded w-24"></div>
+            <div className="h-4 bg-green-200 rounded w-20"></div>
+            <div className="h-4 bg-green-200 rounded w-32"></div>
+            <div className="h-4 bg-green-200 rounded w-16"></div>
+            <div className="h-4 bg-green-200 rounded w-24"></div>
+            <div className="h-4 bg-green-200 rounded w-8"></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function BoxEditor() {
-  const { data: boxes, isLoading, refetch } = trpc.boxes.list.useQuery();
-  const { data: harvesters } = trpc.harvesters.list.useQuery();
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(50);
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterError, setFilterError] = useState<'all' | 'duplicates' | 'no_polygon'>('all');
   
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<Partial<Box & { newParcelCode?: string; newParcelName?: string }>>({});
+  const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState(false);
+  const [photoZoom, setPhotoZoom] = useState(false);
+  const [selectedMap, setSelectedMap] = useState<{ latitude: string | null; longitude: string | null; boxCode: string } | null>(null);
+
+  // Debounce para búsqueda
+  const debouncedSearch = useDebouncedCallback((value: string) => {
+    setSearchQuery(value);
+    setPage(1);
+  }, 300);
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setSearchInput(value);
+    debouncedSearch(value);
+  };
+
+  // Query para datos paginados con errores
+  const { data: editorData, isLoading, isFetching, refetch } = trpc.boxes.listForEditor.useQuery(
+    {
+      page,
+      pageSize,
+      search: searchQuery || undefined,
+      filterError: filterError !== 'all' ? filterError : undefined,
+    },
+    {
+      keepPreviousData: true,
+    }
+  );
+
+  // Query para parcelas con polígono (para el selector)
+  const { data: parcelsWithPolygon } = trpc.boxes.parcelsWithPolygon.useQuery();
+  
+  const { data: harvesters } = trpc.harvesters.list.useQuery();
+
   const updateBox = trpc.boxes.update.useMutation({
     onSuccess: () => {
       toast.success("✅ Caja actualizada");
@@ -50,50 +118,41 @@ export default function BoxEditor() {
     },
   });
 
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState<Partial<Box>>({});
-  const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
-  const [photoError, setPhotoError] = useState(false);
-  const [photoZoom, setPhotoZoom] = useState(false);
-  const [selectedMap, setSelectedMap] = useState<{ latitude: string | null; longitude: string | null; boxCode: string } | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  
-  // Filtros por columna
-  const [filters, setFilters] = useState({
-    boxCode: "",
-    parcelCode: "",
-    parcelName: "",
-    harvesterId: "",
-    weight: "",
-    date: "",
-  });
+  // Reset página cuando cambia el filtro de error
+  useEffect(() => {
+    setPage(1);
+  }, [filterError]);
 
-  // Datos filtrados (memoizado)
-  const filteredBoxes = useMemo(() => {
-    if (!boxes) return [];
-    
-    return boxes.filter((box) => {
-      if (filters.boxCode && !box.boxCode.toLowerCase().includes(filters.boxCode.toLowerCase())) return false;
-      if (filters.parcelCode && !box.parcelCode.toLowerCase().includes(filters.parcelCode.toLowerCase())) return false;
-      if (filters.parcelName && !box.parcelName.toLowerCase().includes(filters.parcelName.toLowerCase())) return false;
-      if (filters.harvesterId && box.harvesterId.toString() !== filters.harvesterId) return false;
-      if (filters.weight && !(box.weight / 1000).toString().includes(filters.weight)) return false;
-      if (filters.date && !format(new Date(box.submissionTime), "yyyy-MM-dd").includes(filters.date)) return false;
-      return true;
-    });
-  }, [boxes, filters]);
+  const boxes = editorData?.boxes || [];
+  const total = editorData?.total || 0;
+  const totalPages = editorData?.totalPages || 0;
+  const duplicateCodes = editorData?.duplicateCodes || [];
+  const parcelsWithoutPolygon = editorData?.parcelsWithoutPolygon || [];
 
-  // Paginación (memoizado)
-  const totalPages = Math.ceil(filteredBoxes.length / ITEMS_PER_PAGE);
-  const paginatedBoxes = useMemo(() => {
-    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredBoxes.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-  }, [filteredBoxes, currentPage]);
+  // Contadores de errores
+  const duplicateCount = useMemo(() => {
+    if (!duplicateCodes.length) return 0;
+    return boxes.filter(b => duplicateCodes.includes(b.boxCode)).length;
+  }, [boxes, duplicateCodes]);
 
-  // Callbacks memoizados
-  const updateFilters = useCallback((newFilters: typeof filters) => {
-    setFilters(newFilters);
-    setCurrentPage(1);
+  const noPolygonCount = useMemo(() => {
+    if (!parcelsWithoutPolygon.length) return 0;
+    return boxes.filter(b => parcelsWithoutPolygon.includes(b.parcelCode)).length;
+  }, [boxes, parcelsWithoutPolygon]);
+
+  const getHarvesterName = useCallback((harvesterId: number) => {
+    const harvester = harvesters?.find((h) => h.number === harvesterId);
+    if (harvester?.customName) return harvester.customName;
+    if (harvesterId === 97) return "Recolecta";
+    if (harvesterId === 98) return "Segunda";
+    if (harvesterId === 99) return "Desperdicio";
+    return `Cortadora ${harvesterId}`;
+  }, [harvesters]);
+
+  const getPhotoUrl = useCallback((box: Box) => {
+    if (box.photoUrl) return getProxiedImageUrl(box.photoUrl);
+    if (box.photoFilename) return `/app/photos/${box.photoFilename}`;
+    return null;
   }, []);
 
   const startEdit = useCallback((box: Box) => {
@@ -106,6 +165,8 @@ export default function BoxEditor() {
       parcelName: box.parcelName,
       weight: box.weight,
       submissionTime: box.submissionTime,
+      newParcelCode: box.parcelCode,
+      newParcelName: box.parcelName,
     });
   }, []);
 
@@ -121,8 +182,8 @@ export default function BoxEditor() {
       id: editForm.id,
       boxCode: editForm.boxCode!,
       harvesterId: editForm.harvesterId!,
-      parcelCode: editForm.parcelCode!,
-      parcelName: editForm.parcelName!,
+      parcelCode: editForm.newParcelCode || editForm.parcelCode!,
+      parcelName: editForm.newParcelName || editForm.parcelName!,
       weight: editForm.weight!,
       submissionTime: new Date(editForm.submissionTime!).toISOString(),
     });
@@ -136,31 +197,23 @@ export default function BoxEditor() {
     }
   }, [deleteBox]);
 
-  const clearFilters = useCallback(() => {
-    updateFilters({
-      boxCode: "",
-      parcelCode: "",
-      parcelName: "",
-      harvesterId: "",
-      weight: "",
-      date: "",
-    });
-  }, [updateFilters]);
-
-  const getHarvesterName = useCallback((harvesterId: number) => {
-    const harvester = harvesters?.find((h) => h.number === harvesterId);
-    if (harvester?.customName) return harvester.customName;
-    if (harvesterId === 97) return "Recolecta";
-    if (harvesterId === 98) return "Segunda";
-    if (harvesterId === 99) return "Desperdicio";
-    return `Cortadora ${harvesterId}`;
-  }, [harvesters]);
-
-  const getPhotoUrl = useCallback((box: Box) => {
-    if (box.photoUrl) return box.photoUrl;
-    if (box.photoFilename) return `/app/photos/${box.photoFilename}`;
-    return null;
+  const handleClearFilters = useCallback(() => {
+    setSearchInput("");
+    setSearchQuery("");
+    setFilterError('all');
+    setPage(1);
   }, []);
+
+  const handleParcelChange = useCallback((parcelCode: string) => {
+    const parcel = parcelsWithPolygon?.find(p => p.code === parcelCode);
+    if (parcel) {
+      setEditForm(prev => ({
+        ...prev,
+        newParcelCode: parcel.code,
+        newParcelName: parcel.name,
+      }));
+    }
+  }, [parcelsWithPolygon]);
 
   const openPhoto = useCallback((url: string) => {
     setSelectedPhoto(url);
@@ -174,344 +227,421 @@ export default function BoxEditor() {
     setPhotoZoom(false);
   }, []);
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-lg">Cargando...</div>
-      </div>
-    );
-  }
+  // Verificar si una caja tiene errores
+  const hasError = useCallback((box: Box) => {
+    const isDuplicate = duplicateCodes.includes(box.boxCode);
+    const hasNoPolygon = parcelsWithoutPolygon.includes(box.parcelCode);
+    return { isDuplicate, hasNoPolygon, hasAnyError: isDuplicate || hasNoPolygon };
+  }, [duplicateCodes, parcelsWithoutPolygon]);
 
   return (
-    <div className="container mx-auto py-6 space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span>Editor de Cajas</span>
-            <div className="text-sm font-normal text-muted-foreground">
-              {filteredBoxes.length} de {boxes?.length || 0}
+    <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
+      <div className="container">
+        {/* Header */}
+        <div className="mb-8 flex items-center gap-4">
+          <img src={APP_LOGO} alt="Agratec" className="h-16 w-16" />
+          <div>
+            <h1 className="text-4xl font-bold text-green-900">Editor de Cajas</h1>
+            <p className="text-green-700">
+              {total.toLocaleString()} cajas
+              {isFetching && !isLoading && (
+                <span className="ml-2 text-sm text-green-500">Actualizando...</span>
+              )}
+            </p>
+          </div>
+        </div>
+
+        {/* Resumen de errores */}
+        <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <GlassCard className="p-4 cursor-pointer hover:shadow-lg transition-shadow" onClick={() => setFilterError('all')}>
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-green-100 rounded-lg">
+                <Filter className="h-6 w-6 text-green-600" />
+              </div>
+              <div>
+                <p className="text-sm text-green-600">Total Cajas</p>
+                <p className="text-2xl font-bold text-green-900">{total.toLocaleString()}</p>
+              </div>
             </div>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {/* Filtros */}
-          <div className="mb-4 p-4 bg-muted/50 rounded-lg space-y-3">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold flex items-center gap-2">
-                <Search className="h-4 w-4" />
-                Filtros
-              </h3>
-              <Button variant="outline" size="sm" onClick={clearFilters}>
-                Limpiar
-              </Button>
+          </GlassCard>
+
+          <GlassCard 
+            className={`p-4 cursor-pointer hover:shadow-lg transition-shadow ${filterError === 'duplicates' ? 'ring-2 ring-red-500' : ''}`}
+            onClick={() => setFilterError('duplicates')}
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-red-100 rounded-lg">
+                <AlertTriangle className="h-6 w-6 text-red-600" />
+              </div>
+              <div>
+                <p className="text-sm text-red-600">Códigos Duplicados</p>
+                <p className="text-2xl font-bold text-red-900">{duplicateCodes.length}</p>
+              </div>
             </div>
-            
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          </GlassCard>
+
+          <GlassCard 
+            className={`p-4 cursor-pointer hover:shadow-lg transition-shadow ${filterError === 'no_polygon' ? 'ring-2 ring-orange-500' : ''}`}
+            onClick={() => setFilterError('no_polygon')}
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-orange-100 rounded-lg">
+                <MapPin className="h-6 w-6 text-orange-600" />
+              </div>
+              <div>
+                <p className="text-sm text-orange-600">Sin Polígono</p>
+                <p className="text-2xl font-bold text-orange-900">{parcelsWithoutPolygon.length} parcelas</p>
+              </div>
+            </div>
+          </GlassCard>
+        </div>
+
+        {/* Buscador y Filtros */}
+        <GlassCard className="mb-6 p-6">
+          {/* Buscador */}
+          <div className="mb-6">
+            <label className="mb-2 block text-sm font-medium text-green-900">Buscar por código de caja</label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-green-500" />
               <Input
-                placeholder="Código Caja"
-                value={filters.boxCode}
-                onChange={(e) => updateFilters({ ...filters, boxCode: e.target.value })}
-                className="h-9"
-              />
-              <Input
-                placeholder="Código Parcela"
-                value={filters.parcelCode}
-                onChange={(e) => updateFilters({ ...filters, parcelCode: e.target.value })}
-                className="h-9"
-              />
-              <Input
-                placeholder="Nombre Parcela"
-                value={filters.parcelName}
-                onChange={(e) => updateFilters({ ...filters, parcelName: e.target.value })}
-                className="h-9"
-              />
-              <Input
-                placeholder="Cortadora #"
-                type="number"
-                value={filters.harvesterId}
-                onChange={(e) => updateFilters({ ...filters, harvesterId: e.target.value })}
-                className="h-9"
-              />
-              <Input
-                placeholder="Peso (kg)"
-                value={filters.weight}
-                onChange={(e) => updateFilters({ ...filters, weight: e.target.value })}
-                className="h-9"
-              />
-              <Input
-                placeholder="Fecha"
-                value={filters.date}
-                onChange={(e) => updateFilters({ ...filters, date: e.target.value })}
-                className="h-9"
+                type="text"
+                placeholder="Ej: 01-123456"
+                value={searchInput}
+                onChange={handleSearchChange}
+                className="pl-10 border-green-200 focus:border-green-500 focus:ring-green-500"
               />
             </div>
           </div>
 
-          {/* Paginación superior */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between mb-4">
-              <div className="text-sm text-muted-foreground">
-                Pág {currentPage} de {totalPages}
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Input
-                  type="number"
-                  min={1}
-                  max={totalPages}
-                  value={currentPage}
-                  onChange={(e) => {
-                    const page = parseInt(e.target.value);
-                    if (page >= 1 && page <= totalPages) setCurrentPage(page);
-                  }}
-                  className="h-9 w-16 text-center"
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Filter className="h-5 w-5 text-green-600" />
+              <h2 className="text-lg font-semibold text-green-900">Filtro de Errores</h2>
             </div>
-          )}
+            <Button
+              onClick={handleClearFilters}
+              variant="outline"
+              className="border-green-600 text-green-700 hover:bg-green-50"
+            >
+              Limpiar Filtros
+            </Button>
+          </div>
+          
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Select value={filterError} onValueChange={(v) => setFilterError(v as any)}>
+              <SelectTrigger className="border-green-200">
+                <SelectValue placeholder="Filtrar por error" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas las cajas</SelectItem>
+                <SelectItem value="duplicates">
+                  <span className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-red-500" />
+                    Solo códigos duplicados
+                  </span>
+                </SelectItem>
+                <SelectItem value="no_polygon">
+                  <span className="flex items-center gap-2">
+                    <MapPin className="h-4 w-4 text-orange-500" />
+                    Solo sin polígono
+                  </span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </GlassCard>
 
-          {/* Tabla */}
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="p-2 text-left text-xs font-semibold">Código</th>
-                  <th className="p-2 text-left text-xs font-semibold">Parcela</th>
-                  <th className="p-2 text-left text-xs font-semibold">Nombre</th>
-                  <th className="p-2 text-left text-xs font-semibold">Cortadora</th>
-                  <th className="p-2 text-left text-xs font-semibold">Peso</th>
-                  <th className="p-2 text-left text-xs font-semibold">Fecha</th>
-                  <th className="p-2 text-center text-xs font-semibold">Foto</th>
-                  <th className="p-2 text-center text-xs font-semibold">Mapa</th>
-                  <th className="p-2 text-center text-xs font-semibold">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedBoxes.map((box) => {
-                  const isEditing = editingId === box.id;
-                  const photoUrl = getPhotoUrl(box);
-                  
-                  return (
-                    <tr key={box.id} className="border-b hover:bg-muted/30">
-                      <td className="p-2">
-                        {isEditing ? (
-                          <Input
-                            value={editForm.boxCode}
-                            onChange={(e) => setEditForm({ ...editForm, boxCode: e.target.value })}
-                            className="h-8 text-sm"
-                          />
-                        ) : (
-                          <span className="font-mono text-sm">{box.boxCode}</span>
-                        )}
-                      </td>
-                      
-                      <td className="p-2">
-                        {isEditing ? (
-                          <Input
-                            value={editForm.parcelCode}
-                            onChange={(e) => setEditForm({ ...editForm, parcelCode: e.target.value })}
-                            className="h-8 text-sm"
-                          />
-                        ) : (
-                          <span className="text-sm">{box.parcelCode}</span>
-                        )}
-                      </td>
-                      
-                      <td className="p-2">
-                        {isEditing ? (
-                          <Input
-                            value={editForm.parcelName}
-                            onChange={(e) => setEditForm({ ...editForm, parcelName: e.target.value })}
-                            className="h-8 text-sm"
-                          />
-                        ) : (
-                          <span className="text-sm">{box.parcelName}</span>
-                        )}
-                      </td>
-                      
-                      <td className="p-2">
-                        {isEditing ? (
-                          <Input
-                            type="number"
-                            value={editForm.harvesterId}
-                            onChange={(e) => setEditForm({ ...editForm, harvesterId: parseInt(e.target.value) })}
-                            className="h-8 text-sm"
-                          />
-                        ) : (
-                          <span className="text-sm">{getHarvesterName(box.harvesterId)}</span>
-                        )}
-                      </td>
-                      
-                      <td className="p-2">
-                        {isEditing ? (
-                          <Input
-                            type="number"
-                            step="0.01"
-                            value={(editForm.weight! / 1000).toFixed(2)}
-                            onChange={(e) => setEditForm({ ...editForm, weight: Math.round(parseFloat(e.target.value) * 1000) })}
-                            className="h-8 text-sm"
-                          />
-                        ) : (
-                          <span className={`text-sm ${box.weight > 20000 ? "text-red-600 font-bold" : ""}`}>
-                            {(box.weight / 1000).toFixed(2)}
-                          </span>
-                        )}
-                      </td>
-                      
-                      <td className="p-2">
-                        {isEditing ? (
-                          <Input
-                            type="datetime-local"
-                            value={format(new Date(editForm.submissionTime!), "yyyy-MM-dd'T'HH:mm")}
-                            onChange={(e) => setEditForm({ ...editForm, submissionTime: new Date(e.target.value) })}
-                            className="h-8 text-sm"
-                          />
-                        ) : (
-                          <span className="text-xs">
-                            {format(new Date(box.submissionTime), "dd/MM/yy HH:mm", { locale: es })}
-                          </span>
-                        )}
-                      </td>
-                      
-                      <td className="p-2 text-center">
-                        {photoUrl ? (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openPhoto(photoUrl)}
-                            className="h-8 w-8 p-0"
-                          >
-                            <ImageIcon className="h-4 w-4" />
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">-</span>
-                        )}
-                      </td>
-                      
-                      <td className="p-2 text-center">
-                        {box.latitude && box.longitude ? (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setSelectedMap({ latitude: box.latitude, longitude: box.longitude, boxCode: box.boxCode })}
-                            className="h-8 w-8 p-0"
-                          >
-                            <MapPin className="h-4 w-4" />
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">-</span>
-                        )}
-                      </td>
-                      
-                      <td className="p-2">
-                        <div className="flex items-center justify-center gap-1">
-                          {isEditing ? (
-                            <>
-                              <Button
-                                variant="default"
-                                size="sm"
-                                onClick={saveEdit}
-                                disabled={updateBox.isPending}
-                                className="h-8 w-8 p-0"
-                              >
-                                <Save className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={cancelEdit}
-                                className="h-8 w-8 p-0"
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </>
-                          ) : (
-                            <>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => startEdit(box)}
-                                className="h-8 w-8 p-0"
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                onClick={() => handleDelete(box.id, box.boxCode)}
-                                disabled={deleteBox.isPending}
-                                className="h-8 w-8 p-0"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                      </td>
+        {/* Tabla con datos */}
+        <GlassCard className="overflow-hidden p-6" hover={false}>
+          {isLoading ? (
+            <TableSkeleton />
+          ) : boxes.length > 0 ? (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b-2 border-green-200">
+                      <th className="pb-3 pr-4 text-left text-sm font-semibold text-green-900">Código</th>
+                      <th className="pb-3 pr-4 text-left text-sm font-semibold text-green-900">Parcela</th>
+                      <th className="pb-3 pr-4 text-left text-sm font-semibold text-green-900">Nombre</th>
+                      <th className="pb-3 pr-4 text-left text-sm font-semibold text-green-900">Cortadora</th>
+                      <th className="pb-3 pr-4 text-right text-sm font-semibold text-green-900">Peso</th>
+                      <th className="pb-3 pr-4 text-left text-sm font-semibold text-green-900">Fecha</th>
+                      <th className="pb-3 text-center text-sm font-semibold text-green-900">Foto</th>
+                      <th className="pb-3 text-center text-sm font-semibold text-green-900">Mapa</th>
+                      <th className="pb-3 text-center text-sm font-semibold text-green-900">Acciones</th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody>
+                    {boxes.map((box) => {
+                      const isEditing = editingId === box.id;
+                      const photoUrl = getPhotoUrl(box as Box);
+                      const errors = hasError(box as Box);
+                      
+                      return (
+                        <tr 
+                          key={box.id} 
+                          className={`border-b border-green-100 transition-colors hover:bg-green-50/50 ${
+                            errors.isDuplicate ? 'bg-red-50' : 
+                            errors.hasNoPolygon ? 'bg-orange-50' : ''
+                          }`}
+                        >
+                          <td className="py-3 pr-4">
+                            {isEditing ? (
+                              <Input
+                                value={editForm.boxCode}
+                                onChange={(e) => setEditForm({ ...editForm, boxCode: e.target.value })}
+                                className="h-8 text-sm"
+                              />
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <span className={`font-mono text-sm ${errors.isDuplicate ? 'text-red-700 font-bold' : 'text-green-900'}`}>
+                                  {box.boxCode}
+                                </span>
+                                {errors.isDuplicate && (
+                                  <AlertTriangle className="h-4 w-4 text-red-500" title="Código duplicado" />
+                                )}
+                              </div>
+                            )}
+                          </td>
+                          
+                          <td className="py-3 pr-4">
+                            {isEditing ? (
+                              <Select 
+                                value={editForm.newParcelCode || editForm.parcelCode} 
+                                onValueChange={handleParcelChange}
+                              >
+                                <SelectTrigger className="h-8 text-sm">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {parcelsWithPolygon?.map(p => (
+                                    <SelectItem key={p.code} value={p.code}>
+                                      {p.code} - {p.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <span className={`text-sm ${errors.hasNoPolygon ? 'text-orange-700 font-bold' : 'text-green-900'}`}>
+                                  {box.parcelCode}
+                                </span>
+                                {errors.hasNoPolygon && (
+                                  <MapPin className="h-4 w-4 text-orange-500" title="Sin polígono" />
+                                )}
+                              </div>
+                            )}
+                          </td>
+                          
+                          <td className="py-3 pr-4">
+                            {isEditing ? (
+                              <span className="text-sm text-gray-500">{editForm.newParcelName || editForm.parcelName}</span>
+                            ) : (
+                              <span className={`text-sm ${errors.hasNoPolygon ? 'text-orange-700' : 'text-green-900'}`}>
+                                {box.parcelName}
+                              </span>
+                            )}
+                          </td>
+                          
+                          <td className="py-3 pr-4">
+                            {isEditing ? (
+                              <Input
+                                type="number"
+                                value={editForm.harvesterId}
+                                onChange={(e) => setEditForm({ ...editForm, harvesterId: parseInt(e.target.value) })}
+                                className="h-8 text-sm w-20"
+                              />
+                            ) : (
+                              <span className="text-sm text-green-900">{getHarvesterName(box.harvesterId)}</span>
+                            )}
+                          </td>
+                          
+                          <td className="py-3 pr-4 text-right">
+                            {isEditing ? (
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={(editForm.weight! / 1000).toFixed(2)}
+                                onChange={(e) => setEditForm({ ...editForm, weight: Math.round(parseFloat(e.target.value) * 1000) })}
+                                className="h-8 text-sm w-24"
+                              />
+                            ) : (
+                              <span className={`text-sm font-semibold ${box.weight > 20000 ? "text-red-600" : "text-green-900"}`}>
+                                {(box.weight / 1000).toFixed(2)} kg
+                              </span>
+                            )}
+                          </td>
+                          
+                          <td className="py-3 pr-4">
+                            {isEditing ? (
+                              <Input
+                                type="datetime-local"
+                                value={format(new Date(editForm.submissionTime!), "yyyy-MM-dd'T'HH:mm")}
+                                onChange={(e) => setEditForm({ ...editForm, submissionTime: new Date(e.target.value) })}
+                                className="h-8 text-sm"
+                              />
+                            ) : (
+                              <span className="text-xs text-green-900">
+                                {format(new Date(box.submissionTime), "dd/MM/yy HH:mm", { locale: es })}
+                              </span>
+                            )}
+                          </td>
+                          
+                          <td className="py-3 text-center">
+                            {photoUrl ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => openPhoto(photoUrl)}
+                                className="h-8 w-8 p-0 hover:bg-green-100"
+                              >
+                                <ImageIcon className="h-4 w-4 text-green-600" />
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-gray-400">-</span>
+                            )}
+                          </td>
+                          
+                          <td className="py-3 text-center">
+                            {box.latitude && box.longitude ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setSelectedMap({ latitude: box.latitude, longitude: box.longitude, boxCode: box.boxCode })}
+                                className="h-8 w-8 p-0 hover:bg-green-100"
+                              >
+                                <MapPin className="h-4 w-4 text-green-600" />
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-gray-400">-</span>
+                            )}
+                          </td>
+                          
+                          <td className="py-3">
+                            <div className="flex items-center justify-center gap-1">
+                              {isEditing ? (
+                                <>
+                                  <Button
+                                    variant="default"
+                                    size="sm"
+                                    onClick={saveEdit}
+                                    disabled={updateBox.isPending}
+                                    className="h-8 w-8 p-0 bg-green-600 hover:bg-green-700"
+                                  >
+                                    <Save className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={cancelEdit}
+                                    className="h-8 w-8 p-0 border-green-300"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </Button>
+                                </>
+                              ) : (
+                                <>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => startEdit(box as Box)}
+                                    className="h-8 w-8 p-0 border-green-300 hover:bg-green-50"
+                                  >
+                                    <Pencil className="h-4 w-4 text-green-600" />
+                                  </Button>
+                                  <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    onClick={() => handleDelete(box.id, box.boxCode)}
+                                    disabled={deleteBox.isPending}
+                                    className="h-8 w-8 p-0"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
 
-          {filteredBoxes.length === 0 && (
-            <div className="text-center py-8 text-muted-foreground text-sm">
-              No se encontraron cajas
+              {/* Paginación */}
+              <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-green-200 pt-4">
+                <div className="text-sm text-green-700">
+                  Mostrando {((page - 1) * pageSize) + 1} - {Math.min(page * pageSize, total)} de {total.toLocaleString()} cajas
+                </div>
+                
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(1)}
+                    disabled={page === 1 || isFetching}
+                    className="border-green-300 hover:bg-green-50"
+                  >
+                    <ChevronsLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                    disabled={page === 1 || isFetching}
+                    className="border-green-300 hover:bg-green-50"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  
+                  <div className="flex items-center gap-1 px-2">
+                    <span className="text-sm font-medium text-green-900">
+                      Página {page} de {totalPages}
+                    </span>
+                  </div>
+                  
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                    disabled={page === totalPages || isFetching}
+                    className="border-green-300 hover:bg-green-50"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(totalPages)}
+                    disabled={page === totalPages || isFetching}
+                    className="border-green-300 hover:bg-green-50"
+                  >
+                    <ChevronsRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="py-12 text-center">
+              <AlertTriangle className="mx-auto mb-4 h-16 w-16 text-green-300" />
+              <h3 className="mb-2 text-xl font-semibold text-green-900">No hay cajas que coincidan</h3>
+              <p className="text-green-600">Intenta ajustar los filtros o la búsqueda</p>
             </div>
           )}
-
-          {/* Paginación inferior */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-center mt-4 gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <span className="text-sm">
-                {((currentPage - 1) * ITEMS_PER_PAGE) + 1}-{Math.min(currentPage * ITEMS_PER_PAGE, filteredBoxes.length)} de {filteredBoxes.length}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        </GlassCard>
+      </div>
 
       {/* Modal de foto */}
       <Dialog open={!!selectedPhoto} onOpenChange={closePhoto}>
-        <DialogContent className="max-w-4xl">
-          <DialogHeader>
+        <DialogContent className="max-w-4xl p-0">
+          <DialogHeader className="p-4 border-b">
             <DialogTitle>Foto de la Caja</DialogTitle>
           </DialogHeader>
-          <div className="relative overflow-auto max-h-[70vh]">
+          <div className="relative overflow-auto max-h-[70vh] p-4">
             {photoError ? (
-              <div className="text-center py-8 text-muted-foreground">
+              <div className="text-center py-8 text-gray-500">
                 Error al cargar la imagen
               </div>
             ) : (
@@ -519,8 +649,7 @@ export default function BoxEditor() {
                 <img
                   src={selectedPhoto}
                   alt="Foto de caja"
-                  className={`w-full h-auto rounded-lg cursor-pointer transition-transform ${photoZoom ? 'scale-200' : 'scale-100'}`}
-                  style={{ transform: photoZoom ? 'scale(2)' : 'scale(1)' }}
+                  className={`w-full h-auto rounded-lg cursor-pointer transition-transform ${photoZoom ? 'scale-150' : 'scale-100'}`}
                   onClick={() => setPhotoZoom(!photoZoom)}
                   onError={() => setPhotoError(true)}
                   loading="lazy"

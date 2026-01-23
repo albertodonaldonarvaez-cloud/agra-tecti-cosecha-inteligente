@@ -80,6 +80,47 @@ export const appRouter = router({
       return await db.getBoxFilterOptions();
     }),
 
+    // Obtener códigos de caja duplicados
+    duplicateCodes: protectedProcedure.query(async () => {
+      return await db.getDuplicateBoxCodes();
+    }),
+
+    // Obtener parcelas sin polígono
+    parcelsWithoutPolygon: protectedProcedure.query(async () => {
+      return await db.getParcelsWithoutPolygon();
+    }),
+
+    // Obtener parcelas con polígono (para selector)
+    parcelsWithPolygon: protectedProcedure.query(async () => {
+      return await db.getParcelsWithPolygon();
+    }),
+
+    // Endpoint para editor de cajas con filtros de errores
+    listForEditor: adminProcedure
+      .input(z.object({
+        page: z.number().min(1).default(1),
+        pageSize: z.number().min(10).max(100).default(50),
+        search: z.string().optional(),
+        filterError: z.enum(['all', 'duplicates', 'no_polygon']).optional(),
+      }))
+      .query(async ({ input }) => {
+        // Obtener listas de errores
+        const duplicateCodes = await db.getDuplicateBoxCodes();
+        const parcelsWithoutPolygon = await db.getParcelsWithoutPolygon();
+        
+        const result = await db.getBoxesForEditor({
+          ...input,
+          duplicateCodes,
+          parcelsWithoutPolygon,
+        });
+        
+        return {
+          ...result,
+          duplicateCodes,
+          parcelsWithoutPolygon,
+        };
+      }),
+
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {

@@ -339,3 +339,123 @@ export async function getAvailableDates() {
   
   return Array.from(uniqueDates);
 }
+
+
+// Obtener códigos de caja duplicados
+export async function getDuplicateBoxCodes() {
+  const db = await getDb();
+  if (!db) return [];
+  
+  const { sql } = await import("drizzle-orm");
+  
+  const result = await db.execute(sql`
+    SELECT boxCode, COUNT(*) as count 
+    FROM boxes 
+    GROUP BY boxCode 
+    HAVING COUNT(*) > 1
+  `);
+  
+  return (result[0] as any[]).map(r => r.boxCode);
+}
+
+// Obtener parcelas sin polígono definido
+export async function getParcelsWithoutPolygon() {
+  const db = await getDb();
+  if (!db) return [];
+  
+  const { sql } = await import("drizzle-orm");
+  
+  // Obtener códigos de parcela de cajas que no tienen polígono en la tabla parcels
+  const result = await db.execute(sql`
+    SELECT DISTINCT b.parcelCode 
+    FROM boxes b 
+    LEFT JOIN parcels p ON b.parcelCode = p.code 
+    WHERE p.polygon IS NULL OR p.polygon = '' OR p.id IS NULL
+  `);
+  
+  return (result[0] as any[]).map(r => r.parcelCode);
+}
+
+// Obtener parcelas con polígono definido (para el selector)
+export async function getParcelsWithPolygon() {
+  const db = await getDb();
+  if (!db) return [];
+  
+  const { sql } = await import("drizzle-orm");
+  
+  const result = await db.execute(sql`
+    SELECT code, name 
+    FROM parcels 
+    WHERE polygon IS NOT NULL AND polygon != '' AND isActive = 1
+    ORDER BY code
+  `);
+  
+  return (result[0] as any[]).map(r => ({ code: r.code, name: r.name }));
+}
+
+// Endpoint para editor de cajas con paginación y filtros de errores
+export async function getBoxesForEditor(params: {
+  page: number;
+  pageSize: number;
+  search?: string;
+  filterError?: 'all' | 'duplicates' | 'no_polygon';
+  duplicateCodes?: string[];
+  parcelsWithoutPolygon?: string[];
+}) {
+  const db = await getDb();
+  if (!db) return { boxes: [], total: 0, page: params.page, pageSize: params.pageSize, totalPages: 0 };
+  
+  const { desc, and, like, count, inArray } = await import("drizzle-orm");
+  const offset = (params.page - 1) * params.pageSize;
+  
+  // Construir condiciones de filtro
+  const conditions = [];
+  
+  // Búsqueda por código de caja
+  if (params.search && params.search.trim() !== '') {
+    conditions.push(like(boxes.boxCode, `%${params.search.trim()}%`));
+  }
+  
+  // Filtro de errores
+  if (params.filterError === 'duplicates' && params.duplicateCodes && params.duplicateCodes.length > 0) {
+    conditions.push(inArray(boxes.boxCode, params.duplicateCodes));
+  } else if (params.filterError === 'no_polygon' && params.parcelsWithoutPolygon && params.parcelsWithoutPolygon.length > 0) {
+    conditions.push(inArray(boxes.parcelCode, params.parcelsWithoutPolygon));
+  }
+  
+  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+  
+  // Obtener total de registros
+  const totalResult = await db.select({ count: count() })
+    .from(boxes)
+    .where(whereClause);
+  const total = totalResult[0]?.count || 0;
+  
+  // Obtener página de datos
+  const data = await db.select({
+    id: boxes.id,
+    boxCode: boxes.boxCode,
+    harvesterId: boxes.harvesterId,
+    parcelCode: boxes.parcelCode,
+    parcelName: boxes.parcelName,
+    weight: boxes.weight,
+    photoUrl: boxes.photoUrl,
+    photoFilename: boxes.photoFilename,
+    submissionTime: boxes.submissionTime,
+    latitude: boxes.latitude,
+    longitude: boxes.longitude,
+  })
+    .from(boxes)
+    .where(whereClause)
+    .orderBy(desc(boxes.submissionTime))
+    .limit(params.pageSize)
+    .offset(offset);
+  
+  return {
+    boxes: data,
+    total,
+    page: params.page,
+    pageSize: params.pageSize,
+    totalPages: Math.ceil(total / params.pageSize),
+  };
+}
