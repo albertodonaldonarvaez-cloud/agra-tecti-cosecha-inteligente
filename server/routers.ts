@@ -722,6 +722,70 @@ export const appRouter = router({
         
         return forecastData;
       }),
+    
+    getCurrent: protectedProcedure
+      .query(async () => {
+        const { getCurrentWeather } = await import("./weatherService");
+        const locationConfig = await dbExt.getLocationConfig();
+        
+        if (!locationConfig) {
+          throw new Error("Configuración de ubicación no encontrada. Configure la ubicación en Ajustes.");
+        }
+        
+        const currentWeather = await getCurrentWeather(
+          locationConfig.latitude,
+          locationConfig.longitude,
+          locationConfig.timezone
+        );
+        
+        return currentWeather;
+      }),
+    
+    getExtendedForecast: protectedProcedure
+      .input(z.object({
+        days: z.number().min(1).max(16).default(7),
+      }).optional())
+      .query(async ({ input }) => {
+        const { getExtendedForecast } = await import("./weatherService");
+        const locationConfig = await dbExt.getLocationConfig();
+        
+        if (!locationConfig) {
+          throw new Error("Configuración de ubicación no encontrada. Configure la ubicación en Ajustes.");
+        }
+        
+        const forecast = await getExtendedForecast(
+          locationConfig.latitude,
+          locationConfig.longitude,
+          input?.days || 7,
+          locationConfig.timezone
+        );
+        
+        return forecast;
+      }),
+    
+    getHistoricalDetailed: protectedProcedure
+      .input(z.object({
+        startDate: z.string(),
+        endDate: z.string(),
+      }))
+      .query(async ({ input }) => {
+        const { getHistoricalWeatherDetailed } = await import("./weatherService");
+        const locationConfig = await dbExt.getLocationConfig();
+        
+        if (!locationConfig) {
+          throw new Error("Configuración de ubicación no encontrada. Configure la ubicación en Ajustes.");
+        }
+        
+        const historical = await getHistoricalWeatherDetailed(
+          locationConfig.latitude,
+          locationConfig.longitude,
+          input.startDate,
+          input.endDate,
+          locationConfig.timezone
+        );
+        
+        return historical;
+      }),
   }),
 
   analytics: router({
