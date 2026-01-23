@@ -61,31 +61,15 @@ export async function processKoboData(data: KoboData) {
       const weightKg = parseFloat(result.peso_de_la_caja);
       const weight = Math.round(weightKg * 1000); // Convertir a gramos
 
-      // Validar peso máximo (20 kg = 20000 gramos)
-      if (weight > 20000) {
-        // Registrar error de validación
-        const { insertUploadError } = await import("./db_extended");
-        await insertUploadError({
-          batchId: 'kobo-sync',
-          fileName: 'Sincronización Kobo',
-          rowNumber: 0,
-          errorType: 'peso_excesivo',
-          errorMessage: `Peso excesivo: ${weightKg} kg (máximo 20 kg). Probablemente falta punto decimal.`,
-          boxCode: result.escanea_la_caja,
-          parcelCode,
-          harvesterId,
-          weightKg,
-          photoUrl: result._attachments?.[0]?.download_url || null,
-          latitude,
-          longitude,
-          collectedAt: result.start || result._submission_time,
-          rawData: JSON.stringify(result),
-        });
-        errors.push(`Peso excesivo en caja ${result.escanea_la_caja}: ${weightKg} kg`);
-        continue; // No insertar la caja, solo el error
+      // NOTA: Ya no descartamos cajas con peso alto.
+      // Las cajas con peso > 14 kg se marcan visualmente en el Editor de Cajas
+      // para revisión manual (posible error de punto decimal).
+      // Solo registramos un log para monitoreo.
+      if (weight > 14000) {
+        console.log(`⚠️ Peso alto detectado: ${weightKg} kg en caja ${result.escanea_la_caja} - Se insertará para revisión manual`);
       }
 
-       // Extraer URLs de fotos
+      // Extraer URLs de fotos
       let photoFilename = result.foto_de_la_caja || null;
       let photoUrl = null;
       let photoLargeUrl = null;

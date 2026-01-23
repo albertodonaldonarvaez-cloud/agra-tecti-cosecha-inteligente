@@ -264,16 +264,11 @@ export async function processExcelFile(
       }
       const weight = Math.round(weightKg * 1000); // Convertir a gramos
       
-      // Validar peso máximo (20 kg = 20000 gramos)
-      if (weight > 20000) {
-        errors.push({
-          type: 'peso_excesivo',
-          boxCode,
-          message: `Peso excesivo: ${weightKg} kg (máximo 20 kg). Probablemente falta punto decimal.`,
-          rowData: row
-        });
-        errorRows++;
-        continue;
+      // NOTA: Ya no descartamos cajas con peso alto.
+      // Las cajas con peso > 14 kg se marcan visualmente en el Editor de Cajas
+      // para revisión manual (posible error de punto decimal).
+      if (weight > 14000) {
+        console.log(`⚠️ Peso alto detectado: ${weightKg} kg en caja ${boxCode} - Se insertará para revisión manual`);
       }
 
       // Coordenadas (submissionTime ya fue calculado arriba para validación de duplicados)
