@@ -401,11 +401,13 @@ export async function getBoxesForEditor(params: {
   filterError?: 'all' | 'duplicates' | 'no_polygon';
   duplicateCodes?: string[];
   parcelsWithoutPolygon?: string[];
+  sortBy?: 'boxCode' | 'parcelCode' | 'parcelName' | 'harvesterId' | 'weight' | 'submissionTime';
+  sortOrder?: 'asc' | 'desc';
 }) {
   const db = await getDb();
   if (!db) return { boxes: [], total: 0, page: params.page, pageSize: params.pageSize, totalPages: 0 };
   
-  const { desc, and, like, count, inArray } = await import("drizzle-orm");
+  const { desc, asc, and, like, count, inArray } = await import("drizzle-orm");
   const offset = (params.page - 1) * params.pageSize;
   
   // Construir condiciones de filtro
@@ -431,6 +433,21 @@ export async function getBoxesForEditor(params: {
     .where(whereClause);
   const total = totalResult[0]?.count || 0;
   
+  // Determinar columna y orden de ordenamiento
+  const sortColumn = params.sortBy || 'submissionTime';
+  const sortFn = params.sortOrder === 'asc' ? asc : desc;
+  
+  const columnMap = {
+    boxCode: boxes.boxCode,
+    parcelCode: boxes.parcelCode,
+    parcelName: boxes.parcelName,
+    harvesterId: boxes.harvesterId,
+    weight: boxes.weight,
+    submissionTime: boxes.submissionTime,
+  };
+  
+  const orderByColumn = columnMap[sortColumn] || boxes.submissionTime;
+  
   // Obtener página de datos
   const data = await db.select({
     id: boxes.id,
@@ -447,7 +464,7 @@ export async function getBoxesForEditor(params: {
   })
     .from(boxes)
     .where(whereClause)
-    .orderBy(desc(boxes.submissionTime))
+    .orderBy(sortFn(orderByColumn))
     .limit(params.pageSize)
     .offset(offset);
   

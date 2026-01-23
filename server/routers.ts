@@ -102,6 +102,8 @@ export const appRouter = router({
         pageSize: z.number().min(10).max(100).default(50),
         search: z.string().optional(),
         filterError: z.enum(['all', 'duplicates', 'no_polygon']).optional(),
+        sortBy: z.enum(['boxCode', 'parcelCode', 'parcelName', 'harvesterId', 'weight', 'submissionTime']).optional(),
+        sortOrder: z.enum(['asc', 'desc']).optional(),
       }))
       .query(async ({ input }) => {
         // Obtener listas de errores
@@ -221,6 +223,46 @@ export const appRouter = router({
           .where(eq(boxes.id, input.id));
         
         return { success: true };
+      }),
+
+    // Actualizar parcela en lote
+    updateParcelBatch: adminProcedure
+      .input(z.object({
+        boxIds: z.array(z.number()),
+        parcelCode: z.string(),
+        parcelName: z.string(),
+      }))
+      .mutation(async ({ input }) => {
+        const database = await getDb();
+        if (!database) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available" });
+        
+        const { inArray } = await import("drizzle-orm");
+        
+        await database.update(boxes)
+          .set({
+            parcelCode: input.parcelCode,
+            parcelName: input.parcelName,
+            updatedAt: new Date(),
+          })
+          .where(inArray(boxes.id, input.boxIds));
+        
+        return { success: true, updated: input.boxIds.length };
+      }),
+
+    // Eliminar cajas en lote
+    deleteBatch: adminProcedure
+      .input(z.object({
+        boxIds: z.array(z.number()),
+      }))
+      .mutation(async ({ input }) => {
+        const database = await getDb();
+        if (!database) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available" });
+        
+        const { inArray } = await import("drizzle-orm");
+        
+        await database.delete(boxes).where(inArray(boxes.id, input.boxIds));
+        
+        return { success: true, deleted: input.boxIds.length };
       }),
 
     delete: adminProcedure

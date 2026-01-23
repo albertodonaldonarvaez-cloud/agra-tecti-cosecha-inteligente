@@ -3,6 +3,7 @@ import { trpc } from "../lib/trpc";
 import { GlassCard } from "../components/GlassCard";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
+import { Checkbox } from "../components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -10,8 +11,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
-import { Pencil, Trash2, Save, X, Search, Image as ImageIcon, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, MapPin, AlertTriangle, Filter } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import { 
+  Pencil, Trash2, Save, X, Search, Image as ImageIcon, 
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, 
+  MapPin, AlertTriangle, Filter, ArrowUpDown, ArrowUp, ArrowDown,
+  CheckSquare, Square, Edit3
+} from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -34,6 +40,9 @@ interface Box {
   longitude: string | null;
 }
 
+type SortColumn = 'boxCode' | 'parcelCode' | 'parcelName' | 'harvesterId' | 'weight' | 'submissionTime';
+type SortOrder = 'asc' | 'desc';
+
 // Skeleton para tabla
 function TableSkeleton() {
   return (
@@ -41,6 +50,7 @@ function TableSkeleton() {
       <div className="space-y-3">
         {Array.from({ length: 10 }).map((_, i) => (
           <div key={i} className="flex gap-4 py-3 border-b border-green-100">
+            <div className="h-4 bg-green-200 rounded w-6"></div>
             <div className="h-4 bg-green-200 rounded w-24"></div>
             <div className="h-4 bg-green-200 rounded w-20"></div>
             <div className="h-4 bg-green-200 rounded w-32"></div>
@@ -54,12 +64,57 @@ function TableSkeleton() {
   );
 }
 
+// Componente de encabezado ordenable
+function SortableHeader({ 
+  label, 
+  column, 
+  currentSort, 
+  currentOrder, 
+  onSort 
+}: { 
+  label: string; 
+  column: SortColumn; 
+  currentSort: SortColumn; 
+  currentOrder: SortOrder;
+  onSort: (column: SortColumn) => void;
+}) {
+  const isActive = currentSort === column;
+  
+  return (
+    <th 
+      className="pb-3 pr-4 text-left text-sm font-semibold text-green-900 cursor-pointer hover:bg-green-50 transition-colors select-none"
+      onClick={() => onSort(column)}
+    >
+      <div className="flex items-center gap-1">
+        {label}
+        {isActive ? (
+          currentOrder === 'asc' ? (
+            <ArrowUp className="h-4 w-4 text-green-600" />
+          ) : (
+            <ArrowDown className="h-4 w-4 text-green-600" />
+          )
+        ) : (
+          <ArrowUpDown className="h-4 w-4 text-gray-400" />
+        )}
+      </div>
+    </th>
+  );
+}
+
 export default function BoxEditor() {
   const [page, setPage] = useState(1);
   const [pageSize] = useState(50);
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterError, setFilterError] = useState<'all' | 'duplicates' | 'no_polygon'>('all');
+  const [sortBy, setSortBy] = useState<SortColumn>('submissionTime');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+  
+  // Estado para selección múltiple
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [showBatchDialog, setShowBatchDialog] = useState(false);
+  const [batchParcelCode, setBatchParcelCode] = useState("");
+  const [batchParcelName, setBatchParcelName] = useState("");
   
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<Partial<Box & { newParcelCode?: string; newParcelName?: string }>>({});
@@ -87,6 +142,8 @@ export default function BoxEditor() {
       pageSize,
       search: searchQuery || undefined,
       filterError: filterError !== 'all' ? filterError : undefined,
+      sortBy,
+      sortOrder,
     },
     {
       keepPreviousData: true,
@@ -118,10 +175,40 @@ export default function BoxEditor() {
     },
   });
 
-  // Reset página cuando cambia el filtro de error
+  const updateParcelBatch = trpc.boxes.updateParcelBatch.useMutation({
+    onSuccess: (data) => {
+      toast.success(`✅ ${data.updated} cajas actualizadas`);
+      setSelectedIds(new Set());
+      setShowBatchDialog(false);
+      setBatchParcelCode("");
+      setBatchParcelName("");
+      refetch();
+    },
+    onError: (error) => {
+      toast.error("❌ Error al actualizar", { description: error.message });
+    },
+  });
+
+  const deleteBatch = trpc.boxes.deleteBatch.useMutation({
+    onSuccess: (data) => {
+      toast.success(`✅ ${data.deleted} cajas eliminadas`);
+      setSelectedIds(new Set());
+      refetch();
+    },
+    onError: (error) => {
+      toast.error("❌ Error al eliminar", { description: error.message });
+    },
+  });
+
+  // Reset página cuando cambia el filtro de error o el ordenamiento
   useEffect(() => {
     setPage(1);
-  }, [filterError]);
+  }, [filterError, sortBy, sortOrder]);
+
+  // Limpiar selección cuando cambian los datos
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [page, searchQuery, filterError]);
 
   const boxes = editorData?.boxes || [];
   const total = editorData?.total || 0;
@@ -129,16 +216,64 @@ export default function BoxEditor() {
   const duplicateCodes = editorData?.duplicateCodes || [];
   const parcelsWithoutPolygon = editorData?.parcelsWithoutPolygon || [];
 
-  // Contadores de errores
-  const duplicateCount = useMemo(() => {
-    if (!duplicateCodes.length) return 0;
-    return boxes.filter(b => duplicateCodes.includes(b.boxCode)).length;
-  }, [boxes, duplicateCodes]);
+  // Manejar ordenamiento
+  const handleSort = useCallback((column: SortColumn) => {
+    if (sortBy === column) {
+      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(column);
+      setSortOrder('desc');
+    }
+  }, [sortBy]);
 
-  const noPolygonCount = useMemo(() => {
-    if (!parcelsWithoutPolygon.length) return 0;
-    return boxes.filter(b => parcelsWithoutPolygon.includes(b.parcelCode)).length;
-  }, [boxes, parcelsWithoutPolygon]);
+  // Manejar selección
+  const toggleSelect = useCallback((id: number) => {
+    setSelectedIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    if (selectedIds.size === boxes.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(boxes.map(b => b.id)));
+    }
+  }, [boxes, selectedIds.size]);
+
+  const handleBatchParcelChange = useCallback((parcelCode: string) => {
+    const parcel = parcelsWithPolygon?.find(p => p.code === parcelCode);
+    if (parcel) {
+      setBatchParcelCode(parcel.code);
+      setBatchParcelName(parcel.name);
+    }
+  }, [parcelsWithPolygon]);
+
+  const handleBatchUpdate = useCallback(() => {
+    if (selectedIds.size === 0 || !batchParcelCode) return;
+    
+    updateParcelBatch.mutate({
+      boxIds: Array.from(selectedIds),
+      parcelCode: batchParcelCode,
+      parcelName: batchParcelName,
+    });
+  }, [selectedIds, batchParcelCode, batchParcelName, updateParcelBatch]);
+
+  const handleBatchDelete = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    
+    if (confirm(`¿Eliminar ${selectedIds.size} cajas seleccionadas?`)) {
+      deleteBatch.mutate({
+        boxIds: Array.from(selectedIds),
+      });
+    }
+  }, [selectedIds, deleteBatch]);
 
   const getHarvesterName = useCallback((harvesterId: number) => {
     const harvester = harvesters?.find((h) => h.number === harvesterId);
@@ -201,7 +336,10 @@ export default function BoxEditor() {
     setSearchInput("");
     setSearchQuery("");
     setFilterError('all');
+    setSortBy('submissionTime');
+    setSortOrder('desc');
     setPage(1);
+    setSelectedIds(new Set());
   }, []);
 
   const handleParcelChange = useCallback((parcelCode: string) => {
@@ -233,6 +371,9 @@ export default function BoxEditor() {
     const hasNoPolygon = parcelsWithoutPolygon.includes(box.parcelCode);
     return { isDuplicate, hasNoPolygon, hasAnyError: isDuplicate || hasNoPolygon };
   }, [duplicateCodes, parcelsWithoutPolygon]);
+
+  const allSelected = boxes.length > 0 && selectedIds.size === boxes.length;
+  const someSelected = selectedIds.size > 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
@@ -351,6 +492,45 @@ export default function BoxEditor() {
           </div>
         </GlassCard>
 
+        {/* Barra de acciones por lotes */}
+        {someSelected && (
+          <GlassCard className="mb-4 p-4 bg-blue-50 border-blue-200">
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div className="flex items-center gap-2">
+                <CheckSquare className="h-5 w-5 text-blue-600" />
+                <span className="font-medium text-blue-900">
+                  {selectedIds.size} caja{selectedIds.size !== 1 ? 's' : ''} seleccionada{selectedIds.size !== 1 ? 's' : ''}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => setShowBatchDialog(true)}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  <Edit3 className="h-4 w-4 mr-2" />
+                  Cambiar Parcela
+                </Button>
+                <Button
+                  onClick={handleBatchDelete}
+                  variant="destructive"
+                  disabled={deleteBatch.isPending}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Eliminar
+                </Button>
+                <Button
+                  onClick={() => setSelectedIds(new Set())}
+                  variant="outline"
+                  className="border-blue-300"
+                >
+                  <X className="h-4 w-4 mr-2" />
+                  Deseleccionar
+                </Button>
+              </div>
+            </div>
+          </GlassCard>
+        )}
+
         {/* Tabla con datos */}
         <GlassCard className="overflow-hidden p-6" hover={false}>
           {isLoading ? (
@@ -361,12 +541,28 @@ export default function BoxEditor() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b-2 border-green-200">
-                      <th className="pb-3 pr-4 text-left text-sm font-semibold text-green-900">Código</th>
-                      <th className="pb-3 pr-4 text-left text-sm font-semibold text-green-900">Parcela</th>
-                      <th className="pb-3 pr-4 text-left text-sm font-semibold text-green-900">Nombre</th>
-                      <th className="pb-3 pr-4 text-left text-sm font-semibold text-green-900">Cortadora</th>
-                      <th className="pb-3 pr-4 text-right text-sm font-semibold text-green-900">Peso</th>
-                      <th className="pb-3 pr-4 text-left text-sm font-semibold text-green-900">Fecha</th>
+                      <th className="pb-3 pr-2 text-center">
+                        <Checkbox
+                          checked={allSelected}
+                          onCheckedChange={toggleSelectAll}
+                          className="border-green-400"
+                        />
+                      </th>
+                      <SortableHeader label="Código" column="boxCode" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
+                      <SortableHeader label="Parcela" column="parcelCode" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
+                      <SortableHeader label="Nombre" column="parcelName" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
+                      <SortableHeader label="Cortadora" column="harvesterId" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
+                      <th className="pb-3 pr-4 text-right text-sm font-semibold text-green-900 cursor-pointer hover:bg-green-50" onClick={() => handleSort('weight')}>
+                        <div className="flex items-center justify-end gap-1">
+                          Peso
+                          {sortBy === 'weight' ? (
+                            sortOrder === 'asc' ? <ArrowUp className="h-4 w-4 text-green-600" /> : <ArrowDown className="h-4 w-4 text-green-600" />
+                          ) : (
+                            <ArrowUpDown className="h-4 w-4 text-gray-400" />
+                          )}
+                        </div>
+                      </th>
+                      <SortableHeader label="Fecha" column="submissionTime" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
                       <th className="pb-3 text-center text-sm font-semibold text-green-900">Foto</th>
                       <th className="pb-3 text-center text-sm font-semibold text-green-900">Mapa</th>
                       <th className="pb-3 text-center text-sm font-semibold text-green-900">Acciones</th>
@@ -377,15 +573,25 @@ export default function BoxEditor() {
                       const isEditing = editingId === box.id;
                       const photoUrl = getPhotoUrl(box as Box);
                       const errors = hasError(box as Box);
+                      const isSelected = selectedIds.has(box.id);
                       
                       return (
                         <tr 
                           key={box.id} 
                           className={`border-b border-green-100 transition-colors hover:bg-green-50/50 ${
+                            isSelected ? 'bg-blue-50' :
                             errors.isDuplicate ? 'bg-red-50' : 
                             errors.hasNoPolygon ? 'bg-orange-50' : ''
                           }`}
                         >
+                          <td className="py-3 pr-2 text-center">
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={() => toggleSelect(box.id)}
+                              className="border-green-400"
+                            />
+                          </td>
+                          
                           <td className="py-3 pr-4">
                             {isEditing ? (
                               <Input
@@ -632,6 +838,53 @@ export default function BoxEditor() {
           )}
         </GlassCard>
       </div>
+
+      {/* Modal de edición por lotes */}
+      <Dialog open={showBatchDialog} onOpenChange={setShowBatchDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Edit3 className="h-5 w-5 text-blue-600" />
+              Cambiar Parcela ({selectedIds.size} cajas)
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="py-4">
+            <label className="mb-2 block text-sm font-medium">Seleccionar nueva parcela</label>
+            <Select value={batchParcelCode} onValueChange={handleBatchParcelChange}>
+              <SelectTrigger>
+                <SelectValue placeholder="Seleccionar parcela..." />
+              </SelectTrigger>
+              <SelectContent>
+                {parcelsWithPolygon?.map(p => (
+                  <SelectItem key={p.code} value={p.code}>
+                    {p.code} - {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            
+            {batchParcelCode && (
+              <p className="mt-2 text-sm text-gray-600">
+                Nueva parcela: <strong>{batchParcelCode}</strong> - {batchParcelName}
+              </p>
+            )}
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowBatchDialog(false)}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleBatchUpdate}
+              disabled={!batchParcelCode || updateParcelBatch.isPending}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {updateParcelBatch.isPending ? "Actualizando..." : "Actualizar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Modal de foto */}
       <Dialog open={!!selectedPhoto} onOpenChange={closePhoto}>
