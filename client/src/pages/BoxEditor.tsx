@@ -428,7 +428,10 @@ export default function BoxEditor() {
       }));
   }, [boxes, selectedIds, getPhotoUrl]);
 
-  const canComparePhotos = selectedBoxesForCompare.filter(b => b.photoUrl).length >= 2;
+  const selectedWithPhotos = selectedBoxesForCompare.filter(b => b.photoUrl).length;
+  const totalSelected = selectedIds.size;
+  const tooManySelected = totalSelected > 3;
+  const canComparePhotos = selectedWithPhotos >= 2 && !tooManySelected;
 
   const handleOpenCompare = useCallback(() => {
     setCompareZoom([1, 1, 1]);
@@ -571,15 +574,20 @@ export default function BoxEditor() {
                 </span>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
-                {canComparePhotos && (
+                {tooManySelected ? (
+                  <span className="text-sm text-amber-700 bg-amber-50 px-3 py-2 rounded-md border border-amber-200">
+                    <AlertTriangle className="h-4 w-4 inline mr-1" />
+                    Máximo 3 cajas para comparar fotos
+                  </span>
+                ) : canComparePhotos ? (
                   <Button
                     onClick={handleOpenCompare}
                     className="bg-purple-600 hover:bg-purple-700"
                   >
                     <Images className="h-4 w-4 mr-2" />
-                    Comparar Fotos ({Math.min(selectedBoxesForCompare.filter(b => b.photoUrl).length, 3)})
+                    Comparar Fotos ({selectedWithPhotos})
                   </Button>
-                )}
+                ) : null}
                 <Button
                   onClick={() => setShowBatchDialog(true)}
                   className="bg-blue-600 hover:bg-blue-700"
@@ -848,13 +856,18 @@ export default function BoxEditor() {
                                     <Pencil className="h-4 w-4 text-green-600" />
                                   </Button>
                                   <Button
-                                    variant="destructive"
+                                    variant="outline"
                                     size="sm"
-                                    onClick={() => handleDelete(box.id, box.boxCode)}
-                                    disabled={deleteBox.isPending}
-                                    className="h-8 w-8 p-0"
+                                    onClick={() => {
+                                      if (confirm(`¿Archivar caja ${box.boxCode}?`)) {
+                                        archiveBox.mutate({ id: box.id });
+                                      }
+                                    }}
+                                    disabled={archiveBox.isPending}
+                                    className="h-8 w-8 p-0 border-orange-300 hover:bg-orange-50"
+                                    title="Archivar caja"
                                   >
-                                    <Trash2 className="h-4 w-4" />
+                                    <Archive className="h-4 w-4 text-orange-600" />
                                   </Button>
                                 </>
                               )}
@@ -1013,11 +1026,11 @@ export default function BoxEditor() {
         boxCode={selectedMap?.boxCode || ""}
       />
 
-      {/* Modal de comparación de fotos - Responsivo */}
+      {/* Modal de comparación de fotos - Pantalla completa */}
       <Dialog open={showCompareDialog} onOpenChange={setShowCompareDialog}>
-        <DialogContent className="w-[98vw] max-w-[1900px] h-[95vh] max-h-[95vh] flex flex-col p-0 gap-0 overflow-hidden">
+        <DialogContent className="w-[100vw] max-w-[100vw] h-[100vh] max-h-[100vh] flex flex-col p-0 gap-0 overflow-hidden rounded-none">
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 bg-purple-50 border-b flex-shrink-0">
+          <div className="flex items-center justify-between px-4 py-2 bg-purple-50 border-b flex-shrink-0">
             <div className="flex items-center gap-3">
               <Images className="h-5 w-5 text-purple-600" />
               <span className="font-semibold text-purple-900">
@@ -1037,30 +1050,19 @@ export default function BoxEditor() {
             </div>
           </div>
           
-          {/* Grid responsivo: horizontal=3cols, vertical=scroll */}
-          <div className="flex-1 grid grid-cols-1 landscape:grid-cols-3 gap-3 p-3 bg-gray-100 overflow-auto">
-            {[0, 1, 2].map((slotIndex) => {
-              const box = selectedBoxesForCompare[slotIndex];
+          {/* Grid dinámico: se ajusta según cantidad de fotos seleccionadas */}
+          <div className={`flex-1 grid gap-2 p-2 bg-gray-100 overflow-auto ${
+            selectedBoxesForCompare.length === 1 ? 'grid-cols-1' :
+            selectedBoxesForCompare.length === 2 ? 'grid-cols-2' :
+            'grid-cols-3'
+          }`}>
+            {selectedBoxesForCompare.map((box, slotIndex) => {
               const isEditingThis = editingCodeId === box?.id;
-              
-              if (!box) {
-                // Slot vacío
-                return (
-                  <div 
-                    key={`empty-${slotIndex}`}
-                    className="flex flex-col items-center justify-center bg-white rounded-xl border-2 border-dashed border-gray-300 min-h-[200px] landscape:min-h-0"
-                  >
-                    <ImageIcon className="h-12 w-12 text-gray-300 mb-2" />
-                    <p className="text-gray-400">Espacio {slotIndex + 1}</p>
-                    <p className="text-gray-300 text-sm">Selecciona otra caja</p>
-                  </div>
-                );
-              }
               
               return (
                 <div 
                   key={box.id} 
-                  className="flex flex-col bg-white rounded-xl shadow-md overflow-hidden min-h-[400px] landscape:min-h-0"
+                  className="flex flex-col bg-white rounded-lg shadow-md overflow-hidden"
                 >
                   {/* Header de la caja con acciones */}
                   <div className="px-3 py-2 bg-gray-50 border-b flex-shrink-0">
