@@ -1028,7 +1028,7 @@ export default function BoxEditor() {
 
       {/* Modal de comparación de fotos - Pantalla completa */}
       <Dialog open={showCompareDialog} onOpenChange={setShowCompareDialog}>
-        <DialogContent className="w-[100vw] max-w-[100vw] h-[100vh] max-h-[100vh] flex flex-col p-0 gap-0 overflow-hidden rounded-none">
+        <DialogContent className="w-[95vw] md:w-[80vw] h-[90vh] max-w-none flex flex-col p-0 gap-0 overflow-hidden">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-2 bg-purple-50 border-b flex-shrink-0">
             <div className="flex items-center gap-3">
@@ -1050,12 +1050,12 @@ export default function BoxEditor() {
             </div>
           </div>
           
-          {/* Grid dinámico: se ajusta según cantidad de fotos seleccionadas */}
-          <div className={`flex-1 grid gap-2 p-2 bg-gray-100 overflow-auto ${
-            selectedBoxesForCompare.length === 1 ? 'grid-cols-1' :
-            selectedBoxesForCompare.length === 2 ? 'grid-cols-2' :
-            'grid-cols-3'
-          }`}>
+          {/* Grid responsivo: columnas en pantalla ancha, lista en pantalla angosta */}
+          <div className={`flex-1 grid gap-2 p-2 bg-gray-100 overflow-auto
+            grid-cols-1
+            ${selectedBoxesForCompare.length === 2 ? 'md:grid-cols-2' : ''}
+            ${selectedBoxesForCompare.length === 3 ? 'md:grid-cols-3' : ''}
+          `}>
             {selectedBoxesForCompare.map((box, slotIndex) => {
               const isEditingThis = editingCodeId === box?.id;
               
