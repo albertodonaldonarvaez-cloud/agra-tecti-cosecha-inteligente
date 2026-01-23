@@ -312,8 +312,15 @@ export default function ClimateAnalysis() {
         </div>
 
         {/* Clima Actual */}
-        {currentWeather && (
-          <GlassCard className="p-6 md:p-8">
+        <GlassCard className="p-6 md:p-8">
+          {loadingCurrent ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="text-center">
+                <RefreshCw className="w-8 h-8 animate-spin text-yellow-500 mx-auto mb-2" />
+                <p className="text-gray-500">Cargando clima actual...</p>
+              </div>
+            </div>
+          ) : currentWeather ? (
             <div className="flex flex-col md:flex-row items-center justify-between gap-6">
               <div className="flex items-center gap-6">
                 <div className="text-center">
@@ -345,8 +352,12 @@ export default function ClimateAnalysis() {
                 </div>
               </div>
             </div>
-          </GlassCard>
-        )}
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              No hay datos de clima disponibles
+            </div>
+          )}
+        </GlassCard>
 
         {/* Pronóstico Extendido */}
         <GlassCard className="p-6 md:p-8">
@@ -365,57 +376,107 @@ export default function ClimateAnalysis() {
               <option value={14}>14 días</option>
             </select>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-            {forecast?.map((day, i) => (
-              <div
-                key={day.date}
-                className={`p-4 rounded-xl text-center transition-all ${
-                  i === 0 ? "bg-green-100 border-2 border-green-400" : "bg-white/50 hover:bg-white/70"
-                }`}
-              >
-                <p className="text-sm font-medium text-gray-600">{formatDate(day.date)}</p>
-                <div className="my-2">
-                  <WeatherIcon condition={day.condition} size={36} />
-                </div>
-                <p className="text-lg font-bold text-gray-800">
-                  {day.temperatureMax.toFixed(0)}° / {day.temperatureMin.toFixed(0)}°
-                </p>
-                <p className="text-xs text-gray-500">{day.conditionText}</p>
-                {day.precipitationProbability > 0 && (
-                  <p className="text-xs text-blue-600 mt-1">
-                    <Droplets className="w-3 h-3 inline" /> {day.precipitationProbability}%
-                  </p>
-                )}
+          {loadingForecast ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-center">
+                <RefreshCw className="w-8 h-8 animate-spin text-blue-500 mx-auto mb-2" />
+                <p className="text-gray-500">Cargando pronóstico...</p>
               </div>
-            ))}
-          </div>
+            </div>
+          ) : forecast && forecast.length > 0 ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+              {forecast.map((day, i) => (
+                <div
+                  key={day.date}
+                  className={`p-4 rounded-xl text-center transition-all ${
+                    i === 0 ? "bg-green-100 border-2 border-green-400" : "bg-white/50 hover:bg-white/70"
+                  }`}
+                >
+                  <p className="text-sm font-medium text-gray-600">{formatDate(day.date)}</p>
+                  <div className="my-2">
+                    <WeatherIcon condition={day.condition} size={36} />
+                  </div>
+                  <p className="text-lg font-bold text-gray-800">
+                    {day.temperatureMax.toFixed(0)}° / {day.temperatureMin.toFixed(0)}°
+                  </p>
+                  <p className="text-xs text-gray-500">{day.conditionText}</p>
+                  {day.precipitationProbability > 0 && (
+                    <p className="text-xs text-blue-600 mt-1">
+                      <Droplets className="w-3 h-3 inline" /> {day.precipitationProbability}%
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              No hay datos de pronóstico disponibles
+            </div>
+          )}
         </GlassCard>
 
         {/* Estadísticas de Correlación */}
-        {correlationStats && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <GlassCard className="p-4 md:p-6 text-center">
-              <Thermometer className="w-8 h-8 mx-auto text-orange-500 mb-2" />
-              <p className="text-3xl font-bold text-gray-800">{correlationStats.avgTemp}°C</p>
-              <p className="text-sm text-gray-500">Temp. Promedio</p>
-            </GlassCard>
-            <GlassCard className="p-4 md:p-6 text-center">
-              <TrendingUp className="w-8 h-8 mx-auto text-green-500 mb-2" />
-              <p className="text-3xl font-bold text-gray-800">{correlationStats.avgBoxes}</p>
-              <p className="text-sm text-gray-500">Cajas/Día Promedio</p>
-            </GlassCard>
-            <GlassCard className="p-4 md:p-6 text-center">
-              <Sun className="w-8 h-8 mx-auto text-yellow-500 mb-2" />
-              <p className="text-3xl font-bold text-gray-800">{correlationStats.avgBoxesDry}</p>
-              <p className="text-sm text-gray-500">Cajas/Día Seco</p>
-            </GlassCard>
-            <GlassCard className="p-4 md:p-6 text-center">
-              <CloudRain className="w-8 h-8 mx-auto text-blue-500 mb-2" />
-              <p className="text-3xl font-bold text-gray-800">{correlationStats.avgBoxesRainy}</p>
-              <p className="text-sm text-gray-500">Cajas/Día Lluvioso</p>
-            </GlassCard>
-          </div>
-        )}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {loadingHistorical ? (
+            <>
+              {[1, 2, 3, 4].map((i) => (
+                <GlassCard key={i} className="p-4 md:p-6 text-center">
+                  <div className="animate-pulse">
+                    <div className="w-8 h-8 bg-gray-200 rounded-full mx-auto mb-2"></div>
+                    <div className="h-8 bg-gray-200 rounded w-16 mx-auto mb-2"></div>
+                    <div className="h-4 bg-gray-200 rounded w-24 mx-auto"></div>
+                  </div>
+                </GlassCard>
+              ))}
+            </>
+          ) : correlationStats ? (
+            <>
+              <GlassCard className="p-4 md:p-6 text-center">
+                <Thermometer className="w-8 h-8 mx-auto text-orange-500 mb-2" />
+                <p className="text-3xl font-bold text-gray-800">{correlationStats.avgTemp}°C</p>
+                <p className="text-sm text-gray-500">Temp. Promedio</p>
+              </GlassCard>
+              <GlassCard className="p-4 md:p-6 text-center">
+                <TrendingUp className="w-8 h-8 mx-auto text-green-500 mb-2" />
+                <p className="text-3xl font-bold text-gray-800">{correlationStats.avgBoxes}</p>
+                <p className="text-sm text-gray-500">Cajas/Día Promedio</p>
+              </GlassCard>
+              <GlassCard className="p-4 md:p-6 text-center">
+                <Sun className="w-8 h-8 mx-auto text-yellow-500 mb-2" />
+                <p className="text-3xl font-bold text-gray-800">{correlationStats.avgBoxesDry}</p>
+                <p className="text-sm text-gray-500">Cajas/Día Seco</p>
+              </GlassCard>
+              <GlassCard className="p-4 md:p-6 text-center">
+                <CloudRain className="w-8 h-8 mx-auto text-blue-500 mb-2" />
+                <p className="text-3xl font-bold text-gray-800">{correlationStats.avgBoxesRainy}</p>
+                <p className="text-sm text-gray-500">Cajas/Día Lluvioso</p>
+              </GlassCard>
+            </>
+          ) : (
+            <>
+              <GlassCard className="p-4 md:p-6 text-center">
+                <Thermometer className="w-8 h-8 mx-auto text-gray-300 mb-2" />
+                <p className="text-3xl font-bold text-gray-400">--</p>
+                <p className="text-sm text-gray-500">Temp. Promedio</p>
+              </GlassCard>
+              <GlassCard className="p-4 md:p-6 text-center">
+                <TrendingUp className="w-8 h-8 mx-auto text-gray-300 mb-2" />
+                <p className="text-3xl font-bold text-gray-400">--</p>
+                <p className="text-sm text-gray-500">Cajas/Día Promedio</p>
+              </GlassCard>
+              <GlassCard className="p-4 md:p-6 text-center">
+                <Sun className="w-8 h-8 mx-auto text-gray-300 mb-2" />
+                <p className="text-3xl font-bold text-gray-400">--</p>
+                <p className="text-sm text-gray-500">Cajas/Día Seco</p>
+              </GlassCard>
+              <GlassCard className="p-4 md:p-6 text-center">
+                <CloudRain className="w-8 h-8 mx-auto text-gray-300 mb-2" />
+                <p className="text-3xl font-bold text-gray-400">--</p>
+                <p className="text-sm text-gray-500">Cajas/Día Lluvioso</p>
+              </GlassCard>
+            </>
+          )}
+        </div>
 
         {/* Gráfica de Correlación Temperatura vs Cosecha */}
         <GlassCard className="p-6 md:p-8">
