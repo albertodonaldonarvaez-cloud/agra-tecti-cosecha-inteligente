@@ -55,7 +55,16 @@ export default function Settings() {
 
   const syncFromKobo = trpc.boxes.sync.useMutation({
     onSuccess: (data: any) => {
-      if (data.success) {
+      // Sincronización en segundo plano
+      if (data.status === 'started') {
+        toast.success('🔄 Sincronización iniciada en segundo plano. Los datos se actualizarán automáticamente.', {
+          duration: 5000,
+        });
+        // Refrescar datos después de un tiempo
+        setTimeout(() => {
+          window.location.reload();
+        }, 30000); // Recargar después de 30 segundos
+      } else if (data.success) {
         toast.success(`¡Sincronización exitosa! ${data.processedCount} de ${data.totalCount} cajas procesadas`);
         if (data.errors && data.errors.length > 0) {
           console.warn("Errores durante la sincronización:", data.errors);

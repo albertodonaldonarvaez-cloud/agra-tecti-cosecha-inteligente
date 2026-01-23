@@ -142,15 +142,28 @@ export const appRouter = router({
           });
         }
 
-        const result = await syncFromKoboAPI(
-          config.apiUrl, 
-          config.apiToken, 
-          config.assetId,
-          input?.date
-        );
-        await db.updateLastSync();
+        // Ejecutar sincronización en segundo plano (no esperar)
+        setImmediate(async () => {
+          try {
+            console.log('🔄 Iniciando sincronización en segundo plano...');
+            const result = await syncFromKoboAPI(
+              config.apiUrl, 
+              config.apiToken, 
+              config.assetId,
+              input?.date
+            );
+            await db.updateLastSync();
+            console.log('✅ Sincronización completada:', result);
+          } catch (error) {
+            console.error('❌ Error en sincronización:', error);
+          }
+        });
         
-        return result;
+        // Devolver inmediatamente
+        return { 
+          message: "Sincronización iniciada en segundo plano",
+          status: "started"
+        };
       }),
 
     uploadExcel: adminProcedure
