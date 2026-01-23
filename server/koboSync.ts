@@ -37,9 +37,30 @@ export async function processKoboData(data: KoboData) {
   for (const result of data.results) {
     try {
       // Parsear código de parcela
-      const parcelParts = result.escanea_la_parcela.split(" -");
-      const parcelCode = parcelParts[0].trim();
-      const parcelName = parcelParts[1]?.trim() || "";
+      // Formato esperado: "123 -NOMBRE" o " -NOMBRE" (sin número)
+      const parcelRaw = result.escanea_la_parcela.trim();
+      let parcelCode = "";
+      let parcelName = "";
+      
+      if (parcelRaw.startsWith("-")) {
+        // Formato: "-NOMBRE" (sin número, el código es el nombre completo)
+        parcelCode = parcelRaw; // Usar el formato completo como código
+        parcelName = parcelRaw.substring(1).trim(); // Quitar el guión inicial
+      } else if (parcelRaw.includes(" -")) {
+        // Formato: "123 -NOMBRE"
+        const parcelParts = parcelRaw.split(" -");
+        parcelCode = parcelParts[0].trim();
+        parcelName = parcelParts[1]?.trim() || "";
+        // Si el código está vacío, usar el formato completo
+        if (!parcelCode) {
+          parcelCode = parcelRaw;
+          parcelName = parcelRaw.replace(/^\s*-\s*/, "");
+        }
+      } else {
+        // Formato desconocido, usar todo como código y nombre
+        parcelCode = parcelRaw;
+        parcelName = parcelRaw;
+      }
 
       // Parsear código de caja (formato: XX-XXXXXX)
       const boxParts = result.escanea_la_caja.split("-");
