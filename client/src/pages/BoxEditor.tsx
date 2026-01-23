@@ -106,7 +106,7 @@ export default function BoxEditor() {
   const [pageSize] = useState(50);
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterError, setFilterError] = useState<'all' | 'duplicates' | 'no_polygon'>('all');
+  const [filterError, setFilterError] = useState<'all' | 'duplicates' | 'no_polygon' | 'overweight'>('all');
   const [sortBy, setSortBy] = useState<SortColumn>('submissionTime');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   
@@ -418,7 +418,8 @@ export default function BoxEditor() {
   const hasError = useCallback((box: Box) => {
     const isDuplicate = duplicateCodes.includes(box.boxCode);
     const hasNoPolygon = parcelsWithoutPolygon.includes(box.parcelCode);
-    return { isDuplicate, hasNoPolygon, hasAnyError: isDuplicate || hasNoPolygon };
+    const isOverweight = box.weight > 14000; // > 14 kg
+    return { isDuplicate, hasNoPolygon, isOverweight, hasAnyError: isDuplicate || hasNoPolygon || isOverweight };
   }, [duplicateCodes, parcelsWithoutPolygon]);
 
   const allSelected = boxes.length > 0 && selectedIds.size === boxes.length;
@@ -607,6 +608,12 @@ export default function BoxEditor() {
                     Solo sin polígono
                   </span>
                 </SelectItem>
+                <SelectItem value="overweight">
+                  <span className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-purple-500" />
+                    Solo peso &gt; 14 kg
+                  </span>
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -729,7 +736,8 @@ export default function BoxEditor() {
                           className={`border-b border-green-100 transition-colors hover:bg-green-50/50 ${
                             isSelected ? 'bg-blue-50' :
                             errors.isDuplicate ? 'bg-red-50' : 
-                            errors.hasNoPolygon ? 'bg-orange-50' : ''
+                            errors.hasNoPolygon ? 'bg-orange-50' :
+                            errors.isOverweight ? 'bg-purple-50' : ''
                           }`}
                         >
                           <td className="py-3 pr-2 text-center">
@@ -821,9 +829,14 @@ export default function BoxEditor() {
                                 className="h-8 text-sm w-24"
                               />
                             ) : (
-                              <span className={`text-sm font-semibold ${box.weight > 20000 ? "text-red-600" : "text-green-900"}`}>
-                                {(box.weight / 1000).toFixed(2)} kg
-                              </span>
+                              <div className="flex items-center justify-end gap-1">
+                                <span className={`text-sm font-semibold ${box.weight > 14000 ? "text-purple-700 bg-purple-100 px-2 py-0.5 rounded" : "text-green-900"}`}>
+                                  {(box.weight / 1000).toFixed(2)} kg
+                                </span>
+                                {box.weight > 14000 && (
+                                  <AlertTriangle className="h-4 w-4 text-purple-600" title="Peso excesivo (>14 kg)" />
+                                )}
+                              </div>
                             )}
                           </td>
                           
@@ -1241,15 +1254,17 @@ export default function BoxEditor() {
                       <img
                         src={box.photoUrl}
                         alt={`Foto de caja ${box.boxCode}`}
-                        className="w-full h-full select-none"
+                        className="select-none"
                         draggable={false}
                         style={{ 
+                          width: '100%',
+                          height: '100%',
                           transform: `scale(${compareZoom[slotIndex]}) translate(${dragState[slotIndex]?.x / compareZoom[slotIndex] || 0}px, ${dragState[slotIndex]?.y / compareZoom[slotIndex] || 0}px)`,
                           transformOrigin: 'center center',
-                          objectFit: compareZoom[slotIndex] > 1 ? 'none' : 'contain',
+                          objectFit: 'contain',
                           transition: dragState[slotIndex]?.isDragging ? 'none' : 'transform 0.2s ease-out'
                         }}
-                        loading="lazy"
+                        loading="eager"
                       />
                     ) : (
                       <div className="flex items-center justify-center h-full text-gray-400">

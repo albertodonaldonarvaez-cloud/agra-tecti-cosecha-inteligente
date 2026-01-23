@@ -405,7 +405,7 @@ export async function getBoxesForEditor(params: {
   page: number;
   pageSize: number;
   search?: string;
-  filterError?: 'all' | 'duplicates' | 'no_polygon';
+  filterError?: 'all' | 'duplicates' | 'no_polygon' | 'overweight';
   duplicateCodes?: string[];
   parcelsWithoutPolygon?: string[];
   sortBy?: 'boxCode' | 'parcelCode' | 'parcelName' | 'harvesterId' | 'weight' | 'submissionTime';
@@ -433,6 +433,9 @@ export async function getBoxesForEditor(params: {
     conditions.push(inArray(boxes.boxCode, params.duplicateCodes));
   } else if (params.filterError === 'no_polygon' && params.parcelsWithoutPolygon && params.parcelsWithoutPolygon.length > 0) {
     conditions.push(inArray(boxes.parcelCode, params.parcelsWithoutPolygon));
+  } else if (params.filterError === 'overweight') {
+    const { gt } = await import("drizzle-orm");
+    conditions.push(gt(boxes.weight, 14000)); // > 14 kg
   }
   
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;

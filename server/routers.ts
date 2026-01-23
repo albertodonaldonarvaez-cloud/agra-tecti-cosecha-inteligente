@@ -101,7 +101,7 @@ export const appRouter = router({
         page: z.number().min(1).default(1),
         pageSize: z.number().min(10).max(100).default(50),
         search: z.string().optional(),
-        filterError: z.enum(['all', 'duplicates', 'no_polygon']).optional(),
+        filterError: z.enum(['all', 'duplicates', 'no_polygon', 'overweight']).optional(),
         sortBy: z.enum(['boxCode', 'parcelCode', 'parcelName', 'harvesterId', 'weight', 'submissionTime']).optional(),
         sortOrder: z.enum(['asc', 'desc']).optional(),
       }))
