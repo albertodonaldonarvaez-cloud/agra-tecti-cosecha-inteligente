@@ -1,20 +1,61 @@
 -- Script para agregar nuevos campos de permisos a la tabla users
--- Ejecutar en la base de datos MySQL si los campos no existen
+-- Compatible con MySQL 8.0
 
--- Agregar campo canViewClimate si no existe
-ALTER TABLE users ADD COLUMN IF NOT EXISTS canViewClimate BOOLEAN NOT NULL DEFAULT TRUE;
+-- Usar procedimiento para verificar si la columna existe antes de agregarla
 
--- Agregar campo canViewPerformance si no existe  
-ALTER TABLE users ADD COLUMN IF NOT EXISTS canViewPerformance BOOLEAN NOT NULL DEFAULT TRUE;
+DELIMITER //
 
--- Agregar campo canViewEditor si no existe
-ALTER TABLE users ADD COLUMN IF NOT EXISTS canViewEditor BOOLEAN NOT NULL DEFAULT FALSE;
+DROP PROCEDURE IF EXISTS AddColumnIfNotExists//
 
--- Verificar que todos los campos de permisos existen
--- Si alguno falla, ejecutar manualmente:
--- ALTER TABLE users ADD COLUMN canViewClimate BOOLEAN NOT NULL DEFAULT TRUE;
--- ALTER TABLE users ADD COLUMN canViewPerformance BOOLEAN NOT NULL DEFAULT TRUE;
--- ALTER TABLE users ADD COLUMN canViewEditor BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE PROCEDURE AddColumnIfNotExists()
+BEGIN
+    -- Agregar canViewClimate si no existe
+    IF NOT EXISTS (
+        SELECT * FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() 
+        AND TABLE_NAME = 'users' 
+        AND COLUMN_NAME = 'canViewClimate'
+    ) THEN
+        ALTER TABLE users ADD COLUMN canViewClimate BOOLEAN NOT NULL DEFAULT TRUE;
+        SELECT 'Columna canViewClimate agregada' AS resultado;
+    ELSE
+        SELECT 'Columna canViewClimate ya existe' AS resultado;
+    END IF;
 
--- Mostrar estructura actual de la tabla
+    -- Agregar canViewPerformance si no existe
+    IF NOT EXISTS (
+        SELECT * FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() 
+        AND TABLE_NAME = 'users' 
+        AND COLUMN_NAME = 'canViewPerformance'
+    ) THEN
+        ALTER TABLE users ADD COLUMN canViewPerformance BOOLEAN NOT NULL DEFAULT TRUE;
+        SELECT 'Columna canViewPerformance agregada' AS resultado;
+    ELSE
+        SELECT 'Columna canViewPerformance ya existe' AS resultado;
+    END IF;
+
+    -- Agregar canViewEditor si no existe
+    IF NOT EXISTS (
+        SELECT * FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() 
+        AND TABLE_NAME = 'users' 
+        AND COLUMN_NAME = 'canViewEditor'
+    ) THEN
+        ALTER TABLE users ADD COLUMN canViewEditor BOOLEAN NOT NULL DEFAULT FALSE;
+        SELECT 'Columna canViewEditor agregada' AS resultado;
+    ELSE
+        SELECT 'Columna canViewEditor ya existe' AS resultado;
+    END IF;
+END//
+
+DELIMITER ;
+
+-- Ejecutar el procedimiento
+CALL AddColumnIfNotExists();
+
+-- Limpiar
+DROP PROCEDURE IF EXISTS AddColumnIfNotExists;
+
+-- Mostrar estructura actual
 DESCRIBE users;
