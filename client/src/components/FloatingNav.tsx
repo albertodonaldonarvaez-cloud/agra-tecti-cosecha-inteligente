@@ -1,18 +1,11 @@
 import { cn } from "@/lib/utils";
-import { BarChart3, Box, Settings, Users, Scissors, LogOut, TrendingUp, Calendar, MapPin, AlertCircle, Target, ChevronLeft, ChevronRight, Edit, CloudSun } from "lucide-react";
+import { LogOut, ChevronLeft, ChevronRight, Users, Settings } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useRef, useState, useEffect } from "react";
-
-interface NavItem {
-  to: string;
-  icon: typeof BarChart3;
-  label: string;
-  adminOnly?: boolean;
-  permission?: string;
-}
+import { getNavPages, ADMIN_ONLY_PAGES, hasPermission } from "@/config/pages";
 
 interface FloatingNavProps {
   isAdmin?: boolean;
@@ -33,35 +26,27 @@ export function FloatingNav({ isAdmin = false }: FloatingNavProps) {
     },
   });
 
-  const navItems: NavItem[] = [
-    { to: "/", icon: BarChart3, label: "Dashboard", permission: "canViewDashboard" },
-    { to: "/boxes", icon: Box, label: "Cajas", permission: "canViewBoxes" },
-    { to: "/analytics", icon: TrendingUp, label: "Análisis", permission: "canViewAnalytics" },
-    { to: "/daily", icon: Calendar, label: "Diario", permission: "canViewDailyAnalysis" },
-    { to: "/climate", icon: CloudSun, label: "Clima", permission: "canViewAnalytics" },
-    { to: "/performance", icon: Target, label: "Rendimiento", permission: "canViewAnalytics" },
-    { to: "/harvesters", icon: Scissors, label: "Cortadoras", adminOnly: true, permission: "canViewHarvesters" },
-    { to: "/parcels", icon: MapPin, label: "Parcelas", adminOnly: true, permission: "canViewParcels" },
+  // Obtener páginas de navegación desde la configuración centralizada
+  const navPages = getNavPages();
 
-    { to: "/editor", icon: Edit, label: "Editor", adminOnly: true },
-    { to: "/users", icon: Users, label: "Usuarios", adminOnly: true },
-    { to: "/settings", icon: Settings, label: "Configuración", adminOnly: true },
-  ];
-
-  const filteredItems = navItems.filter(item => {
+  // Filtrar páginas según permisos del usuario
+  const filteredItems = navPages.filter(page => {
     // Admins ven todo
     if (isAdmin) return true;
     
     // Filtrar por adminOnly
-    if (item.adminOnly) return false;
+    if (page.adminOnly) return false;
     
     // Filtrar por permiso
-    if (item.permission && user && !(user as any)[item.permission]) {
+    if (!hasPermission(user, page.permissionKey)) {
       return false;
     }
     
     return true;
   });
+
+  // Agregar páginas de admin si es administrador
+  const adminPages = isAdmin ? ADMIN_ONLY_PAGES.filter(p => p.showInNav) : [];
 
   const handleLogout = () => {
     if (confirm("¿Estás seguro de que deseas cerrar sesión?")) {
@@ -135,20 +120,44 @@ export function FloatingNav({ isAdmin = false }: FloatingNavProps) {
               WebkitOverflowScrolling: 'touch'
             }}
           >
-            {filteredItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = location === item.to;
+            {/* Páginas con permisos */}
+            {filteredItems.map((page) => {
+              const Icon = page.icon;
+              const isActive = location === page.path;
               
               return (
                 <Link
-                  key={item.to}
-                  href={item.to}
+                  key={page.path}
+                  href={page.path}
                   className={cn(
                     "flex items-center justify-center rounded-full p-3 transition-all duration-300 flex-shrink-0",
                     isActive
                       ? "bg-white/30 text-green-700 shadow-md backdrop-blur-sm border border-green-400/50"
                       : "text-green-600 hover:bg-white/20 hover:text-green-700"
                   )}
+                  title={page.label}
+                >
+                  <Icon className="h-5 w-5" />
+                </Link>
+              );
+            })}
+
+            {/* Páginas solo de admin */}
+            {adminPages.map((page) => {
+              const Icon = page.icon;
+              const isActive = location === page.path;
+              
+              return (
+                <Link
+                  key={page.path}
+                  href={page.path}
+                  className={cn(
+                    "flex items-center justify-center rounded-full p-3 transition-all duration-300 flex-shrink-0",
+                    isActive
+                      ? "bg-white/30 text-green-700 shadow-md backdrop-blur-sm border border-green-400/50"
+                      : "text-green-600 hover:bg-white/20 hover:text-green-700"
+                  )}
+                  title={page.label}
                 >
                   <Icon className="h-5 w-5" />
                 </Link>

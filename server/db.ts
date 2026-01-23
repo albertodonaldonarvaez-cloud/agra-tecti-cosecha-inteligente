@@ -273,18 +273,39 @@ export async function updateUserRole(userId: number, role: "user" | "admin") {
   await db.update(users).set({ role, updatedAt: new Date() }).where(eq(users.id, userId));
 }
 
-export async function updateUserPermissions(userId: number, permissions: {
-  canViewDashboard: boolean;
-  canViewBoxes: boolean;
-  canViewAnalytics: boolean;
-  canViewDailyAnalysis: boolean;
-  canViewParcels: boolean;
-  canViewHarvesters: boolean;
-  canViewErrors: boolean;
-}) {
+/**
+ * Actualiza los permisos de un usuario
+ * @param userId ID del usuario
+ * @param permissions Objeto con los permisos a actualizar (campos canView*)
+ */
+export async function updateUserPermissions(userId: number, permissions: Record<string, boolean>) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(users).set({ ...permissions, updatedAt: new Date() }).where(eq(users.id, userId));
+  
+  // Construir objeto de actualización solo con campos válidos
+  const updateData: Record<string, any> = { updatedAt: new Date() };
+  
+  // Lista de campos de permisos válidos en la tabla users
+  const validPermissionFields = [
+    'canViewDashboard',
+    'canViewBoxes', 
+    'canViewAnalytics',
+    'canViewDailyAnalysis',
+    'canViewClimate',
+    'canViewPerformance',
+    'canViewParcels',
+    'canViewHarvesters',
+    'canViewEditor',
+    'canViewErrors',
+  ];
+  
+  for (const [key, value] of Object.entries(permissions)) {
+    if (validPermissionFields.includes(key)) {
+      updateData[key] = value;
+    }
+  }
+  
+  await db.update(users).set(updateData).where(eq(users.id, userId));
 }
 
 export async function createManualUser(data: { name: string; email: string; password: string; role?: "user" | "admin" }) {

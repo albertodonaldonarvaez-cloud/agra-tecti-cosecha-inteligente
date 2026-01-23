@@ -625,18 +625,18 @@ export const appRouter = router({
     updatePermissions: adminProcedure
       .input(z.object({
         userId: z.number(),
-        permissions: z.object({
-          canViewDashboard: z.boolean(),
-          canViewBoxes: z.boolean(),
-          canViewAnalytics: z.boolean(),
-          canViewDailyAnalysis: z.boolean(),
-          canViewParcels: z.boolean(),
-          canViewHarvesters: z.boolean(),
-          canViewErrors: z.boolean(),
-        }),
+        // Permisos dinámicos - acepta cualquier campo canView*
+        permissions: z.record(z.string(), z.boolean()),
       }))
       .mutation(async ({ input }) => {
-        await db.updateUserPermissions(input.userId, input.permissions);
+        // Filtrar solo los campos de permisos válidos (canView*)
+        const validPermissions: Record<string, boolean> = {};
+        for (const [key, value] of Object.entries(input.permissions)) {
+          if (key.startsWith('canView')) {
+            validPermissions[key] = value;
+          }
+        }
+        await db.updateUserPermissions(input.userId, validPermissions);
         return { success: true };
       }),
 

@@ -12,12 +12,16 @@ export const users = mysqlTable("users", {
   name: text("name").notNull(),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
   // Permisos granulares para usuarios no-admin
+  // NOTA: Estos campos deben coincidir con permissionKey en client/src/config/pages.ts
   canViewDashboard: boolean("canViewDashboard").default(true).notNull(),
   canViewBoxes: boolean("canViewBoxes").default(true).notNull(),
   canViewAnalytics: boolean("canViewAnalytics").default(true).notNull(),
   canViewDailyAnalysis: boolean("canViewDailyAnalysis").default(true).notNull(),
+  canViewClimate: boolean("canViewClimate").default(true).notNull(),
+  canViewPerformance: boolean("canViewPerformance").default(true).notNull(),
   canViewParcels: boolean("canViewParcels").default(false).notNull(),
   canViewHarvesters: boolean("canViewHarvesters").default(false).notNull(),
+  canViewEditor: boolean("canViewEditor").default(false).notNull(),
   canViewErrors: boolean("canViewErrors").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

@@ -20,9 +20,10 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Users as UsersIcon, Shield, User, UserPlus, Settings } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Users as UsersIcon, Shield, User, UserPlus, Settings, Info } from "lucide-react";
+import { useEffect, useState, useMemo } from "react";
 import { toast } from "sonner";
+import { getPermissionPages, getDefaultPermissions, type PageConfig } from "@/config/pages";
 
 export default function Users() {
   const { user, loading } = useAuth();
@@ -34,15 +35,11 @@ export default function Users() {
   const [newUserPassword, setNewUserPassword] = useState("");
   const [newUserRole, setNewUserRole] = useState<"user" | "admin">("user");
   
-  const [permissions, setPermissions] = useState({
-    canViewDashboard: true,
-    canViewBoxes: true,
-    canViewAnalytics: true,
-    canViewDailyAnalysis: true,
-    canViewParcels: false,
-    canViewHarvesters: false,
-    canViewErrors: false,
-  });
+  // Obtener páginas con permisos desde la configuración centralizada
+  const permissionPages = useMemo(() => getPermissionPages(), []);
+  
+  // Estado dinámico de permisos basado en la configuración
+  const [permissions, setPermissions] = useState<Record<string, boolean>>(() => getDefaultPermissions());
   
   const { data: users, refetch } = trpc.usersAdmin.list.useQuery(undefined, {
     enabled: !!user && user.role === "admin",
@@ -111,15 +108,12 @@ export default function Users() {
 
   const handleOpenPermissions = (u: any) => {
     setSelectedUser(u);
-    setPermissions({
-      canViewDashboard: u.canViewDashboard ?? true,
-      canViewBoxes: u.canViewBoxes ?? true,
-      canViewAnalytics: u.canViewAnalytics ?? true,
-      canViewDailyAnalysis: u.canViewDailyAnalysis ?? true,
-      canViewParcels: u.canViewParcels ?? false,
-      canViewHarvesters: u.canViewHarvesters ?? false,
-      canViewErrors: u.canViewErrors ?? false,
+    // Cargar permisos actuales del usuario
+    const currentPermissions: Record<string, boolean> = {};
+    permissionPages.forEach(page => {
+      currentPermissions[page.permissionKey] = u[page.permissionKey] ?? page.defaultValue;
     });
+    setPermissions(currentPermissions);
     setShowPermissionsDialog(true);
   };
 
@@ -148,6 +142,32 @@ export default function Users() {
     });
   };
 
+  const handlePermissionChange = (permissionKey: string, checked: boolean) => {
+    setPermissions(prev => ({
+      ...prev,
+      [permissionKey]: checked
+    }));
+  };
+
+  const handleSelectAll = () => {
+    const allSelected: Record<string, boolean> = {};
+    permissionPages.forEach(page => {
+      allSelected[page.permissionKey] = true;
+    });
+    setPermissions(allSelected);
+  };
+
+  const handleDeselectAll = () => {
+    const allDeselected: Record<string, boolean> = {};
+    permissionPages.forEach(page => {
+      allDeselected[page.permissionKey] = false;
+    });
+    setPermissions(allDeselected);
+  };
+
+  // Contar permisos activos
+  const activePermissionsCount = Object.values(permissions).filter(Boolean).length;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
       <div className="container max-w-4xl">
@@ -161,6 +181,20 @@ export default function Users() {
             Agregar Usuario
           </Button>
         </div>
+
+        {/* Info sobre permisos dinámicos */}
+        <GlassCard className="mb-6 p-4 bg-blue-50/50 border-blue-200">
+          <div className="flex items-start gap-3">
+            <Info className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="text-sm text-blue-800 font-medium">Sistema de Permisos Dinámico</p>
+              <p className="text-xs text-blue-600 mt-1">
+                Los permisos se actualizan automáticamente cuando se agregan nuevas páginas al sistema. 
+                Actualmente hay <strong>{permissionPages.length} páginas</strong> con permisos configurables.
+              </p>
+            </div>
+          </div>
+        </GlassCard>
 
         {users && users.length > 0 ? (
           <div className="space-y-4">
@@ -283,111 +317,67 @@ export default function Users() {
           </DialogContent>
         </Dialog>
 
-        {/* Dialog para gestionar permisos */}
+        {/* Dialog para gestionar permisos - Ahora dinámico */}
         <Dialog open={showPermissionsDialog} onOpenChange={setShowPermissionsDialog}>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-lg">
             <DialogHeader>
               <DialogTitle>Permisos de {selectedUser?.name}</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
-              <p className="text-sm text-gray-600">
-                Selecciona qué páginas puede ver este usuario
-              </p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-600">
+                  Selecciona qué páginas puede ver este usuario
+                </p>
+                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
+                  {activePermissionsCount}/{permissionPages.length} activos
+                </span>
+              </div>
               
-              <div className="space-y-3">
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="dashboard"
-                    checked={permissions.canViewDashboard}
-                    onCheckedChange={(checked) => 
-                      setPermissions({ ...permissions, canViewDashboard: !!checked })
-                    }
-                  />
-                  <label htmlFor="dashboard" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                    Dashboard (Inicio)
-                  </label>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="boxes"
-                    checked={permissions.canViewBoxes}
-                    onCheckedChange={(checked) => 
-                      setPermissions({ ...permissions, canViewBoxes: !!checked })
-                    }
-                  />
-                  <label htmlFor="boxes" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                    Cajas Registradas
-                  </label>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="analytics"
-                    checked={permissions.canViewAnalytics}
-                    onCheckedChange={(checked) => 
-                      setPermissions({ ...permissions, canViewAnalytics: !!checked })
-                    }
-                  />
-                  <label htmlFor="analytics" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                    Análisis de Datos
-                  </label>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="daily"
-                    checked={permissions.canViewDailyAnalysis}
-                    onCheckedChange={(checked) => 
-                      setPermissions({ ...permissions, canViewDailyAnalysis: !!checked })
-                    }
-                  />
-                  <label htmlFor="daily" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                    Análisis Diario
-                  </label>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="parcels"
-                    checked={permissions.canViewParcels}
-                    onCheckedChange={(checked) => 
-                      setPermissions({ ...permissions, canViewParcels: !!checked })
-                    }
-                  />
-                  <label htmlFor="parcels" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                    Parcelas
-                  </label>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="harvesters"
-                    checked={permissions.canViewHarvesters}
-                    onCheckedChange={(checked) => 
-                      setPermissions({ ...permissions, canViewHarvesters: !!checked })
-                    }
-                  />
-                  <label htmlFor="harvesters" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                    Cortadoras
-                  </label>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="errors"
-                    checked={permissions.canViewErrors}
-                    onCheckedChange={(checked) => 
-                      setPermissions({ ...permissions, canViewErrors: !!checked })
-                    }
-                  />
-                  <label htmlFor="errors" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                    Errores de Validación
-                  </label>
-                </div>
+              {/* Botones de selección rápida */}
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={handleSelectAll}>
+                  Seleccionar todo
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleDeselectAll}>
+                  Deseleccionar todo
+                </Button>
+              </div>
+              
+              {/* Lista de permisos generada dinámicamente */}
+              <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
+                {permissionPages.map((page) => {
+                  const Icon = page.icon;
+                  return (
+                    <div 
+                      key={page.permissionKey} 
+                      className="flex items-start space-x-3 p-3 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      <Checkbox
+                        id={page.permissionKey}
+                        checked={permissions[page.permissionKey] ?? page.defaultValue}
+                        onCheckedChange={(checked) => 
+                          handlePermissionChange(page.permissionKey, !!checked)
+                        }
+                        className="mt-0.5"
+                      />
+                      <div className="flex-1">
+                        <label 
+                          htmlFor={page.permissionKey} 
+                          className="text-sm font-medium leading-none cursor-pointer flex items-center gap-2"
+                        >
+                          <Icon className="h-4 w-4 text-green-600" />
+                          {page.fullName}
+                        </label>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {page.description}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
-              <div className="flex justify-end gap-2 pt-4">
+              <div className="flex justify-end gap-2 pt-4 border-t">
                 <Button variant="outline" onClick={() => setShowPermissionsDialog(false)}>
                   Cancelar
                 </Button>
