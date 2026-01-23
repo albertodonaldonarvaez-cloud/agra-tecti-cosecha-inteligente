@@ -963,105 +963,114 @@ export default function BoxEditor() {
 
       {/* Modal de comparación de fotos - Pantalla completa */}
       <Dialog open={showCompareDialog} onOpenChange={setShowCompareDialog}>
-        <DialogContent className="w-[98vw] max-w-[98vw] h-[95vh] max-h-[95vh] p-0 overflow-hidden">
-          {/* Header compacto */}
-          <div className="flex items-center justify-between px-4 py-3 bg-purple-50 border-b">
-            <div className="flex items-center gap-2">
-              <Images className="h-5 w-5 text-purple-600" />
-              <span className="font-semibold text-purple-900">
-                Comparar Fotos ({selectedBoxesForCompare.filter(b => b.photoUrl).length} cajas)
+        <DialogContent className="w-[95vw] max-w-[1800px] h-[90vh] flex flex-col p-0 gap-0">
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 bg-purple-50 border-b flex-shrink-0">
+            <div className="flex items-center gap-3">
+              <Images className="h-6 w-6 text-purple-600" />
+              <span className="font-semibold text-lg text-purple-900">
+                Comparar Fotos
+              </span>
+              <span className="text-sm text-purple-600 bg-purple-100 px-2 py-1 rounded">
+                {selectedBoxesForCompare.filter(b => b.photoUrl).length} de 3 cajas
               </span>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-purple-600">
-                Clic en foto para zoom
+            <div className="flex items-center gap-4">
+              <span className="text-sm text-gray-500">
+                Clic en la foto para hacer zoom
               </span>
               <Button 
                 variant="outline" 
-                size="sm"
                 onClick={() => setShowCompareDialog(false)}
                 className="border-purple-300 hover:bg-purple-100"
               >
-                <X className="h-4 w-4 mr-1" />
+                <X className="h-4 w-4 mr-2" />
                 Cerrar
               </Button>
             </div>
           </div>
           
-          {/* Contenedor de fotos - Ocupa todo el espacio disponible */}
-          <div 
-            className={`flex-1 overflow-hidden p-4 bg-gray-100 ${
-              selectedBoxesForCompare.length === 1 ? 'grid grid-cols-1' :
-              selectedBoxesForCompare.length === 2 ? 'grid grid-cols-2' :
-              'grid grid-cols-3'
-            } gap-4`}
-            style={{ height: 'calc(95vh - 60px)' }}
-          >
-            {selectedBoxesForCompare.map((box, index) => (
-              <div 
-                key={box.id} 
-                className="flex flex-col bg-white rounded-xl shadow-lg overflow-hidden h-full"
-              >
-                {/* Info compacta de la caja */}
-                <div className="px-4 py-2 bg-gradient-to-r from-gray-50 to-gray-100 border-b flex-shrink-0">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className="font-mono font-bold text-xl text-gray-900 bg-white px-2 py-1 rounded border">
+          {/* Grid de 3 columnas fijo */}
+          <div className="flex-1 grid grid-cols-3 gap-4 p-4 bg-gray-100 overflow-hidden">
+            {[0, 1, 2].map((slotIndex) => {
+              const box = selectedBoxesForCompare[slotIndex];
+              
+              if (!box) {
+                // Slot vacío
+                return (
+                  <div 
+                    key={`empty-${slotIndex}`}
+                    className="flex flex-col items-center justify-center bg-white rounded-xl border-2 border-dashed border-gray-300"
+                  >
+                    <ImageIcon className="h-16 w-16 text-gray-300 mb-3" />
+                    <p className="text-gray-400 text-lg">Espacio {slotIndex + 1}</p>
+                    <p className="text-gray-300 text-sm">Selecciona otra caja</p>
+                  </div>
+                );
+              }
+              
+              return (
+                <div 
+                  key={box.id} 
+                  className="flex flex-col bg-white rounded-xl shadow-md overflow-hidden"
+                >
+                  {/* Header de la caja */}
+                  <div className="px-4 py-3 bg-gray-50 border-b flex-shrink-0">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-mono font-bold text-xl text-gray-900">
                         {box.boxCode}
                       </span>
-                      <div className="text-sm text-gray-600">
-                        <span className="font-medium">{box.parcelName}</span>
-                        <span className="mx-2">|</span>
-                        <span>{((box.weight || 0) / 1000).toFixed(2)} kg</span>
-                        <span className="mx-2">|</span>
-                        <span>{format(new Date(box.submissionTime), "dd/MM/yy HH:mm", { locale: es })}</span>
-                      </div>
+                      <Button
+                        variant={compareZoom[slotIndex] > 1 ? "default" : "outline"}
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleCompareZoom(slotIndex);
+                        }}
+                        className={compareZoom[slotIndex] > 1 ? "bg-purple-600 hover:bg-purple-700" : ""}
+                      >
+                        {compareZoom[slotIndex] > 1 ? (
+                          <><ZoomOut className="h-4 w-4 mr-1" /> Alejar</>
+                        ) : (
+                          <><ZoomIn className="h-4 w-4 mr-1" /> Zoom</>
+                        )}
+                      </Button>
                     </div>
-                    <Button
-                      variant={compareZoom[index] > 1 ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => toggleCompareZoom(index)}
-                      className={compareZoom[index] > 1 ? "bg-purple-600 hover:bg-purple-700" : "border-gray-300"}
-                    >
-                      {compareZoom[index] > 1 ? (
-                        <><ZoomOut className="h-4 w-4 mr-1" /> Alejar</>
-                      ) : (
-                        <><ZoomIn className="h-4 w-4 mr-1" /> Zoom</>
-                      )}
-                    </Button>
+                    <div className="text-sm text-gray-600 space-y-1">
+                      <p><strong>Parcela:</strong> {box.parcelCode} - {box.parcelName}</p>
+                      <p><strong>Peso:</strong> {((box.weight || 0) / 1000).toFixed(2)} kg &nbsp;|&nbsp; <strong>Fecha:</strong> {format(new Date(box.submissionTime), "dd/MM/yy HH:mm", { locale: es })}</p>
+                    </div>
+                  </div>
+                  
+                  {/* Contenedor de foto */}
+                  <div 
+                    className="flex-1 overflow-auto bg-gray-100 cursor-pointer min-h-0"
+                    onClick={() => toggleCompareZoom(slotIndex)}
+                  >
+                    {box.photoUrl ? (
+                      <img
+                        src={box.photoUrl}
+                        alt={`Foto de caja ${box.boxCode}`}
+                        className="w-full h-full transition-transform duration-300"
+                        style={{ 
+                          transform: `scale(${compareZoom[slotIndex]})`, 
+                          transformOrigin: 'top left',
+                          objectFit: compareZoom[slotIndex] > 1 ? 'none' : 'contain'
+                        }}
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-gray-400">
+                        <div className="text-center">
+                          <ImageIcon className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                          <p>Sin foto</p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
-                
-                {/* Foto - Ocupa todo el espacio restante */}
-                <div 
-                  className="flex-1 overflow-auto bg-gray-50 cursor-pointer"
-                  onClick={() => toggleCompareZoom(index)}
-                >
-                  {box.photoUrl ? (
-                    <img
-                      src={box.photoUrl}
-                      alt={`Foto de caja ${box.boxCode}`}
-                      className="transition-transform duration-300 ease-out"
-                      style={{ 
-                        transform: `scale(${compareZoom[index]})`, 
-                        transformOrigin: 'top left',
-                        minWidth: '100%',
-                        minHeight: compareZoom[index] > 1 ? 'auto' : '100%',
-                        objectFit: compareZoom[index] > 1 ? 'none' : 'contain'
-                      }}
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="flex items-center justify-center h-full bg-gray-100 text-gray-400">
-                      <div className="text-center">
-                        <ImageIcon className="h-16 w-16 mx-auto mb-3 opacity-50" />
-                        <p className="text-lg">Sin foto disponible</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </DialogContent>
       </Dialog>
