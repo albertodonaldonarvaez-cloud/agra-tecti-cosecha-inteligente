@@ -66,7 +66,7 @@ function formatDateShort(dateStr: string) {
 }
 
 export default function ClimateAnalysis() {
-  const [historicalDays, setHistoricalDays] = useState(30);
+  const [historicalDays, setHistoricalDays] = useState(365);
   const [forecastDays, setForecastDays] = useState(7);
 
   // Queries
@@ -308,21 +308,30 @@ export default function ClimateAnalysis() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
               <TrendingUp className="w-5 h-5" />
-              Temperatura vs Cosecha (Últimos {historicalDays} días)
+              Temperatura vs Cosecha {historicalDays === 365 ? '(Todo el historial)' : `(Últimos ${historicalDays} días)`}
             </h2>
             <select
               value={historicalDays}
               onChange={(e) => setHistoricalDays(Number(e.target.value))}
               className="px-3 py-1 border rounded-lg text-sm"
             >
-              <option value={7}>7 días</option>
-              <option value={14}>14 días</option>
-              <option value={30}>30 días</option>
-              <option value={60}>60 días</option>
+              <option value={365}>Todo</option>
               <option value={90}>90 días</option>
+              <option value={60}>60 días</option>
+              <option value={30}>30 días</option>
+              <option value={14}>14 días</option>
+              <option value={7}>7 días</option>
             </select>
           </div>
           <div className="h-80">
+            {loadingHistorical ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <RefreshCw className="w-8 h-8 animate-spin text-green-500 mx-auto mb-2" />
+                  <p className="text-gray-500">Cargando datos históricos...</p>
+                </div>
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={correlationData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -359,6 +368,7 @@ export default function ClimateAnalysis() {
                 <Bar yAxisId="boxes" dataKey="boxes" name="Cajas" fill="#22c55e" opacity={0.7} />
               </ComposedChart>
             </ResponsiveContainer>
+            )}
           </div>
         </GlassCard>
 
@@ -369,6 +379,14 @@ export default function ClimateAnalysis() {
             Precipitación vs Cosecha
           </h2>
           <div className="h-80">
+            {loadingHistorical ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <RefreshCw className="w-8 h-8 animate-spin text-blue-500 mx-auto mb-2" />
+                  <p className="text-gray-500">Cargando datos...</p>
+                </div>
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={correlationData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -396,6 +414,7 @@ export default function ClimateAnalysis() {
                 />
               </ComposedChart>
             </ResponsiveContainer>
+            )}
           </div>
         </GlassCard>
 
@@ -404,6 +423,14 @@ export default function ClimateAnalysis() {
           <GlassCard className="p-6 md:p-8">
             <h2 className="text-xl font-bold text-gray-800 mb-4">Dispersión: Temperatura vs Cajas</h2>
             <div className="h-64">
+              {loadingHistorical ? (
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-center">
+                    <RefreshCw className="w-8 h-8 animate-spin text-green-500 mx-auto mb-2" />
+                    <p className="text-gray-500">Cargando...</p>
+                  </div>
+                </div>
+              ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <ScatterChart>
                   <CartesianGrid strokeDasharray="3 3" />
@@ -429,6 +456,7 @@ export default function ClimateAnalysis() {
                   />
                 </ScatterChart>
               </ResponsiveContainer>
+              )}
             </div>
             <p className="text-sm text-gray-500 mt-2 text-center">
               Cada punto representa un día de cosecha
@@ -438,6 +466,14 @@ export default function ClimateAnalysis() {
           <GlassCard className="p-6 md:p-8">
             <h2 className="text-xl font-bold text-gray-800 mb-4">Dispersión: Lluvia vs Cajas</h2>
             <div className="h-64">
+              {loadingHistorical ? (
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-center">
+                    <RefreshCw className="w-8 h-8 animate-spin text-blue-500 mx-auto mb-2" />
+                    <p className="text-gray-500">Cargando...</p>
+                  </div>
+                </div>
+              ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <ScatterChart>
                   <CartesianGrid strokeDasharray="3 3" />
@@ -464,6 +500,7 @@ export default function ClimateAnalysis() {
                   />
                 </ScatterChart>
               </ResponsiveContainer>
+              )}
             </div>
             <p className="text-sm text-gray-500 mt-2 text-center">
               Analiza cómo la lluvia afecta la producción
@@ -474,6 +511,14 @@ export default function ClimateAnalysis() {
         {/* Tabla de Datos Históricos */}
         <GlassCard className="p-6 md:p-8">
           <h2 className="text-xl font-bold text-gray-800 mb-4">Datos Históricos Detallados</h2>
+          {loadingHistorical ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-center">
+                <RefreshCw className="w-8 h-8 animate-spin text-green-500 mx-auto mb-2" />
+                <p className="text-gray-500">Cargando datos históricos...</p>
+              </div>
+            </div>
+          ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -510,6 +555,7 @@ export default function ClimateAnalysis() {
               </tbody>
             </table>
           </div>
+          )}
         </GlassCard>
       </div>
     </div>
