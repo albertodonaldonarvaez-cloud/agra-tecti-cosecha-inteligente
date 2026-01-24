@@ -72,7 +72,7 @@ export default function ClimateAnalysis() {
   // Estado para manejar transiciones suaves
   const [isChangingRange, setIsChangingRange] = useState(false);
 
-  // OPTIMIZADO PARA MÓVIL: Queries con mejor manejo de errores y caché
+  // QUERIES OPTIMIZADAS - Cargan automáticamente al montar el componente
   const { 
     data: currentWeather, 
     isLoading: loadingCurrent, 
@@ -82,13 +82,14 @@ export default function ClimateAnalysis() {
   } = trpc.weather.getCurrent.useQuery(
     undefined,
     {
-      refetchInterval: 5 * 60 * 1000, // Refetch cada 5 minutos
-      refetchOnWindowFocus: false, // Desactivar para móvil (ahorra datos)
-      retry: 3,
-      retryDelay: 2000, // Más tiempo entre reintentos para conexiones lentas
-      staleTime: 3 * 60 * 1000, // Datos frescos por 3 minutos
+      refetchInterval: 3 * 60 * 1000, // Refetch cada 3 minutos
+      refetchOnWindowFocus: true, // Recargar al volver a la pestaña
+      retry: 5, // Más reintentos
+      retryDelay: 1000, // 1 segundo entre reintentos
+      staleTime: 60 * 1000, // Datos frescos por 1 minuto
     }
   );
+  
   const { 
     data: forecast, 
     isLoading: loadingForecast,
@@ -98,22 +99,21 @@ export default function ClimateAnalysis() {
   } = trpc.weather.getExtendedForecast.useQuery(
     { days: forecastDays },
     {
-      refetchInterval: 15 * 60 * 1000, // Refetch cada 15 minutos
-      refetchOnWindowFocus: false, // Desactivar para móvil
-      retry: 3,
-      retryDelay: 2000,
-      staleTime: 10 * 60 * 1000, // Datos frescos por 10 minutos
+      refetchInterval: 5 * 60 * 1000, // Refetch cada 5 minutos
+      refetchOnWindowFocus: true, // Recargar al volver a la pestaña
+      retry: 5,
+      retryDelay: 1000,
+      staleTime: 2 * 60 * 1000, // Datos frescos por 2 minutos
     }
   );
   
-  // Datos de cajas - PRIORIDAD ALTA (cargar primero)
-  // Optimizado para móvil con caché agresivo
+  // Datos de cajas - Cargar automáticamente
   const { data: boxesByDay, isLoading: loadingBoxes } = trpc.boxes.list.useQuery(undefined, {
-    refetchInterval: 5 * 60 * 1000,
-    refetchOnWindowFocus: false,
-    staleTime: 5 * 60 * 1000, // Datos frescos por 5 minutos
-    retry: 3,
-    retryDelay: 2000,
+    refetchInterval: 2 * 60 * 1000, // Refetch cada 2 minutos
+    refetchOnWindowFocus: true,
+    staleTime: 60 * 1000, // Datos frescos por 1 minuto
+    retry: 5,
+    retryDelay: 1000,
   });
 
   // Calcular fecha de inicio de cosecha (primera caja registrada)
@@ -157,7 +157,7 @@ export default function ClimateAnalysis() {
     };
   }, [harvestStartInfo.daysAgo]);
 
-  // Consulta única de datos históricos - se cachea y no cambia con el selector
+  // Consulta única de datos históricos - carga automáticamente
   const { 
     data: historicalWeather, 
     isLoading: loadingHistorical,
@@ -165,19 +165,23 @@ export default function ClimateAnalysis() {
   } = trpc.weather.getHistoricalDetailed.useQuery(
     maxHistoricalDates,
     {
-      refetchInterval: 15 * 60 * 1000, // Refetch cada 15 minutos
-      refetchOnWindowFocus: false, // No refetch al volver a la pestaña
-      staleTime: 10 * 60 * 1000, // Considerar datos frescos por 10 minutos
+      refetchInterval: 5 * 60 * 1000, // Refetch cada 5 minutos
+      refetchOnWindowFocus: true, // Recargar al volver a la pestaña
+      staleTime: 2 * 60 * 1000, // Datos frescos por 2 minutos
+      retry: 5,
+      retryDelay: 1000,
     }
   );
   
-  // Datos de cosecha para el mismo período (también cacheado)
+  // Datos de cosecha para el mismo período
   const { data: harvestData } = trpc.analytics.getStats.useQuery({
     startDate: maxHistoricalDates.startDate,
     endDate: maxHistoricalDates.endDate,
   }, {
-    staleTime: 10 * 60 * 1000,
-    refetchOnWindowFocus: false,
+    staleTime: 2 * 60 * 1000,
+    refetchOnWindowFocus: true,
+    retry: 5,
+    retryDelay: 1000,
   });
 
   // Combinar datos de clima y cosecha - SOLO DÍAS CON COSECHA
@@ -430,16 +434,11 @@ export default function ClimateAnalysis() {
               </div>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center py-8">
-              <Cloud className="w-12 h-12 text-gray-300 mb-3" />
-              <p className="text-gray-500 mb-4">Cargando datos del clima...</p>
-              <button
-                onClick={() => refetchCurrent()}
-                className="flex items-center gap-2 px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-colors"
-              >
-                <RefreshCw className="w-4 h-4" />
-                Cargar clima
-              </button>
+            <div className="flex items-center justify-center py-8">
+              <div className="text-center">
+                <RefreshCw className="w-8 h-8 animate-spin text-yellow-500 mx-auto mb-2" />
+                <p className="text-gray-500">Obteniendo clima actual...</p>
+              </div>
             </div>
           )}
         </GlassCard>
@@ -511,16 +510,11 @@ export default function ClimateAnalysis() {
               ))}
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center py-8">
-              <Calendar className="w-12 h-12 text-gray-300 mb-3" />
-              <p className="text-gray-500 mb-4">Cargando pronóstico...</p>
-              <button
-                onClick={() => refetchForecast()}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors"
-              >
-                <RefreshCw className="w-4 h-4" />
-                Cargar pronóstico
-              </button>
+            <div className="flex items-center justify-center py-8">
+              <div className="text-center">
+                <RefreshCw className="w-8 h-8 animate-spin text-blue-500 mx-auto mb-2" />
+                <p className="text-gray-500">Obteniendo pronóstico...</p>
+              </div>
             </div>
           )}
         </GlassCard>
