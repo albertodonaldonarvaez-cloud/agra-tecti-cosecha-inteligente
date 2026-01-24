@@ -68,6 +68,9 @@ export default function ClimateAnalysis() {
   const [tableDays, setTableDays] = useState(14); // Filtro para la tabla
   const [tableSortField, setTableSortField] = useState<string>("date");
   const [tableSortOrder, setTableSortOrder] = useState<"asc" | "desc">("desc");
+  
+  // Estado para manejar transiciones suaves
+  const [isChangingRange, setIsChangingRange] = useState(false);
 
   // Queries con refetch automático y retry
   const { 
@@ -102,9 +105,11 @@ export default function ClimateAnalysis() {
   );
   
   // Datos de cajas por día (mover antes para calcular fecha de inicio)
+  // Optimizado: mantener en caché por más tiempo ya que no cambia frecuentemente
   const { data: boxesByDay } = trpc.boxes.list.useQuery(undefined, {
     refetchInterval: 5 * 60 * 1000,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false, // Evitar refetch innecesario
+    staleTime: 2 * 60 * 1000, // Considerar datos frescos por 2 minutos
   });
 
   // Calcular fecha de inicio de cosecha (primera caja registrada)
@@ -132,41 +137,51 @@ export default function ClimateAnalysis() {
     };
   }, [boxesByDay]);
 
-  // Calcular fechas para históricos
-  const historicalDates = useMemo(() => {
+  // OPTIMIZACIÓN: Siempre cargar el máximo de datos (desde inicio de cosecha)
+  // y filtrar localmente según el selector. Esto evita consultas repetidas al servidor.
+  const maxHistoricalDates = useMemo(() => {
     const end = new Date();
     end.setDate(end.getDate() - 1); // Ayer
     const start = new Date();
-    
-    // Si historicalDays es -1, usar desde inicio de cosecha
-    const daysToUse = historicalDays === -1 ? harvestStartInfo.daysAgo : historicalDays;
-    start.setDate(start.getDate() - daysToUse);
+    // Siempre cargar desde el inicio de cosecha (o 365 días si no hay datos)
+    const maxDays = Math.max(harvestStartInfo.daysAgo, 365);
+    start.setDate(start.getDate() - maxDays);
     
     return {
       startDate: start.toISOString().split("T")[0],
       endDate: end.toISOString().split("T")[0],
     };
-  }, [historicalDays, harvestStartInfo.daysAgo]);
+  }, [harvestStartInfo.daysAgo]);
 
-  const { data: historicalWeather, isLoading: loadingHistorical } = trpc.weather.getHistoricalDetailed.useQuery(
-    historicalDates,
+  // Consulta única de datos históricos - se cachea y no cambia con el selector
+  const { 
+    data: historicalWeather, 
+    isLoading: loadingHistorical,
+    isFetching: fetchingHistorical 
+  } = trpc.weather.getHistoricalDetailed.useQuery(
+    maxHistoricalDates,
     {
-      refetchInterval: 10 * 60 * 1000,
-      refetchOnWindowFocus: true,
+      refetchInterval: 15 * 60 * 1000, // Refetch cada 15 minutos
+      refetchOnWindowFocus: false, // No refetch al volver a la pestaña
+      staleTime: 10 * 60 * 1000, // Considerar datos frescos por 10 minutos
     }
   );
   
-  // Datos de cosecha para el mismo período
+  // Datos de cosecha para el mismo período (también cacheado)
   const { data: harvestData } = trpc.analytics.getStats.useQuery({
-    startDate: historicalDates.startDate,
-    endDate: historicalDates.endDate,
+    startDate: maxHistoricalDates.startDate,
+    endDate: maxHistoricalDates.endDate,
+  }, {
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
-  // Combinar datos de clima y cosecha para correlación
-  const correlationData = useMemo(() => {
+  // Combinar datos de clima y cosecha - DATOS COMPLETOS (sin filtrar)
+  // Este useMemo solo se recalcula cuando cambian los datos del servidor
+  const allCorrelationData = useMemo(() => {
     if (!historicalWeather || !boxesByDay) return [];
 
-    // Agrupar cajas por fecha
+    // Agrupar cajas por fecha (una sola vez)
     const boxesByDate: Record<string, { count: number; weight: number; firstQuality: number }> = {};
     boxesByDay?.forEach((box: any) => {
       const date = new Date(box.submissionTime).toISOString().split("T")[0];
@@ -198,6 +213,24 @@ export default function ClimateAnalysis() {
       };
     });
   }, [historicalWeather, boxesByDay]);
+
+  // FILTRADO LOCAL: Filtrar datos según el selector de días
+  // Este filtro es instantáneo porque trabaja con datos ya cargados
+  const correlationData = useMemo(() => {
+    if (!allCorrelationData.length) return [];
+    
+    // Si es -1 (desde inicio), mostrar todos los datos
+    if (historicalDays === -1) {
+      return allCorrelationData;
+    }
+    
+    // Filtrar por los últimos N días
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - historicalDays);
+    const cutoffStr = cutoffDate.toISOString().split("T")[0];
+    
+    return allCorrelationData.filter(d => d.date >= cutoffStr);
+  }, [allCorrelationData, historicalDays]);
 
   // Calcular correlaciones
   const correlationStats = useMemo(() => {
@@ -236,13 +269,17 @@ export default function ClimateAnalysis() {
   }, [correlationData]);
 
   // Datos filtrados y ordenados para la tabla
+  // Usa allCorrelationData para filtrado independiente de la gráfica
   const tableData = useMemo(() => {
-    if (!correlationData.length) return [];
+    if (!allCorrelationData.length) return [];
     
     // Filtrar por días seleccionados
-    let filtered = correlationData;
+    let filtered = allCorrelationData;
     if (tableDays > 0) {
-      filtered = correlationData.slice(-tableDays);
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - tableDays);
+      const cutoffStr = cutoffDate.toISOString().split("T")[0];
+      filtered = allCorrelationData.filter(d => d.date >= cutoffStr);
     }
     
     // Ordenar
@@ -277,7 +314,7 @@ export default function ClimateAnalysis() {
     });
     
     return sorted;
-  }, [correlationData, tableDays, tableSortField, tableSortOrder]);
+  }, [allCorrelationData, tableDays, tableSortField, tableSortOrder]);
 
   // Función para cambiar ordenamiento de la tabla
   const handleTableSort = (field: string) => {
@@ -547,27 +584,32 @@ export default function ClimateAnalysis() {
         {/* Gráfica de Correlación Temperatura vs Cosecha */}
         <GlassCard className="p-6 md:p-8">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
-            <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-              <TrendingUp className="w-5 h-5" />
-              Temperatura vs Cosecha {historicalDays === -1 
-                ? `(Desde inicio: ${harvestStartInfo.date ? formatDateShort(harvestStartInfo.date) : 'cargando...'})` 
-                : `(Últimos ${historicalDays} días)`}
-            </h2>
-            <select
-              value={historicalDays}
-              onChange={(e) => setHistoricalDays(Number(e.target.value))}
-              className="px-3 py-2 border rounded-lg text-sm bg-white shadow-sm"
-            >
-              <option value={-1}>Desde inicio cosecha</option>
-              <option value={90}>90 días</option>
-              <option value={60}>60 días</option>
-              <option value={30}>30 días</option>
-              <option value={14}>14 días</option>
-              <option value={7}>7 días</option>
-            </select>
+            <div className="flex items-center gap-3">
+              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <TrendingUp className="w-5 h-5" />
+                Temperatura vs Cosecha
+              </h2>
+              <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                {correlationData.length} registros
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                value={historicalDays}
+                onChange={(e) => setHistoricalDays(Number(e.target.value))}
+                className="px-3 py-2 border rounded-lg text-sm bg-white shadow-sm"
+              >
+                <option value={-1}>Desde inicio cosecha</option>
+                <option value={90}>90 días</option>
+                <option value={60}>60 días</option>
+                <option value={30}>30 días</option>
+                <option value={14}>14 días</option>
+                <option value={7}>7 días</option>
+              </select>
+            </div>
           </div>
           <div className="h-80">
-            {loadingHistorical ? (
+            {loadingHistorical && !allCorrelationData.length ? (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center">
                   <RefreshCw className="w-8 h-8 animate-spin text-green-500 mx-auto mb-2" />
@@ -632,7 +674,7 @@ export default function ClimateAnalysis() {
             Precipitación vs Cosecha
           </h2>
           <div className="h-80">
-            {loadingHistorical ? (
+            {loadingHistorical && !allCorrelationData.length ? (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center">
                   <RefreshCw className="w-8 h-8 animate-spin text-blue-500 mx-auto mb-2" />
@@ -691,7 +733,7 @@ export default function ClimateAnalysis() {
               </select>
             </div>
           </div>
-          {loadingHistorical ? (
+          {loadingHistorical && !allCorrelationData.length ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
                 <RefreshCw className="w-8 h-8 animate-spin text-green-500 mx-auto mb-2" />
