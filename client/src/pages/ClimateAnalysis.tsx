@@ -69,19 +69,35 @@ export default function ClimateAnalysis() {
   const [tableSortField, setTableSortField] = useState<string>("date");
   const [tableSortOrder, setTableSortOrder] = useState<"asc" | "desc">("desc");
 
-  // Queries con refetch automático
-  const { data: currentWeather, isLoading: loadingCurrent, refetch: refetchCurrent } = trpc.weather.getCurrent.useQuery(
+  // Queries con refetch automático y retry
+  const { 
+    data: currentWeather, 
+    isLoading: loadingCurrent, 
+    refetch: refetchCurrent,
+    error: errorCurrent,
+    isError: isErrorCurrent 
+  } = trpc.weather.getCurrent.useQuery(
     undefined,
     {
       refetchInterval: 5 * 60 * 1000, // Refetch cada 5 minutos
       refetchOnWindowFocus: true,
+      retry: 3, // Reintentar 3 veces si falla
+      retryDelay: 1000, // Esperar 1 segundo entre reintentos
     }
   );
-  const { data: forecast, isLoading: loadingForecast } = trpc.weather.getExtendedForecast.useQuery(
+  const { 
+    data: forecast, 
+    isLoading: loadingForecast,
+    refetch: refetchForecast,
+    error: errorForecast,
+    isError: isErrorForecast
+  } = trpc.weather.getExtendedForecast.useQuery(
     { days: forecastDays },
     {
       refetchInterval: 10 * 60 * 1000, // Refetch cada 10 minutos
       refetchOnWindowFocus: true,
+      retry: 3,
+      retryDelay: 1000,
     }
   );
   
@@ -320,6 +336,23 @@ export default function ClimateAnalysis() {
                 <p className="text-gray-500">Cargando clima actual...</p>
               </div>
             </div>
+          ) : isErrorCurrent ? (
+            <div className="flex flex-col items-center justify-center py-8">
+              <Cloud className="w-12 h-12 text-gray-300 mb-3" />
+              <p className="text-gray-600 mb-2">Error al cargar el clima</p>
+              <p className="text-sm text-gray-400 mb-4">
+                {errorCurrent?.message?.includes("ubicación") 
+                  ? "Configure la ubicación en Ajustes" 
+                  : "Verifica tu conexión a internet"}
+              </p>
+              <button
+                onClick={() => refetchCurrent()}
+                className="flex items-center gap-2 px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-colors"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Reintentar
+              </button>
+            </div>
           ) : currentWeather ? (
             <div className="flex flex-col md:flex-row items-center justify-between gap-6">
               <div className="flex items-center gap-6">
@@ -353,8 +386,16 @@ export default function ClimateAnalysis() {
               </div>
             </div>
           ) : (
-            <div className="text-center py-8 text-gray-500">
-              No hay datos de clima disponibles
+            <div className="flex flex-col items-center justify-center py-8">
+              <Cloud className="w-12 h-12 text-gray-300 mb-3" />
+              <p className="text-gray-500 mb-4">Cargando datos del clima...</p>
+              <button
+                onClick={() => refetchCurrent()}
+                className="flex items-center gap-2 px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-colors"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Cargar clima
+              </button>
             </div>
           )}
         </GlassCard>
@@ -383,6 +424,23 @@ export default function ClimateAnalysis() {
                 <p className="text-gray-500">Cargando pronóstico...</p>
               </div>
             </div>
+          ) : isErrorForecast ? (
+            <div className="flex flex-col items-center justify-center py-8">
+              <Calendar className="w-12 h-12 text-gray-300 mb-3" />
+              <p className="text-gray-600 mb-2">Error al cargar el pronóstico</p>
+              <p className="text-sm text-gray-400 mb-4">
+                {errorForecast?.message?.includes("ubicación") 
+                  ? "Configure la ubicación en Ajustes" 
+                  : "Verifica tu conexión a internet"}
+              </p>
+              <button
+                onClick={() => refetchForecast()}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Reintentar
+              </button>
+            </div>
           ) : forecast && forecast.length > 0 ? (
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
               {forecast.map((day, i) => (
@@ -409,8 +467,16 @@ export default function ClimateAnalysis() {
               ))}
             </div>
           ) : (
-            <div className="text-center py-8 text-gray-500">
-              No hay datos de pronóstico disponibles
+            <div className="flex flex-col items-center justify-center py-8">
+              <Calendar className="w-12 h-12 text-gray-300 mb-3" />
+              <p className="text-gray-500 mb-4">Cargando pronóstico...</p>
+              <button
+                onClick={() => refetchForecast()}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Cargar pronóstico
+              </button>
             </div>
           )}
         </GlassCard>
