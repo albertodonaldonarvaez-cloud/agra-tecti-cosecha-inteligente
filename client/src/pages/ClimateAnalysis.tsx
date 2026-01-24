@@ -72,7 +72,7 @@ export default function ClimateAnalysis() {
   // Estado para manejar transiciones suaves
   const [isChangingRange, setIsChangingRange] = useState(false);
 
-  // Queries con refetch automático y retry
+  // OPTIMIZADO PARA MÓVIL: Queries con mejor manejo de errores y caché
   const { 
     data: currentWeather, 
     isLoading: loadingCurrent, 
@@ -83,9 +83,10 @@ export default function ClimateAnalysis() {
     undefined,
     {
       refetchInterval: 5 * 60 * 1000, // Refetch cada 5 minutos
-      refetchOnWindowFocus: true,
-      retry: 3, // Reintentar 3 veces si falla
-      retryDelay: 1000, // Esperar 1 segundo entre reintentos
+      refetchOnWindowFocus: false, // Desactivar para móvil (ahorra datos)
+      retry: 3,
+      retryDelay: 2000, // Más tiempo entre reintentos para conexiones lentas
+      staleTime: 3 * 60 * 1000, // Datos frescos por 3 minutos
     }
   );
   const { 
@@ -97,19 +98,22 @@ export default function ClimateAnalysis() {
   } = trpc.weather.getExtendedForecast.useQuery(
     { days: forecastDays },
     {
-      refetchInterval: 10 * 60 * 1000, // Refetch cada 10 minutos
-      refetchOnWindowFocus: true,
+      refetchInterval: 15 * 60 * 1000, // Refetch cada 15 minutos
+      refetchOnWindowFocus: false, // Desactivar para móvil
       retry: 3,
-      retryDelay: 1000,
+      retryDelay: 2000,
+      staleTime: 10 * 60 * 1000, // Datos frescos por 10 minutos
     }
   );
   
-  // Datos de cajas por día (mover antes para calcular fecha de inicio)
-  // Optimizado: mantener en caché por más tiempo ya que no cambia frecuentemente
-  const { data: boxesByDay } = trpc.boxes.list.useQuery(undefined, {
+  // Datos de cajas - PRIORIDAD ALTA (cargar primero)
+  // Optimizado para móvil con caché agresivo
+  const { data: boxesByDay, isLoading: loadingBoxes } = trpc.boxes.list.useQuery(undefined, {
     refetchInterval: 5 * 60 * 1000,
-    refetchOnWindowFocus: false, // Evitar refetch innecesario
-    staleTime: 2 * 60 * 1000, // Considerar datos frescos por 2 minutos
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000, // Datos frescos por 5 minutos
+    retry: 3,
+    retryDelay: 2000,
   });
 
   // Calcular fecha de inicio de cosecha (primera caja registrada)
@@ -176,10 +180,10 @@ export default function ClimateAnalysis() {
     refetchOnWindowFocus: false,
   });
 
-  // Combinar datos de clima y cosecha - DATOS COMPLETOS (sin filtrar)
+  // Combinar datos de clima y cosecha - SOLO DÍAS CON COSECHA
   // Este useMemo solo se recalcula cuando cambian los datos del servidor
   const allCorrelationData = useMemo(() => {
-    if (!historicalWeather || !boxesByDay) return [];
+    if (!historicalWeather || !boxesByDay || boxesByDay.length === 0) return [];
 
     // Agrupar cajas por fecha (una sola vez)
     const boxesByDate: Record<string, { count: number; weight: number; firstQuality: number }> = {};
@@ -195,23 +199,26 @@ export default function ClimateAnalysis() {
       }
     });
 
-    // Combinar con datos de clima
-    return historicalWeather.map((weather) => {
-      const harvest = boxesByDate[weather.date] || { count: 0, weight: 0, firstQuality: 0 };
-      return {
-        date: weather.date,
-        dateFormatted: formatDateShort(weather.date),
-        tempMax: weather.temperatureMax,
-        tempMin: weather.temperatureMin,
-        tempMean: weather.temperatureMean,
-        precipitation: weather.precipitation,
-        cloudCover: weather.cloudCover,
-        boxes: harvest.count,
-        weight: harvest.weight / 1000, // kg
-        firstQualityPercent: harvest.count > 0 ? (harvest.firstQuality / harvest.count) * 100 : 0,
-        condition: weather.condition,
-      };
-    });
+    // SOLO incluir días que tienen cosecha (cajas > 0)
+    // Filtrar datos de clima para solo mostrar días con cosecha
+    return historicalWeather
+      .filter((weather) => boxesByDate[weather.date] && boxesByDate[weather.date].count > 0)
+      .map((weather) => {
+        const harvest = boxesByDate[weather.date];
+        return {
+          date: weather.date,
+          dateFormatted: formatDateShort(weather.date),
+          tempMax: weather.temperatureMax,
+          tempMin: weather.temperatureMin,
+          tempMean: weather.temperatureMean,
+          precipitation: weather.precipitation,
+          cloudCover: weather.cloudCover,
+          boxes: harvest.count,
+          weight: harvest.weight / 1000, // kg
+          firstQualityPercent: harvest.count > 0 ? (harvest.firstQuality / harvest.count) * 100 : 0,
+          condition: weather.condition,
+        };
+      });
   }, [historicalWeather, boxesByDay]);
 
   // FILTRADO LOCAL: Filtrar datos según el selector de días
@@ -609,11 +616,21 @@ export default function ClimateAnalysis() {
             </div>
           </div>
           <div className="h-80">
-            {loadingHistorical && !allCorrelationData.length ? (
+            {(loadingHistorical || loadingBoxes) && !allCorrelationData.length ? (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center">
                   <RefreshCw className="w-8 h-8 animate-spin text-green-500 mx-auto mb-2" />
-                  <p className="text-gray-500">Cargando datos históricos...</p>
+                  <p className="text-gray-500">
+                    {loadingBoxes ? 'Cargando datos de cosecha...' : 'Cargando datos del clima...'}
+                  </p>
+                </div>
+              </div>
+            ) : correlationData.length === 0 ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <TrendingUp className="w-12 h-12 text-gray-300 mx-auto mb-2" />
+                  <p className="text-gray-500">No hay datos de cosecha para mostrar</p>
+                  <p className="text-sm text-gray-400 mt-1">Los datos aparecerán cuando haya cajas registradas</p>
                 </div>
               </div>
             ) : (
@@ -674,11 +691,18 @@ export default function ClimateAnalysis() {
             Precipitación vs Cosecha
           </h2>
           <div className="h-80">
-            {loadingHistorical && !allCorrelationData.length ? (
+            {(loadingHistorical || loadingBoxes) && !allCorrelationData.length ? (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center">
                   <RefreshCw className="w-8 h-8 animate-spin text-blue-500 mx-auto mb-2" />
                   <p className="text-gray-500">Cargando datos...</p>
+                </div>
+              </div>
+            ) : correlationData.length === 0 ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <Droplets className="w-12 h-12 text-gray-300 mx-auto mb-2" />
+                  <p className="text-gray-500">No hay datos de cosecha</p>
                 </div>
               </div>
             ) : (
@@ -733,11 +757,21 @@ export default function ClimateAnalysis() {
               </select>
             </div>
           </div>
-          {loadingHistorical && !allCorrelationData.length ? (
+          {(loadingHistorical || loadingBoxes) && !allCorrelationData.length ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
                 <RefreshCw className="w-8 h-8 animate-spin text-green-500 mx-auto mb-2" />
-                <p className="text-gray-500">Cargando datos históricos...</p>
+                <p className="text-gray-500">
+                  {loadingBoxes ? 'Cargando datos de cosecha...' : 'Cargando datos del clima...'}
+                </p>
+              </div>
+            </div>
+          ) : tableData.length === 0 ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-center">
+                <Calendar className="w-12 h-12 text-gray-300 mx-auto mb-2" />
+                <p className="text-gray-500">No hay datos de cosecha para mostrar</p>
+                <p className="text-sm text-gray-400 mt-1">Los datos aparecerán cuando haya cajas registradas</p>
               </div>
             </div>
           ) : (
