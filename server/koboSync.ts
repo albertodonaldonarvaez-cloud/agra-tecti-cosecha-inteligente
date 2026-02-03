@@ -83,10 +83,10 @@ export async function processKoboData(data: KoboData) {
       const weight = Math.round(weightKg * 1000); // Convertir a gramos
 
       // NOTA: Ya no descartamos cajas con peso alto.
-      // Las cajas con peso > 14 kg se marcan visualmente en el Editor de Cajas
+      // Las cajas con peso > 15 kg se marcan visualmente en el Editor de Cajas
       // para revisión manual (posible error de punto decimal).
       // Solo registramos un log para monitoreo.
-      if (weight > 14000) {
+      if (weight > 15000) {
         console.log(`⚠️ Peso alto detectado: ${weightKg} kg en caja ${result.escanea_la_caja} - Se insertará para revisión manual`);
       }
 

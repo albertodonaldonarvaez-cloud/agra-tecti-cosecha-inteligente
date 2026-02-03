@@ -456,7 +456,7 @@ export async function getBoxesForEditor(params: {
     conditions.push(inArray(boxes.parcelCode, params.parcelsWithoutPolygon));
   } else if (params.filterError === 'overweight') {
     const { gt } = await import("drizzle-orm");
-    conditions.push(gt(boxes.weight, 14000)); // > 14 kg
+    conditions.push(gt(boxes.weight, 15000)); // > 15 kg
   }
   
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;

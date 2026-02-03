@@ -418,7 +418,7 @@ export default function BoxEditor() {
   const hasError = useCallback((box: Box) => {
     const isDuplicate = duplicateCodes.includes(box.boxCode);
     const hasNoPolygon = parcelsWithoutPolygon.includes(box.parcelCode);
-    const isOverweight = box.weight > 14000; // > 14 kg
+    const isOverweight = box.weight > 15000; // > 15 kg
     return { isDuplicate, hasNoPolygon, isOverweight, hasAnyError: isDuplicate || hasNoPolygon || isOverweight };
   }, [duplicateCodes, parcelsWithoutPolygon]);
 
@@ -611,7 +611,7 @@ export default function BoxEditor() {
                 <SelectItem value="overweight">
                   <span className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-purple-500" />
-                    Solo peso &gt; 14 kg
+                    Solo peso &gt; 15 kg
                   </span>
                 </SelectItem>
               </SelectContent>
@@ -830,11 +830,11 @@ export default function BoxEditor() {
                               />
                             ) : (
                               <div className="flex items-center justify-end gap-1">
-                                <span className={`text-sm font-semibold ${box.weight > 14000 ? "text-purple-700 bg-purple-100 px-2 py-0.5 rounded" : "text-green-900"}`}>
+                                <span className={`text-sm font-semibold ${box.weight > 15000 ? "text-purple-700 bg-purple-100 px-2 py-0.5 rounded" : "text-green-900"}`}>
                                   {(box.weight / 1000).toFixed(2)} kg
                                 </span>
-                                {box.weight > 14000 && (
-                                  <AlertTriangle className="h-4 w-4 text-purple-600" title="Peso excesivo (>14 kg)" />
+                                {box.weight > 15000 && (
+                                  <AlertTriangle className="h-4 w-4 text-purple-600" title="Peso excesivo (>15 kg)" />
                                 )}
                               </div>
                             )}
