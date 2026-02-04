@@ -194,6 +194,28 @@ export const appRouter = router({
         return result;
       }),
 
+    // Endpoint para importar datos históricos con hora exacta desde columna 'start'
+    uploadHistorical: adminProcedure
+      .input(z.object({ 
+        filePath: z.string(),
+        fileName: z.string(),
+        downloadPhotos: z.boolean().optional().default(false)
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const { processHistoricalExcelFile } = await import("./historicalDataSync");
+        const config = await db.getApiConfig();
+        
+        const result = await processHistoricalExcelFile(
+          input.filePath,
+          input.fileName,
+          ctx.user.id,
+          config || { apiUrl: '', apiToken: '', assetId: '' },
+          input.downloadPhotos
+        );
+        
+        return result;
+      }),
+
     uploadJson: adminProcedure
       .input(z.object({ jsonData: z.any() }))
       .mutation(async ({ input }) => {

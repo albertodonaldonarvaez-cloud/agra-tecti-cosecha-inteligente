@@ -20,6 +20,8 @@ export default function Settings() {
   const [jsonData, setJsonData] = useState("");
   const [excelFile, setExcelFile] = useState<File | null>(null);
   const [downloadPhotos, setDownloadPhotos] = useState(true);
+  const [historicalFile, setHistoricalFile] = useState<File | null>(null);
+  const [downloadHistoricalPhotos, setDownloadHistoricalPhotos] = useState(false);
   const [syncDate, setSyncDate] = useState("");
   const [locationName, setLocationName] = useState("");
   const [latitude, setLatitude] = useState("");
@@ -82,6 +84,19 @@ export default function Settings() {
     onSuccess: (data: any) => {
       toast.success(`¡Carga exitosa! ${data.successRows} filas procesadas, ${data.errorRows} errores`);
       setExcelFile(null);
+      if (data.errors && data.errors.length > 0) {
+        toast.info(`Revisa la página de Errores para más detalles`);
+      }
+    },
+    onError: (error: any) => {
+      toast.error(error.message);
+    },
+  });
+
+  const uploadHistorical = trpc.boxes.uploadHistorical.useMutation({
+    onSuccess: (data: any) => {
+      toast.success(`¡Datos históricos cargados! ${data.successRows} nuevos, ${data.skippedRows} omitidos, ${data.errorRows} errores`);
+      setHistoricalFile(null);
       if (data.errors && data.errors.length > 0) {
         toast.info(`Revisa la página de Errores para más detalles`);
       }
@@ -235,6 +250,40 @@ export default function Settings() {
     }
   };
 
+  const handleUploadHistorical = async () => {
+    if (!historicalFile) {
+      toast.error("Por favor selecciona un archivo Excel con datos históricos");
+      return;
+    }
+    
+    try {
+      // Subir archivo al servidor
+      const formData = new FormData();
+      formData.append("file", historicalFile);
+      
+      const response = await fetch("/api/upload-historical", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      
+      if (!response.ok) {
+        throw new Error("Error al subir el archivo");
+      }
+      
+      const { filePath, fileName } = await response.json();
+      
+      // Procesar el archivo subido
+      uploadHistorical.mutate({ 
+        filePath, 
+        fileName,
+        downloadPhotos: downloadHistoricalPhotos 
+      });
+    } catch (error: any) {
+      toast.error(error.message || "Error al subir el archivo");
+    }
+  };
+
   const handleUploadJson = () => {
     if (!jsonData.trim()) {
       toast.error("Por favor ingresa datos JSON válidos");
@@ -347,6 +396,55 @@ export default function Settings() {
                 className="w-full"
               >
                 {uploadExcel.isPending ? "Procesando..." : "Cargar Excel"}
+              </Button>
+            </div>
+          </GlassCard>
+
+          {/* Carga de Datos Históricos */}
+          <GlassCard className="p-6 border-2 border-amber-200 bg-amber-50/30">
+            <div className="mb-4 flex items-center gap-2">
+              <FileSpreadsheet className="h-6 w-6 text-amber-600" />
+              <h2 className="text-2xl font-semibold text-amber-900">Datos Históricos</h2>
+            </div>
+
+            <p className="mb-4 text-sm text-amber-700">
+              Importa datos anteriores al sistema. Usa la columna <strong>'start'</strong> del Excel para obtener la fecha y hora exacta de cada registro.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="historicalFile">Archivo Excel con datos históricos (.xlsx)</Label>
+                <Input
+                  id="historicalFile"
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={(e) => setHistoricalFile(e.target.files?.[0] || null)}
+                />
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="downloadHistoricalPhotos"
+                  checked={downloadHistoricalPhotos}
+                  onChange={(e) => setDownloadHistoricalPhotos(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                <Label htmlFor="downloadHistoricalPhotos" className="text-sm">
+                  Descargar fotos (puede ser lento para muchos registros)
+                </Label>
+              </div>
+
+              <div className="rounded-lg bg-amber-100 p-3 text-sm text-amber-800">
+                <strong>⚠️ Importante:</strong> El archivo debe tener una columna <code className="bg-amber-200 px-1 rounded">start</code> con la fecha y hora en formato <code className="bg-amber-200 px-1 rounded">YYYY-MM-DD HH:MM:SS</code>
+              </div>
+
+              <Button 
+                onClick={handleUploadHistorical} 
+                disabled={uploadHistorical.isPending || !historicalFile}
+                className="w-full bg-amber-600 hover:bg-amber-700"
+              >
+                {uploadHistorical.isPending ? "Procesando datos históricos..." : "Importar Datos Históricos"}
               </Button>
             </div>
           </GlassCard>

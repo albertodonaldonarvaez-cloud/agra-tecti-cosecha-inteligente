@@ -60,6 +60,23 @@ async function startServer() {
     }
   });
   
+  // File upload endpoint for historical data (uses 'start' column for datetime)
+  app.post("/api/upload-historical", upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+      res.json({ 
+        success: true, 
+        filePath: req.file.path,
+        fileName: req.file.originalname,
+        isHistorical: true
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  
   // Image proxy for Kobo images
   const { proxyKoboImage } = await import("../imageProxy");
   app.get("/api/image-proxy", proxyKoboImage);
