@@ -101,29 +101,90 @@ function parseParcelCode(parcelString: string): { code: string; name: string; er
 }
 
 /**
- * Parsea la fecha/hora de la columna 'start' del Excel
- * Excel puede devolver un objeto Date o un string
+ * Convierte un Excel serial date a fecha UTC con hora de México (CST = UTC-6)
+ * 
+ * PROBLEMA: xlsx interpreta las fechas del Excel usando la zona horaria del servidor,
+ * lo cual causa que la hora se desplace dependiendo de dónde corra el servidor.
+ * 
+ * SOLUCIÓN: Leemos el archivo SIN cellDates para obtener el serial date numérico
+ * del Excel. La parte fraccionaria del serial date contiene la hora LOCAL del Excel
+ * (que es hora de México CST). Extraemos la hora manualmente y aplicamos el offset
+ * correcto (CST = UTC-6). Esto funciona independientemente de la TZ del servidor.
+ * 
+ * Ejemplo: serial 45954.35690972222
+ *   - Parte entera 45954 = 2025-10-24
+ *   - Parte fraccionaria 0.35691 = 08:33:57 (hora México CST)
+ *   - En UTC: 2025-10-24T14:33:57Z (08:33 + 6 horas)
  */
 function parseStartDateTime(startValue: Date | string | number): Date {
-  // Si es un número (Excel serial date)
+  // México zona Centro: CST = UTC-6 (ya no usa horario de verano desde 2023)
+  const MEXICO_CST_OFFSET_HOURS = 6;
+  
   if (typeof startValue === 'number') {
-    // Excel serial date: días desde 1900-01-01
-    const excelEpoch = new Date(1899, 11, 30); // Excel epoch
-    const date = new Date(excelEpoch.getTime() + startValue * 24 * 60 * 60 * 1000);
-    return date;
+    // Excel serial date - MÉTODO MÁS CONFIABLE
+    // La parte fraccionaria contiene la hora local del Excel (México CST)
+    const intPart = Math.floor(startValue);
+    const fracPart = startValue - intPart;
+    
+    // Convertir días a fecha (Excel epoch: 1899-12-30)
+    const excelEpoch = Date.UTC(1899, 11, 30); // 30 dic 1899 en UTC
+    const dayMs = intPart * 24 * 60 * 60 * 1000;
+    const baseDate = new Date(excelEpoch + dayMs);
+    
+    // Extraer hora de la parte fraccionaria
+    const totalSeconds = Math.round(fracPart * 24 * 60 * 60);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    
+    // Construir fecha UTC: hora México + offset = hora UTC
+    const utcDate = new Date(Date.UTC(
+      baseDate.getUTCFullYear(),
+      baseDate.getUTCMonth(),
+      baseDate.getUTCDate(),
+      hours + MEXICO_CST_OFFSET_HOURS,
+      minutes,
+      seconds
+    ));
+    
+    console.log(`   ⏰ Serial ${startValue} -> México: ${hours.toString().padStart(2,'0')}:${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')} CST -> UTC: ${utcDate.toISOString()}`);
+    return utcDate;
   }
   
-  // Si ya es un objeto Date
-  if (startValue instanceof Date) {
-    return startValue;
-  }
-  
-  // Si es un string, intentar parsearlo
   if (typeof startValue === 'string') {
-    const parsed = new Date(startValue);
-    if (!isNaN(parsed.getTime())) {
-      return parsed;
+    // String: "2025-10-24 08:33:57" o "2025-10-24"
+    const match = startValue.match(/(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}):(\d{2}))?/);
+    if (match) {
+      const year = parseInt(match[1]);
+      const month = parseInt(match[2]) - 1;
+      const day = parseInt(match[3]);
+      const hours = match[4] ? parseInt(match[4]) : 12;
+      const minutes = match[5] ? parseInt(match[5]) : 0;
+      const seconds = match[6] ? parseInt(match[6]) : 0;
+      
+      const utcDate = new Date(Date.UTC(year, month, day, hours + MEXICO_CST_OFFSET_HOURS, minutes, seconds));
+      console.log(`   ⏰ String "${startValue}" -> México: ${hours.toString().padStart(2,'0')}:${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')} CST -> UTC: ${utcDate.toISOString()}`);
+      return utcDate;
     }
+  }
+  
+  if (startValue instanceof Date && !isNaN(startValue.getTime())) {
+    // Si por alguna razón llega un Date (no debería con cellDates:false)
+    // Asumir que los componentes locales son la hora de México
+    const hours = startValue.getHours();
+    const minutes = startValue.getMinutes();
+    const seconds = startValue.getSeconds();
+    
+    const utcDate = new Date(Date.UTC(
+      startValue.getFullYear(),
+      startValue.getMonth(),
+      startValue.getDate(),
+      hours + MEXICO_CST_OFFSET_HOURS,
+      minutes,
+      seconds
+    ));
+    console.log(`   ⏰ Date fallback -> México: ${hours}:${minutes}:${seconds} CST -> UTC: ${utcDate.toISOString()}`);
+    return utcDate;
   }
   
   // Fallback: fecha actual
@@ -153,11 +214,14 @@ export async function processHistoricalExcelFile(
     throw new Error('Base de datos no disponible');
   }
 
-  // Leer el archivo Excel con opciones para preservar fechas
-  const workbook = XLSX.readFile(filePath, { cellDates: true });
+  // Leer el archivo Excel SIN cellDates para obtener serial dates numéricos
+  // IMPORTANTE: Con cellDates:false + raw:true, las fechas llegan como números
+  // (Excel serial date). La parte fraccionaria contiene la hora local del Excel.
+  // Esto nos permite extraer la hora exacta sin depender de la zona horaria del servidor.
+  const workbook = XLSX.readFile(filePath, { cellDates: false });
   const sheetName = workbook.SheetNames[0];
   const worksheet = workbook.Sheets[sheetName];
-  const data = XLSX.utils.sheet_to_json(worksheet, { raw: false, dateNF: 'yyyy-mm-dd hh:mm:ss' }) as HistoricalExcelRow[];
+  const data = XLSX.utils.sheet_to_json(worksheet, { raw: true }) as HistoricalExcelRow[];
 
   const totalRows = data.length;
 
