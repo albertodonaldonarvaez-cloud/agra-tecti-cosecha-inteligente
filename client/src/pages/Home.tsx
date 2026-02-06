@@ -23,17 +23,29 @@ function HomeContent() {
   const { user, loading } = useAuth();
   const [selectedBox, setSelectedBox] = useState<any>(null);
   const [showImageModal, setShowImageModal] = useState(false);
-  const [selectedMonth, setSelectedMonth] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  });
+  const [selectedMonth, setSelectedMonth] = useState('all');
   
   const { data: boxes } = trpc.boxes.list.useQuery(undefined, {
     enabled: !!user,
   });
 
-  // Calcular rango de fechas del mes seleccionado
-  const monthDateRange = useMemo(() => {
+  // Calcular rango de fechas de toda la temporada de cosecha
+  const harvestDateRange = useMemo(() => {
+    if (!boxes || boxes.length === 0) return null;
+    const dates = boxes.map(b => new Date(b.submissionTime).getTime());
+    const minDate = new Date(Math.min(...dates));
+    const maxDate = new Date(Math.max(...dates));
+    return {
+      startDate: minDate.toISOString().split('T')[0],
+      endDate: maxDate.toISOString().split('T')[0],
+    };
+  }, [boxes]);
+
+  // Calcular rango de fechas según selección (toda la temporada o mes específico)
+  const dateRange = useMemo(() => {
+    if (selectedMonth === 'all') {
+      return harvestDateRange;
+    }
     const [year, month] = selectedMonth.split('-').map(Number);
     const startDate = new Date(year, month - 1, 1);
     const endDate = new Date(year, month, 0);
@@ -41,17 +53,39 @@ function HomeContent() {
       startDate: startDate.toISOString().split('T')[0],
       endDate: endDate.toISOString().split('T')[0],
     };
-  }, [selectedMonth]);
+  }, [selectedMonth, harvestDateRange]);
+
+  // Obtener los días que tienen cosecha (para filtrar la tabla)
+  const harvestDays = useMemo(() => {
+    if (!boxes || boxes.length === 0) return new Set<string>();
+    const days = new Set<string>();
+    boxes.forEach(b => {
+      const dateKey = new Date(b.submissionTime).toISOString().split('T')[0];
+      days.add(dateKey);
+    });
+    return days;
+  }, [boxes]);
+
+  // Obtener meses disponibles con datos de cosecha
+  const availableMonths = useMemo(() => {
+    if (!boxes || boxes.length === 0) return [];
+    const months = new Set<string>();
+    boxes.forEach(b => {
+      const d = new Date(b.submissionTime);
+      months.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    });
+    return Array.from(months).sort().reverse();
+  }, [boxes]);
 
   // Obtener configuración de ubicación primero
   const { data: locationConfig } = trpc.locationConfig.get.useQuery(undefined, {
     enabled: !!user,
   });
 
-  // Obtener datos meteorológicos del mes (solo si hay ubicación configurada)
+  // Obtener datos meteorológicos del rango seleccionado (solo si hay ubicación y rango)
   const { data: weatherData, isLoading: weatherLoading } = trpc.weather.getForDateRange.useQuery(
-    monthDateRange,
-    { enabled: !!user && !!locationConfig }
+    dateRange!,
+    { enabled: !!user && !!locationConfig && !!dateRange }
   );
 
 
@@ -103,21 +137,21 @@ function HomeContent() {
   const chartData = useMemo(() => {
     if (!boxes || boxes.length === 0) return [];
     
-    // Calcular rango de fechas del mes seleccionado
-    const [year, month] = selectedMonth.split('-').map(Number);
-    const monthStart = new Date(year, month - 1, 1);
-    const monthEnd = new Date(year, month, 0);
-    
     // Usar un Map con fecha completa como clave para ordenar correctamente
     const dateMap = new Map<string, { fullDate: Date; dateKey: string; date: string; primera: number; segunda: number; desperdicio: number }>();
     
     boxes.forEach(box => {
       const fullDate = new Date(box.submissionTime);
-      
-      // Filtrar solo cajas del mes seleccionado
-      if (fullDate < monthStart || fullDate > monthEnd) return;
-      
       const dateKey = fullDate.toISOString().split('T')[0]; // YYYY-MM-DD
+      
+      // Si se seleccionó un mes específico, filtrar
+      if (selectedMonth !== 'all') {
+        const [year, month] = selectedMonth.split('-').map(Number);
+        const monthStart = new Date(year, month - 1, 1);
+        const monthEnd = new Date(year, month, 0, 23, 59, 59);
+        if (fullDate < monthStart || fullDate > monthEnd) return;
+      }
+      
       const displayDate = fullDate.toLocaleDateString('es-MX', { month: 'short', day: 'numeric' });
       
       if (!dateMap.has(dateKey)) {
@@ -131,7 +165,7 @@ function HomeContent() {
       else entry.primera += weightKg;
     });
     
-    // Ordenar por fecha (mostrar todos los días)
+    // Ordenar por fecha
     const sortedEntries = Array.from(dateMap.values())
       .sort((a, b) => a.fullDate.getTime() - b.fullDate.getTime());
     
@@ -289,7 +323,12 @@ function HomeContent() {
             {chartData.length > 0 && (
                <GlassCard className="p-6">
                 <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <h3 className="text-lg font-semibold text-green-900">Evolución de Calidad (Kilogramos)</h3>
+                  <h3 className="text-lg font-semibold text-green-900">
+                    Evolución de Calidad (Kilogramos)
+                    <span className="ml-2 text-sm font-normal text-green-600">
+                      {chartData.length} días de cosecha
+                    </span>
+                  </h3>
                   <div className="flex items-center gap-2">
                     <CalendarIcon className="h-5 w-5 text-green-600" />
                     <select
@@ -297,12 +336,12 @@ function HomeContent() {
                       onChange={(e) => setSelectedMonth(e.target.value)}
                       className="rounded-lg border border-green-200 bg-white px-4 py-2 text-sm text-green-900 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
                     >
-                      {Array.from({ length: 12 }, (_, i) => {
-                        const date = new Date();
-                        date.setMonth(date.getMonth() - i);
-                        const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                      <option value="all">📅 Toda la temporada</option>
+                      {availableMonths.map(m => {
+                        const [year, month] = m.split('-').map(Number);
+                        const date = new Date(year, month - 1);
                         const label = date.toLocaleDateString('es-MX', { year: 'numeric', month: 'long' });
-                        return <option key={value} value={value}>{label}</option>;
+                        return <option key={m} value={m}>{label}</option>;
                       })}
                     </select>
                   </div>
@@ -311,7 +350,7 @@ function HomeContent() {
                   <div style={{ minWidth: chartData.length > 7 ? `${chartData.length * 60}px` : '100%', height: '300px' }}>
                     <ResponsiveContainer width="100%" height="100%">
                   <LineChart 
-                    key={`chart-${selectedMonth}-${weatherData?.length || 0}`}
+                    key={`chart-${selectedMonth}-${weatherData?.length || 0}-${chartData.length}`}
                     data={chartData}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="#d1fae5" />
@@ -374,7 +413,7 @@ function HomeContent() {
                 <Cloud className="h-8 w-8 text-green-600" />
                 <div>
                   <h2 className="text-2xl font-semibold text-green-900">Temperatura y Cosecha - Datos Históricos</h2>
-                  <p className="text-sm text-green-600">{locationConfig.locationName}</p>
+                  <p className="text-sm text-green-600">{locationConfig.locationName} • Solo días con cosecha</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -384,12 +423,12 @@ function HomeContent() {
                   onChange={(e) => setSelectedMonth(e.target.value)}
                   className="rounded-lg border border-green-200 bg-white px-4 py-2 text-green-900 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
                 >
-                  {Array.from({ length: 12 }, (_, i) => {
-                    const date = new Date();
-                    date.setMonth(date.getMonth() - i);
-                    const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                  <option value="all">📅 Toda la temporada</option>
+                  {availableMonths.map(m => {
+                    const [year, month] = m.split('-').map(Number);
+                    const date = new Date(year, month - 1);
                     const label = date.toLocaleDateString('es-MX', { year: 'numeric', month: 'long' });
-                    return <option key={value} value={value}>{label}</option>;
+                    return <option key={m} value={m}>{label}</option>;
                   })}
                 </select>
               </div>
@@ -402,6 +441,7 @@ function HomeContent() {
                 <thead>
                   <tr className="border-b border-green-200">
                     <th className="pb-2 text-left text-sm font-semibold text-green-900">Fecha</th>
+                    <th className="pb-2 text-right text-sm font-semibold text-green-900">Cajas</th>
                     <th className="pb-2 text-right text-sm font-semibold text-green-900">Peso Total (kg)</th>
                     <th className="pb-2 text-right text-sm font-semibold text-green-900">1ra Calidad (kg)</th>
                     <th className="pb-2 text-right text-sm font-semibold text-green-900">Temp. Máx (°C)</th>
@@ -410,8 +450,10 @@ function HomeContent() {
                   </tr>
                 </thead>
                 <tbody>
-                  {/* Datos históricos del mes */}
-                  {weatherData && weatherData.map((weather: any) => {
+                  {/* Datos históricos - Solo días con cosecha */}
+                  {weatherData && weatherData
+                    .filter((weather: any) => harvestDays.has(weather.date))
+                    .map((weather: any) => {
                     const dayBoxes = boxes?.filter(b => {
                       const boxDate = new Date(b.submissionTime).toISOString().split('T')[0];
                       return boxDate === weather.date;
@@ -420,23 +462,29 @@ function HomeContent() {
                     const firstQualityWeight = dayBoxes
                       .filter(b => b.harvesterId !== 98 && b.harvesterId !== 99)
                       .reduce((sum, b) => sum + b.weight, 0) / 1000;
+                    const totalBoxes = dayBoxes.length;
                     
                     return (
-                      <tr key={weather.date} className="border-b border-green-100">
-                        <td className="py-3 text-green-900">{weather.date}</td>
+                      <tr key={weather.date} className="border-b border-green-100 hover:bg-green-50/50">
+                        <td className="py-3 text-green-900">
+                          {new Date(weather.date + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' })}
+                        </td>
+                        <td className="py-3 text-right text-xs text-green-600">
+                          {totalBoxes}
+                        </td>
                         <td className="py-3 text-right font-semibold text-green-900">
-                          {totalWeight > 0 ? totalWeight.toFixed(2) : '-'}
+                          {totalWeight.toFixed(2)}
                         </td>
                         <td className="py-3 text-right text-green-900">
-                          {firstQualityWeight > 0 ? firstQualityWeight.toFixed(2) : '-'}
+                          {firstQualityWeight.toFixed(2)}
                         </td>
-                        <td className="py-3 text-right text-green-700">
+                        <td className="py-3 text-right text-red-600">
                           {weather.temperatureMax.toFixed(1)}
                         </td>
-                        <td className="py-3 text-right text-blue-700">
+                        <td className="py-3 text-right text-blue-600">
                           {weather.temperatureMin.toFixed(1)}
                         </td>
-                        <td className="py-3 text-right text-orange-700">
+                        <td className="py-3 text-right text-orange-600">
                           {weather.temperatureMean.toFixed(1)}
                         </td>
                       </tr>
@@ -445,7 +493,7 @@ function HomeContent() {
 
                   {weatherLoading && (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-green-600">
+                      <td colSpan={7} className="py-8 text-center text-green-600">
                         Cargando datos meteorológicos...
                       </td>
                     </tr>
