@@ -56,6 +56,29 @@ export const appRouter = router({
       }),
   }),
 
+  // Sincronización automática
+  autoSync: router({
+    status: adminProcedure.query(async () => {
+      const { getAutoSyncStatus } = await import("./autoSync");
+      return getAutoSyncStatus();
+    }),
+
+    trigger: adminProcedure.mutation(async () => {
+      const { triggerManualSync } = await import("./autoSync");
+      return await triggerManualSync();
+    }),
+
+    updateHours: adminProcedure
+      .input(z.object({ hours: z.array(z.number().min(0).max(23)) }))
+      .mutation(async ({ input }) => {
+        const { updateSyncHours, startAutoSync } = await import("./autoSync");
+        updateSyncHours(input.hours);
+        // Reiniciar el scheduler con los nuevos horarios
+        startAutoSync(input.hours);
+        return { success: true, hours: input.hours };
+      }),
+  }),
+
   boxes: router({
     list: protectedProcedure.query(async () => {
       return await db.getAllBoxes();

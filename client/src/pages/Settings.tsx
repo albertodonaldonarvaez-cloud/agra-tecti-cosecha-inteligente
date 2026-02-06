@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save } from "lucide-react";
+import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save, Clock, Timer, CheckCircle, XCircle, Zap } from "lucide-react";
 import LocationMapPicker from "@/components/LocationMapPicker";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -486,6 +486,9 @@ export default function Settings() {
             </Button>
           </GlassCard>
 
+          {/* Sincronización Automática */}
+          <AutoSyncSection />
+
           {/* Carga Manual */}
           <GlassCard className="p-6">
             <div className="mb-4 flex items-center gap-2">
@@ -633,5 +636,202 @@ export default function Settings() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Componente de Sincronización Automática
+function AutoSyncSection() {
+  const { data: syncStatus, refetch } = trpc.autoSync.status.useQuery(undefined, {
+    refetchInterval: 30000, // Actualizar cada 30 segundos
+  });
+
+  const triggerSync = trpc.autoSync.trigger.useMutation({
+    onSuccess: (data: any) => {
+      if (data.status === "success") {
+        toast.success(data.message);
+      } else {
+        toast.error(data.message);
+      }
+      refetch();
+    },
+    onError: (error: any) => {
+      toast.error(error.message);
+    },
+  });
+
+  const updateHours = trpc.autoSync.updateHours.useMutation({
+    onSuccess: () => {
+      toast.success("Horarios actualizados correctamente");
+      refetch();
+    },
+    onError: (error: any) => {
+      toast.error(error.message);
+    },
+  });
+
+  const [hour1, setHour1] = useState(7);
+  const [hour2, setHour2] = useState(15);
+
+  useEffect(() => {
+    if (syncStatus?.syncHours) {
+      const hours = syncStatus.syncHours.map((h: string) => parseInt(h));
+      if (hours.length >= 1) setHour1(hours[0]);
+      if (hours.length >= 2) setHour2(hours[1]);
+    }
+  }, [syncStatus]);
+
+  const handleUpdateHours = () => {
+    const hours = [hour1, hour2].sort((a, b) => a - b);
+    updateHours.mutate({ hours });
+  };
+
+  const formatDate = (dateStr: string | null) => {
+    if (!dateStr) return "Nunca";
+    const date = new Date(dateStr);
+    return date.toLocaleString("es-MX", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  return (
+    <GlassCard className="p-6 border-2 border-blue-200 bg-blue-50/30">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Timer className="h-6 w-6 text-blue-600" />
+          <h2 className="text-2xl font-semibold text-blue-900">Sincronización Automática</h2>
+        </div>
+        {syncStatus?.isActive && (
+          <span className="flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
+            <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+            Activo
+          </span>
+        )}
+      </div>
+
+      <p className="mb-4 text-sm text-blue-700">
+        La sincronización automática con KoboToolbox se ejecuta en los horarios configurados sin necesidad de intervención manual.
+      </p>
+
+      {/* Estado actual */}
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="rounded-lg bg-white/60 p-3 text-center">
+          <p className="text-xs text-gray-500">Estado</p>
+          <p className="text-sm font-semibold text-green-700">
+            {syncStatus?.isRunning ? "⏳ Sincronizando..." : syncStatus?.isActive ? "✅ Activo" : "⏸️ Inactivo"}
+          </p>
+        </div>
+        <div className="rounded-lg bg-white/60 p-3 text-center">
+          <p className="text-xs text-gray-500">Última ejecución</p>
+          <p className="text-sm font-semibold text-gray-700">
+            {formatDate(syncStatus?.lastRun || null)}
+          </p>
+        </div>
+        <div className="rounded-lg bg-white/60 p-3 text-center">
+          <p className="text-xs text-gray-500">Próxima ejecución</p>
+          <p className="text-sm font-semibold text-blue-700">
+            {formatDate(syncStatus?.nextRun || null)}
+          </p>
+        </div>
+      </div>
+
+      {/* Configuración de horarios */}
+      <div className="mb-4 space-y-3">
+        <Label className="text-blue-800 font-medium">Horarios de sincronización (hora del servidor)</Label>
+        <div className="flex items-center gap-3">
+          <div className="flex-1">
+            <Label htmlFor="hour1" className="text-xs text-gray-500">Mañana</Label>
+            <select
+              id="hour1"
+              value={hour1}
+              onChange={(e) => setHour1(parseInt(e.target.value))}
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+            >
+              {Array.from({ length: 24 }, (_, i) => (
+                <option key={i} value={i}>
+                  {String(i).padStart(2, "0")}:00
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex-1">
+            <Label htmlFor="hour2" className="text-xs text-gray-500">Tarde</Label>
+            <select
+              id="hour2"
+              value={hour2}
+              onChange={(e) => setHour2(parseInt(e.target.value))}
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+            >
+              {Array.from({ length: 24 }, (_, i) => (
+                <option key={i} value={i}>
+                  {String(i).padStart(2, "0")}:00
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="pt-4">
+            <Button
+              onClick={handleUpdateHours}
+              disabled={updateHours.isPending}
+              size="sm"
+              variant="outline"
+              className="border-blue-300 text-blue-700 hover:bg-blue-100"
+            >
+              <Clock className="mr-1 h-4 w-4" />
+              {updateHours.isPending ? "..." : "Guardar"}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Botón de sincronización manual */}
+      <Button
+        onClick={() => triggerSync.mutate()}
+        disabled={triggerSync.isPending || syncStatus?.isRunning}
+        className="w-full bg-blue-600 hover:bg-blue-700"
+      >
+        <Zap className="mr-2 h-4 w-4" />
+        {triggerSync.isPending || syncStatus?.isRunning
+          ? "Sincronizando..."
+          : "Ejecutar Sincronización Ahora"}
+      </Button>
+
+      {/* Historial de sincronizaciones */}
+      {syncStatus?.history && syncStatus.history.length > 0 && (
+        <div className="mt-4">
+          <Label className="text-blue-800 font-medium">Historial reciente</Label>
+          <div className="mt-2 max-h-48 overflow-y-auto rounded-lg border border-blue-200 bg-white/60">
+            {syncStatus.history.map((log: any, i: number) => (
+              <div
+                key={i}
+                className={`flex items-start gap-2 border-b border-blue-100 px-3 py-2 text-xs last:border-0 ${
+                  log.status === "success" ? "text-green-700" : "text-red-700"
+                }`}
+              >
+                {log.status === "success" ? (
+                  <CheckCircle className="mt-0.5 h-3 w-3 flex-shrink-0" />
+                ) : (
+                  <XCircle className="mt-0.5 h-3 w-3 flex-shrink-0" />
+                )}
+                <div className="flex-1">
+                  <p>{log.message}</p>
+                  <p className="text-gray-400">
+                    {new Date(log.timestamp).toLocaleString("es-MX", {
+                      day: "numeric",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </GlassCard>
   );
 }

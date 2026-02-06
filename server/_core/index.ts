@@ -108,6 +108,14 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+    
+    // Iniciar sincronización automática de KoboToolbox
+    // Se ejecuta 2 veces al día: 7:00 AM y 3:00 PM hora del servidor
+    import("../autoSync").then(({ startAutoSync }) => {
+      startAutoSync([7, 15]);
+    }).catch((err) => {
+      console.error("Error al iniciar AutoSync:", err);
+    });
   });
 }
 
