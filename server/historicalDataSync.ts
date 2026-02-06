@@ -213,8 +213,24 @@ export async function processHistoricalExcelFile(
         submissionTime = new Date();
       }
 
-      // Verificar si existe un duplicado EXACTO (mismo código + misma fecha/hora)
+      // === PROTECCIÓN DE CAJAS EDITADAS MANUALMENTE ===
       const { and } = await import("drizzle-orm");
+      
+      // 1. Buscar por koboId
+      const koboId = row['_id'] || null;
+      if (koboId) {
+        const existingByKoboId = await db.select()
+          .from(boxes)
+          .where(eq(boxes.koboId, koboId))
+          .limit(1);
+        
+        if (existingByKoboId.length > 0) {
+          skippedRows++;
+          continue;
+        }
+      }
+      
+      // 2. Buscar por código + fecha/hora exacta
       const existingExactDuplicate = await db.select()
         .from(boxes)
         .where(
@@ -226,7 +242,23 @@ export async function processHistoricalExcelFile(
         .limit(1);
       
       if (existingExactDuplicate.length > 0) {
-        // Duplicado exacto - saltar
+        skippedRows++;
+        continue;
+      }
+      
+      // 3. Buscar por originalBoxCode + fecha/hora (caja editada que cambió de código)
+      const existingEditedBox = await db.select()
+        .from(boxes)
+        .where(
+          and(
+            eq(boxes.originalBoxCode, boxCode),
+            eq(boxes.submissionTime, submissionTime),
+            eq(boxes.manuallyEdited, true)
+          )
+        )
+        .limit(1);
+      
+      if (existingEditedBox.length > 0) {
         skippedRows++;
         continue;
       }

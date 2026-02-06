@@ -603,13 +603,20 @@ export async function getArchivedBoxes(params: {
   };
 }
 
-// Actualizar código de caja
+// Actualizar código de caja (marca como editada manualmente)
 export async function updateBoxCode(id: number, newBoxCode: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   
+  // Obtener código original antes de editar
+  const currentBox = await db.select().from(boxes).where(eq(boxes.id, id)).limit(1);
+  const originalCode = currentBox[0]?.originalBoxCode || currentBox[0]?.boxCode || null;
+  
   await db.update(boxes).set({ 
     boxCode: newBoxCode,
+    manuallyEdited: true,
+    editedAt: new Date(),
+    originalBoxCode: originalCode,
     updatedAt: new Date() 
   }).where(eq(boxes.id, id));
 }

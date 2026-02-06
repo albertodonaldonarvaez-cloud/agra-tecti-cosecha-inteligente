@@ -74,6 +74,9 @@ export const boxes = mysqlTable("boxes", {
   latitude: varchar("latitude", { length: 64 }),
   longitude: varchar("longitude", { length: 64 }),
   submissionTime: timestamp("submissionTime").notNull(),
+  manuallyEdited: boolean("manuallyEdited").default(false).notNull(), // Protege la caja de ser sobrescrita en sincronizaciones
+  editedAt: timestamp("editedAt"), // Fecha de última edición manual
+  originalBoxCode: varchar("originalBoxCode", { length: 64 }), // Código original antes de editar (para rastreo)
   archived: boolean("archived").default(false).notNull(), // Cajas archivadas no aparecen en dashboard
   archivedAt: timestamp("archivedAt"), // Fecha de archivado
   createdAt: timestamp("createdAt").defaultNow().notNull(),

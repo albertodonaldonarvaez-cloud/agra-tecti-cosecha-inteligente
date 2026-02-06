@@ -245,6 +245,10 @@ export const appRouter = router({
         const database = await getDb();
         if (!database) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available" });
         
+        // Obtener la caja actual para guardar el código original si aún no se ha editado
+        const currentBox = await database.select().from(boxes).where(eq(boxes.id, input.id)).limit(1);
+        const originalCode = currentBox[0]?.originalBoxCode || currentBox[0]?.boxCode || null;
+        
         await database.update(boxes)
           .set({
             boxCode: input.boxCode,
@@ -253,6 +257,9 @@ export const appRouter = router({
             parcelName: input.parcelName,
             weight: input.weight,
             submissionTime: new Date(input.submissionTime),
+            manuallyEdited: true,
+            editedAt: new Date(),
+            originalBoxCode: originalCode,
             updatedAt: new Date(),
           })
           .where(eq(boxes.id, input.id));
@@ -277,6 +284,8 @@ export const appRouter = router({
           .set({
             parcelCode: input.parcelCode,
             parcelName: input.parcelName,
+            manuallyEdited: true,
+            editedAt: new Date(),
             updatedAt: new Date(),
           })
           .where(inArray(boxes.id, input.boxIds));

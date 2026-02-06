@@ -166,9 +166,39 @@ export async function processExcelFile(
         submissionTime = new Date();
       }
 
-      // Verificar si existe un duplicado EXACTO (mismo código + misma fecha/hora)
-      // Solo bloqueamos si coincide código Y fecha/hora exacta (para evitar re-importar el mismo registro)
+      // === PROTECCIÓN DE CAJAS EDITADAS MANUALMENTE ===
       const { and } = await import("drizzle-orm");
+      
+      // 1. Buscar por koboId (identificador único de KoboToolbox)
+      const koboId = row['_id'] || row['ID'] || null;
+      if (koboId) {
+        const existingByKoboId = await db.select()
+          .from(boxes)
+          .where(eq(boxes.koboId, koboId))
+          .limit(1);
+        
+        if (existingByKoboId.length > 0) {
+          if (existingByKoboId[0].manuallyEdited) {
+            errors.push({
+              type: 'duplicate_box',
+              boxCode,
+              message: `Omitido (editado manualmente como ${existingByKoboId[0].boxCode}): koboId ${koboId}`,
+              rowData: row
+            });
+          } else {
+            errors.push({
+              type: 'duplicate_box',
+              boxCode,
+              message: `Ya importado (koboId: ${koboId}): ${boxCode}`,
+              rowData: row
+            });
+          }
+          errorRows++;
+          continue;
+        }
+      }
+      
+      // 2. Buscar por código + fecha/hora exacta
       const existingExactDuplicate = await db.select()
         .from(boxes)
         .where(
@@ -180,7 +210,6 @@ export async function processExcelFile(
         .limit(1);
       
       if (existingExactDuplicate.length > 0) {
-        // Duplicado exacto (mismo código Y misma fecha/hora) - este es el mismo registro, saltar
         errors.push({
           type: 'duplicate_box',
           boxCode,
@@ -190,8 +219,31 @@ export async function processExcelFile(
         errorRows++;
         continue;
       }
+      
+      // 3. Buscar por originalBoxCode + fecha/hora (caja editada que cambió de código)
+      const existingEditedBox = await db.select()
+        .from(boxes)
+        .where(
+          and(
+            eq(boxes.originalBoxCode, boxCode),
+            eq(boxes.submissionTime, submissionTime),
+            eq(boxes.manuallyEdited, true)
+          )
+        )
+        .limit(1);
+      
+      if (existingEditedBox.length > 0) {
+        errors.push({
+          type: 'duplicate_box',
+          boxCode,
+          message: `Omitido (ya editado como ${existingEditedBox[0].boxCode}): ${boxCode}`,
+          rowData: row
+        });
+        errorRows++;
+        continue;
+      }
 
-      // NOTA: Si el código existe pero con diferente fecha/hora, SE PERMITE LA INSERCIÓN
+      // NOTA: Si el código existe pero con diferente fecha/hora y no fue editado, SE PERMITE LA INSERCIÓN
       // El usuario decidirá manualmente en el Editor de Cajas si es un duplicado real o una caja diferente
 
       // Parsear y validar parcela

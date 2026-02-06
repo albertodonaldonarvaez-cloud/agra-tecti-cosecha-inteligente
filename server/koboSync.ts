@@ -131,9 +131,29 @@ export async function processKoboData(data: KoboData) {
           ? new Date(result._submission_time) 
           : new Date();
 
-      // Verificar si existe un duplicado EXACTO (mismo código + misma fecha/hora)
-      // Solo bloqueamos si coincide código Y fecha/hora exacta (para evitar re-importar el mismo registro)
-      const { and } = await import("drizzle-orm");
+      // === PROTECCIÓN DE CAJAS EDITADAS MANUALMENTE ===
+      const { and, or } = await import("drizzle-orm");
+      
+      // 1. Buscar por koboId (identificador único de KoboToolbox)
+      if (koboId) {
+        const existingByKoboId = await db.select()
+          .from(boxes)
+          .where(eq(boxes.koboId, koboId))
+          .limit(1);
+        
+        if (existingByKoboId.length > 0) {
+          // Ya existe este registro de Kobo - NO re-insertar
+          // Si fue editado manualmente, respetar la edición
+          if (existingByKoboId[0].manuallyEdited) {
+            errors.push(`Omitido (editado manualmente): ${existingByKoboId[0].boxCode} (original: ${existingByKoboId[0].originalBoxCode || boxCode})`);
+          } else {
+            errors.push(`Ya importado (koboId: ${koboId}): ${boxCode}`);
+          }
+          continue;
+        }
+      }
+      
+      // 2. Buscar por código + fecha/hora exacta (para registros sin koboId)
       const existingExactDuplicate = await db.select()
         .from(boxes)
         .where(
@@ -145,12 +165,29 @@ export async function processKoboData(data: KoboData) {
         .limit(1);
       
       if (existingExactDuplicate.length > 0) {
-        // Duplicado exacto (mismo código Y misma fecha/hora) - este es el mismo registro, saltar
         errors.push(`Registro duplicado exacto (ya importado): ${boxCode} del ${submissionTime.toISOString()}`);
-        continue; // No insertar, ya existe este registro exacto
+        continue;
+      }
+      
+      // 3. Buscar por originalBoxCode + fecha/hora (caja que fue editada y cambió de código)
+      const existingEditedBox = await db.select()
+        .from(boxes)
+        .where(
+          and(
+            eq(boxes.originalBoxCode, boxCode),
+            eq(boxes.submissionTime, submissionTime),
+            eq(boxes.manuallyEdited, true)
+          )
+        )
+        .limit(1);
+      
+      if (existingEditedBox.length > 0) {
+        // Esta caja ya fue importada y editada manualmente - NO re-insertar
+        errors.push(`Omitido (ya editado como ${existingEditedBox[0].boxCode}): ${boxCode} del ${submissionTime.toISOString()}`);
+        continue;
       }
 
-      // NOTA: Si el código existe pero con diferente fecha/hora, SE PERMITE LA INSERCIÓN
+      // NOTA: Si el código existe pero con diferente fecha/hora y no fue editado, SE PERMITE LA INSERCIÓN
       // El usuario decidirá manualmente en el Editor de Cajas si es un duplicado real o una caja diferente
 
       // Insertar caja (sin onDuplicateKeyUpdate)
