@@ -620,3 +620,134 @@ export async function updateBoxCode(id: number, newBoxCode: string) {
     updatedAt: new Date() 
   }).where(eq(boxes.id, id));
 }
+
+
+// ==========================================
+// ESTADÍSTICAS AGREGADAS (para Dashboard optimizado)
+// ==========================================
+
+// Estadísticas generales: totales, pesos, calidades
+export async function getDashboardStats() {
+  const db = await getDb();
+  if (!db) return null;
+  
+  const { sql } = await import("drizzle-orm");
+  
+  const result = await db.execute(sql`
+    SELECT 
+      COUNT(*) as total,
+      SUM(weight) as totalWeight,
+      COUNT(CASE WHEN harvesterId NOT IN (98, 99) THEN 1 END) as firstQuality,
+      COUNT(CASE WHEN harvesterId = 98 THEN 1 END) as secondQuality,
+      COUNT(CASE WHEN harvesterId = 99 THEN 1 END) as waste,
+      SUM(CASE WHEN harvesterId NOT IN (98, 99) THEN weight ELSE 0 END) as firstQualityWeight,
+      SUM(CASE WHEN harvesterId = 98 THEN weight ELSE 0 END) as secondQualityWeight,
+      SUM(CASE WHEN harvesterId = 99 THEN weight ELSE 0 END) as wasteWeight,
+      MIN(submissionTime) as firstDate,
+      MAX(submissionTime) as lastDate
+    FROM boxes 
+    WHERE archived = 0
+  `);
+  
+  const row = (result[0] as unknown as any[])[0];
+  if (!row || row.total === 0) return null;
+  
+  const total = Number(row.total);
+  return {
+    total,
+    totalWeight: Number(row.totalWeight) / 1000,
+    firstQuality: Number(row.firstQuality),
+    secondQuality: Number(row.secondQuality),
+    waste: Number(row.waste),
+    firstQualityWeight: Number(row.firstQualityWeight) / 1000,
+    secondQualityWeight: Number(row.secondQualityWeight) / 1000,
+    wasteWeight: Number(row.wasteWeight) / 1000,
+    firstQualityPercent: total > 0 ? Number((Number(row.firstQuality) / total * 100).toFixed(1)) : 0,
+    secondQualityPercent: total > 0 ? Number((Number(row.secondQuality) / total * 100).toFixed(1)) : 0,
+    wastePercent: total > 0 ? Number((Number(row.waste) / total * 100).toFixed(1)) : 0,
+    firstDate: row.firstDate ? new Date(row.firstDate).toISOString().split('T')[0] : null,
+    lastDate: row.lastDate ? new Date(row.lastDate).toISOString().split('T')[0] : null,
+  };
+}
+
+// Datos diarios agregados para gráfica de evolución (GROUP BY fecha)
+export async function getDailyChartData(month?: string) {
+  const db = await getDb();
+  if (!db) return [];
+  
+  const { sql } = await import("drizzle-orm");
+  
+  let dateFilter = sql``;
+  if (month && month !== 'all') {
+    const [year, m] = month.split('-').map(Number);
+    const startDate = `${year}-${String(m).padStart(2, '0')}-01`;
+    const endDate = `${year}-${String(m).padStart(2, '0')}-31`;
+    dateFilter = sql` AND DATE(submissionTime) >= ${startDate} AND DATE(submissionTime) <= ${endDate}`;
+  }
+  
+  const result = await db.execute(sql`
+    SELECT 
+      DATE(submissionTime) as date,
+      COUNT(*) as totalBoxes,
+      SUM(CASE WHEN harvesterId NOT IN (98, 99) THEN weight ELSE 0 END) / 1000 as primera,
+      SUM(CASE WHEN harvesterId = 98 THEN weight ELSE 0 END) / 1000 as segunda,
+      SUM(CASE WHEN harvesterId = 99 THEN weight ELSE 0 END) / 1000 as desperdicio,
+      SUM(weight) / 1000 as totalWeight,
+      SUM(CASE WHEN harvesterId NOT IN (98, 99) THEN weight ELSE 0 END) / 1000 as firstQualityWeight
+    FROM boxes 
+    WHERE archived = 0 ${dateFilter}
+    GROUP BY DATE(submissionTime)
+    ORDER BY DATE(submissionTime) ASC
+  `);
+  
+  return (result[0] as unknown as any[]).map(row => ({
+    date: row.date instanceof Date ? row.date.toISOString().split('T')[0] : String(row.date),
+    totalBoxes: Number(row.totalBoxes),
+    primera: Number(Number(row.primera).toFixed(2)),
+    segunda: Number(Number(row.segunda).toFixed(2)),
+    desperdicio: Number(Number(row.desperdicio).toFixed(2)),
+    totalWeight: Number(Number(row.totalWeight).toFixed(2)),
+    firstQualityWeight: Number(Number(row.firstQualityWeight).toFixed(2)),
+  }));
+}
+
+// Obtener meses disponibles con datos de cosecha
+export async function getAvailableMonths() {
+  const db = await getDb();
+  if (!db) return [];
+  
+  const { sql } = await import("drizzle-orm");
+  
+  const result = await db.execute(sql`
+    SELECT DISTINCT DATE_FORMAT(submissionTime, '%Y-%m') as month
+    FROM boxes 
+    WHERE archived = 0
+    ORDER BY month DESC
+  `);
+  
+  return (result[0] as unknown as any[]).map(row => String(row.month));
+}
+
+// Obtener últimas N cajas con fotos (para el carrusel de imágenes)
+export async function getRecentBoxesWithPhotos(limit: number = 5) {
+  const db = await getDb();
+  if (!db) return [];
+  
+  const { desc, eq, and, isNotNull } = await import("drizzle-orm");
+  
+  return await db.select({
+    id: boxes.id,
+    boxCode: boxes.boxCode,
+    harvesterId: boxes.harvesterId,
+    parcelCode: boxes.parcelCode,
+    parcelName: boxes.parcelName,
+    weight: boxes.weight,
+    photoUrl: boxes.photoUrl,
+    photoLargeUrl: boxes.photoLargeUrl,
+    submissionTime: boxes.submissionTime,
+  })
+    .from(boxes)
+    .where(and(eq(boxes.archived, false), isNotNull(boxes.photoUrl)))
+    .orderBy(desc(boxes.submissionTime))
+    .limit(limit);
+}

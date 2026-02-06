@@ -2,12 +2,11 @@ import { Loading } from "@/components/Loading";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { GlassCard } from "@/components/GlassCard";
 import { ProtectedPage } from "@/components/ProtectedPage";
-import { Button } from "@/components/ui/button";
 import { getProxiedImageUrl } from "@/lib/imageProxy";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Package, TrendingUp, AlertCircle, CheckCircle, Image as ImageIcon, X, Cloud, Calendar as CalendarIcon } from "lucide-react";
+import { Package, TrendingUp, CheckCircle, Cloud, Calendar as CalendarIcon, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
@@ -25,26 +24,51 @@ function HomeContent() {
   const [showImageModal, setShowImageModal] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState('all');
   
-  const { data: boxes } = trpc.boxes.list.useQuery(undefined, {
+  // ====== OPTIMIZACIÓN: Usar endpoints agregados en lugar de descargar todas las cajas ======
+  
+  // 1. Estadísticas agregadas (SUM, COUNT en el servidor)
+  const { data: stats, isLoading: statsLoading } = trpc.boxes.dashboardStats.useQuery(undefined, {
     enabled: !!user,
+    staleTime: 2 * 60 * 1000, // 2 min
+    refetchInterval: 3 * 60 * 1000, // 3 min
   });
 
-  // Calcular rango de fechas de toda la temporada de cosecha
-  const harvestDateRange = useMemo(() => {
-    if (!boxes || boxes.length === 0) return null;
-    const dates = boxes.map(b => new Date(b.submissionTime).getTime());
-    const minDate = new Date(Math.min(...dates));
-    const maxDate = new Date(Math.max(...dates));
-    return {
-      startDate: minDate.toISOString().split('T')[0],
-      endDate: maxDate.toISOString().split('T')[0],
-    };
-  }, [boxes]);
+  // 2. Datos diarios agregados para la gráfica (GROUP BY fecha en el servidor)
+  const { data: dailyData, isLoading: chartLoading } = trpc.boxes.dailyChartData.useQuery(
+    { month: selectedMonth },
+    {
+      enabled: !!user,
+      staleTime: 2 * 60 * 1000,
+      refetchInterval: 3 * 60 * 1000,
+    }
+  );
 
-  // Calcular rango de fechas según selección (toda la temporada o mes específico)
+  // 3. Meses disponibles (DISTINCT en el servidor)
+  const { data: availableMonths } = trpc.boxes.availableMonths.useQuery(undefined, {
+    enabled: !!user,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // 4. Últimas cajas con fotos (LIMIT 5 en el servidor)
+  const { data: recentPhotos } = trpc.boxes.recentWithPhotos.useQuery(
+    { limit: 5 },
+    {
+      enabled: !!user,
+      staleTime: 2 * 60 * 1000,
+    }
+  );
+
+  // 5. Configuración de ubicación
+  const { data: locationConfig } = trpc.locationConfig.get.useQuery(undefined, {
+    enabled: !!user,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // 6. Datos meteorológicos (solo si hay ubicación y rango de fechas)
   const dateRange = useMemo(() => {
+    if (!stats?.firstDate || !stats?.lastDate) return null;
     if (selectedMonth === 'all') {
-      return harvestDateRange;
+      return { startDate: stats.firstDate, endDate: stats.lastDate };
     }
     const [year, month] = selectedMonth.split('-').map(Number);
     const startDate = new Date(year, month - 1, 1);
@@ -53,41 +77,15 @@ function HomeContent() {
       startDate: startDate.toISOString().split('T')[0],
       endDate: endDate.toISOString().split('T')[0],
     };
-  }, [selectedMonth, harvestDateRange]);
+  }, [selectedMonth, stats]);
 
-  // Obtener los días que tienen cosecha (para filtrar la tabla)
-  const harvestDays = useMemo(() => {
-    if (!boxes || boxes.length === 0) return new Set<string>();
-    const days = new Set<string>();
-    boxes.forEach(b => {
-      const dateKey = new Date(b.submissionTime).toISOString().split('T')[0];
-      days.add(dateKey);
-    });
-    return days;
-  }, [boxes]);
-
-  // Obtener meses disponibles con datos de cosecha
-  const availableMonths = useMemo(() => {
-    if (!boxes || boxes.length === 0) return [];
-    const months = new Set<string>();
-    boxes.forEach(b => {
-      const d = new Date(b.submissionTime);
-      months.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-    });
-    return Array.from(months).sort().reverse();
-  }, [boxes]);
-
-  // Obtener configuración de ubicación primero
-  const { data: locationConfig } = trpc.locationConfig.get.useQuery(undefined, {
-    enabled: !!user,
-  });
-
-  // Obtener datos meteorológicos del rango seleccionado (solo si hay ubicación y rango)
   const { data: weatherData, isLoading: weatherLoading } = trpc.weather.getForDateRange.useQuery(
     dateRange!,
-    { enabled: !!user && !!locationConfig && !!dateRange }
+    {
+      enabled: !!user && !!locationConfig && !!dateRange,
+      staleTime: 5 * 60 * 1000,
+    }
   );
-
 
   useEffect(() => {
     if (!loading && !user) {
@@ -95,102 +93,36 @@ function HomeContent() {
     }
   }, [user, loading]);
 
-  const stats = useMemo(() => {
-    if (!boxes) return <Loading />;
-
-    const total = boxes.length;
-    // El peso está en gramos, convertir a kilogramos
-    const totalWeight = boxes.reduce((sum, box) => sum + box.weight, 0) / 1000;
-    
-    // Calcular calidades según los códigos especiales
-    const firstQuality = boxes.filter(b => b.harvesterId !== 98 && b.harvesterId !== 99).length;
-    const secondQuality = boxes.filter(b => b.harvesterId === 98).length;
-    const waste = boxes.filter(b => b.harvesterId === 99).length;
-
-    // Calcular peso por calidad
-    const firstQualityWeight = boxes
-      .filter(b => b.harvesterId !== 98 && b.harvesterId !== 99)
-      .reduce((sum, box) => sum + box.weight, 0) / 1000;
-    const secondQualityWeight = boxes
-      .filter(b => b.harvesterId === 98)
-      .reduce((sum, box) => sum + box.weight, 0) / 1000;
-    const wasteWeight = boxes
-      .filter(b => b.harvesterId === 99)
-      .reduce((sum, box) => sum + box.weight, 0) / 1000;
-
-    return {
-      total,
-      totalWeight,
-      firstQuality,
-      secondQuality,
-      waste,
-      firstQualityWeight,
-      secondQualityWeight,
-      wasteWeight,
-      firstQualityPercent: total > 0 ? (firstQuality / total * 100).toFixed(1) : 0,
-      secondQualityPercent: total > 0 ? (secondQuality / total * 100).toFixed(1) : 0,
-      wastePercent: total > 0 ? (waste / total * 100).toFixed(1) : 0,
-    };
-  }, [boxes]);
-
-  // Preparar datos para la gráfica de líneas (en kilogramos) con temperatura
+  // Preparar datos para la gráfica combinando datos diarios + temperatura
   const chartData = useMemo(() => {
-    if (!boxes || boxes.length === 0) return [];
+    if (!dailyData || dailyData.length === 0) return [];
     
-    // Usar un Map con fecha completa como clave para ordenar correctamente
-    const dateMap = new Map<string, { fullDate: Date; dateKey: string; date: string; primera: number; segunda: number; desperdicio: number }>();
-    
-    boxes.forEach(box => {
-      const fullDate = new Date(box.submissionTime);
-      const dateKey = fullDate.toISOString().split('T')[0]; // YYYY-MM-DD
-      
-      // Si se seleccionó un mes específico, filtrar
-      if (selectedMonth !== 'all') {
-        const [year, month] = selectedMonth.split('-').map(Number);
-        const monthStart = new Date(year, month - 1, 1);
-        const monthEnd = new Date(year, month, 0, 23, 59, 59);
-        if (fullDate < monthStart || fullDate > monthEnd) return;
-      }
-      
-      const displayDate = fullDate.toLocaleDateString('es-MX', { month: 'short', day: 'numeric' });
-      
-      if (!dateMap.has(dateKey)) {
-        dateMap.set(dateKey, { fullDate, dateKey, date: displayDate, primera: 0, segunda: 0, desperdicio: 0 });
-      }
-      
-      const entry = dateMap.get(dateKey)!;
-      const weightKg = box.weight / 1000; // Convertir gramos a kilogramos
-      if (box.harvesterId === 99) entry.desperdicio += weightKg;
-      else if (box.harvesterId === 98) entry.segunda += weightKg;
-      else entry.primera += weightKg;
-    });
-    
-    // Ordenar por fecha
-    const sortedEntries = Array.from(dateMap.values())
-      .sort((a, b) => a.fullDate.getTime() - b.fullDate.getTime());
-    
-    // Agregar datos de temperatura si están disponibles
     const weatherArray = Array.isArray(weatherData) ? weatherData : [];
     
-    return sortedEntries.map(entry => {
-      const weather = weatherArray.find((w: any) => w.date === entry.dateKey);
+    return dailyData.map(entry => {
+      const displayDate = new Date(entry.date + 'T12:00:00').toLocaleDateString('es-MX', { month: 'short', day: 'numeric' });
+      const weather = weatherArray.find((w: any) => w.date === entry.date);
       return {
-        date: entry.date,
-        primera: Number(entry.primera.toFixed(2)),
-        segunda: Number(entry.segunda.toFixed(2)),
-        desperdicio: Number(entry.desperdicio.toFixed(2)),
+        date: displayDate,
+        dateKey: entry.date,
+        primera: entry.primera,
+        segunda: entry.segunda,
+        desperdicio: entry.desperdicio,
+        totalBoxes: entry.totalBoxes,
+        totalWeight: entry.totalWeight,
+        firstQualityWeight: entry.firstQualityWeight,
         tempMax: weather ? Number(weather.temperatureMax.toFixed(1)) : null,
         tempMin: weather ? Number(weather.temperatureMin.toFixed(1)) : null,
         tempProm: weather ? Number(weather.temperatureMean.toFixed(1)) : null,
       };
     });
-  }, [boxes, weatherData, selectedMonth, weatherLoading]);
+  }, [dailyData, weatherData]);
 
-  // Obtener últimas 5 cajas con imágenes
-  const recentBoxesWithImages = useMemo(() => {
-    if (!boxes) return [];
-    return boxes.filter(b => b.photoUrl).slice(-5).reverse();
-  }, [boxes]);
+  // Crear set de días con cosecha para filtrar la tabla
+  const harvestDays = useMemo(() => {
+    if (!dailyData) return new Set<string>();
+    return new Set(dailyData.map(d => d.date));
+  }, [dailyData]);
 
   const handleImageClick = (box: any) => {
     setSelectedBox(box);
@@ -208,8 +140,7 @@ function HomeContent() {
     return <Loading />;
   }
 
-  // Mostrar skeleton loader mientras cargan los datos
-  const isLoadingData = !stats || !boxes;
+  const isLoadingData = statsLoading;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
@@ -225,15 +156,12 @@ function HomeContent() {
 
         {isLoadingData ? (
           <div className="space-y-6 animate-pulse">
-            {/* Skeleton de estadísticas */}
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {[1, 2, 3].map(i => (
                 <div key={i} className="bg-white/50 backdrop-blur-sm rounded-lg p-6 h-24"></div>
               ))}
             </div>
-            {/* Skeleton de gráfica */}
             <div className="bg-white/50 backdrop-blur-sm rounded-lg p-6 h-96"></div>
-            {/* Skeleton de tabla */}
             <div className="bg-white/50 backdrop-blur-sm rounded-lg p-6 h-64"></div>
           </div>
         ) : stats ? (
@@ -271,7 +199,6 @@ function HomeContent() {
                   <CheckCircle className="h-12 w-12 text-green-400" />
                 </div>
               </GlassCard>
-
             </div>
 
             {/* Distribución de calidad */}
@@ -320,80 +247,92 @@ function HomeContent() {
             </GlassCard>
 
             {/* Gráfica de evolución temporal */}
-            {chartData.length > 0 && (
-               <GlassCard className="p-6">
-                <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <h3 className="text-lg font-semibold text-green-900">
-                    Evolución de Calidad (Kilogramos)
+            <GlassCard className="p-6">
+              <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <h3 className="text-lg font-semibold text-green-900">
+                  Evolución de Calidad (Kilogramos)
+                  {chartData.length > 0 && (
                     <span className="ml-2 text-sm font-normal text-green-600">
                       {chartData.length} días de cosecha
                     </span>
-                  </h3>
-                  <div className="flex items-center gap-2">
-                    <CalendarIcon className="h-5 w-5 text-green-600" />
-                    <select
-                      value={selectedMonth}
-                      onChange={(e) => setSelectedMonth(e.target.value)}
-                      className="rounded-lg border border-green-200 bg-white px-4 py-2 text-sm text-green-900 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
-                    >
-                      <option value="all">📅 Toda la temporada</option>
-                      {availableMonths.map(m => {
-                        const [year, month] = m.split('-').map(Number);
-                        const date = new Date(year, month - 1);
-                        const label = date.toLocaleDateString('es-MX', { year: 'numeric', month: 'long' });
-                        return <option key={m} value={m}>{label}</option>;
-                      })}
-                    </select>
-                  </div>
+                  )}
+                </h3>
+                <div className="flex items-center gap-2">
+                  <CalendarIcon className="h-5 w-5 text-green-600" />
+                  <select
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(e.target.value)}
+                    className="rounded-lg border border-green-200 bg-white px-4 py-2 text-sm text-green-900 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
+                  >
+                    <option value="all">Toda la temporada</option>
+                    {(availableMonths || []).map(m => {
+                      const [year, month] = m.split('-').map(Number);
+                      const date = new Date(year, month - 1);
+                      const label = date.toLocaleDateString('es-MX', { year: 'numeric', month: 'long' });
+                      return <option key={m} value={m}>{label}</option>;
+                    })}
+                  </select>
                 </div>
+              </div>
+              {chartLoading ? (
+                <div className="flex items-center justify-center h-[300px]">
+                  <RefreshCw className="h-8 w-8 text-green-500 animate-spin" />
+                  <span className="ml-3 text-green-600">Cargando datos...</span>
+                </div>
+              ) : chartData.length > 0 ? (
                 <div className="w-full overflow-x-auto">
                   <div style={{ minWidth: chartData.length > 7 ? `${chartData.length * 60}px` : '100%', height: '300px' }}>
                     <ResponsiveContainer width="100%" height="100%">
-                  <LineChart 
-                    key={`chart-${selectedMonth}-${weatherData?.length || 0}-${chartData.length}`}
-                    data={chartData}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#d1fae5" />
-                    <XAxis dataKey="date" stroke="#059669" />
-                    <YAxis label={{ value: 'Kilogramos', angle: -90, position: 'insideLeft' }} stroke="#059669" />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: 'rgba(255, 255, 255, 0.95)', 
-                        border: '1px solid #10b981',
-                        borderRadius: '8px'
-                      }} 
-                    />
-                    <Legend />
-                    <Line 
-                      type="monotone" 
-                      dataKey="primera" 
-                      stroke="#10b981" 
-                      strokeWidth={2}
-                      name="Primera Calidad"
-                      dot={{ fill: '#10b981', r: 4 }}
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="segunda" 
-                      stroke="#f59e0b" 
-                      strokeWidth={2}
-                      name="Segunda Calidad"
-                      dot={{ fill: '#f59e0b', r: 4 }}
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="desperdicio" 
-                      stroke="#ef4444" 
-                      strokeWidth={2}
-                      name="Desperdicio"
-                      dot={{ fill: '#ef4444', r: 4 }}
-                    />
-                    </LineChart>
+                      <LineChart 
+                        key={`chart-${selectedMonth}`}
+                        data={chartData}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#d1fae5" />
+                        <XAxis dataKey="date" stroke="#059669" />
+                        <YAxis label={{ value: 'Kilogramos', angle: -90, position: 'insideLeft' }} stroke="#059669" />
+                        <Tooltip 
+                          contentStyle={{ 
+                            backgroundColor: 'rgba(255, 255, 255, 0.95)', 
+                            border: '1px solid #10b981',
+                            borderRadius: '8px'
+                          }} 
+                        />
+                        <Legend />
+                        <Line 
+                          type="monotone" 
+                          dataKey="primera" 
+                          stroke="#10b981" 
+                          strokeWidth={2}
+                          name="Primera Calidad"
+                          dot={{ fill: '#10b981', r: 3 }}
+                        />
+                        <Line 
+                          type="monotone" 
+                          dataKey="segunda" 
+                          stroke="#f59e0b" 
+                          strokeWidth={2}
+                          name="Segunda Calidad"
+                          dot={{ fill: '#f59e0b', r: 3 }}
+                        />
+                        <Line 
+                          type="monotone" 
+                          dataKey="desperdicio" 
+                          stroke="#ef4444" 
+                          strokeWidth={2}
+                          name="Desperdicio"
+                          dot={{ fill: '#ef4444', r: 3 }}
+                        />
+                      </LineChart>
                     </ResponsiveContainer>
                   </div>
                 </div>
-              </GlassCard>
-            )}
+              ) : (
+                <div className="flex items-center justify-center h-[200px] text-green-600">
+                  <Package className="h-8 w-8 mr-2 opacity-50" />
+                  No hay datos de cosecha para mostrar
+                </div>
+              )}
+            </GlassCard>
           </div>
         ) : (
           <GlassCard className="p-12 text-center">
@@ -413,7 +352,7 @@ function HomeContent() {
                 <Cloud className="h-8 w-8 text-green-600" />
                 <div>
                   <h2 className="text-2xl font-semibold text-green-900">Temperatura y Cosecha - Datos Históricos</h2>
-                  <p className="text-sm text-green-600">{locationConfig.locationName} • Solo días con cosecha</p>
+                  <p className="text-sm text-green-600">{locationConfig.locationName} - Solo días con cosecha</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -423,8 +362,8 @@ function HomeContent() {
                   onChange={(e) => setSelectedMonth(e.target.value)}
                   className="rounded-lg border border-green-200 bg-white px-4 py-2 text-green-900 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
                 >
-                  <option value="all">📅 Toda la temporada</option>
-                  {availableMonths.map(m => {
+                  <option value="all">Toda la temporada</option>
+                  {(availableMonths || []).map(m => {
                     const [year, month] = m.split('-').map(Number);
                     const date = new Date(year, month - 1);
                     const label = date.toLocaleDateString('es-MX', { year: 'numeric', month: 'long' });
@@ -434,7 +373,7 @@ function HomeContent() {
               </div>
             </div>
             <p className="mb-4 text-sm text-green-700">
-              🌡️ Se recomienda usar estaciones meteorológicas locales para mejorar la precisión de los datos de temperatura
+              Se recomienda usar estaciones meteorológicas locales para mejorar la precisión de los datos de temperatura
             </p>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -450,51 +389,55 @@ function HomeContent() {
                   </tr>
                 </thead>
                 <tbody>
-                  {/* Datos históricos - Solo días con cosecha */}
-                  {weatherData && weatherData
-                    .filter((weather: any) => harvestDays.has(weather.date))
-                    .map((weather: any) => {
-                    const dayBoxes = boxes?.filter(b => {
-                      const boxDate = new Date(b.submissionTime).toISOString().split('T')[0];
-                      return boxDate === weather.date;
-                    }) || [];
-                    const totalWeight = dayBoxes.reduce((sum, b) => sum + b.weight, 0) / 1000;
-                    const firstQualityWeight = dayBoxes
-                      .filter(b => b.harvesterId !== 98 && b.harvesterId !== 99)
-                      .reduce((sum, b) => sum + b.weight, 0) / 1000;
-                    const totalBoxes = dayBoxes.length;
-                    
-                    return (
-                      <tr key={weather.date} className="border-b border-green-100 hover:bg-green-50/50">
-                        <td className="py-3 text-green-900">
-                          {new Date(weather.date + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' })}
-                        </td>
-                        <td className="py-3 text-right text-xs text-green-600">
-                          {totalBoxes}
-                        </td>
-                        <td className="py-3 text-right font-semibold text-green-900">
-                          {totalWeight.toFixed(2)}
-                        </td>
-                        <td className="py-3 text-right text-green-900">
-                          {firstQualityWeight.toFixed(2)}
-                        </td>
-                        <td className="py-3 text-right text-red-600">
-                          {weather.temperatureMax.toFixed(1)}
-                        </td>
-                        <td className="py-3 text-right text-blue-600">
-                          {weather.temperatureMin.toFixed(1)}
-                        </td>
-                        <td className="py-3 text-right text-orange-600">
-                          {weather.temperatureMean.toFixed(1)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-
-                  {weatherLoading && (
+                  {weatherLoading || chartLoading ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <RefreshCw className="h-5 w-5 text-green-500 animate-spin" />
+                          <span className="text-green-600">Cargando datos...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : weatherData && chartData.length > 0 ? (
+                    weatherData
+                      .filter((weather: any) => harvestDays.has(weather.date))
+                      .map((weather: any) => {
+                        // Buscar datos de cosecha del día desde chartData (ya agregados)
+                        const dayData = chartData.find(d => d.dateKey === weather.date);
+                        const totalWeight = dayData ? dayData.totalWeight : 0;
+                        const firstQualityWeight = dayData ? dayData.firstQualityWeight : 0;
+                        const totalBoxes = dayData ? dayData.totalBoxes : 0;
+                        
+                        return (
+                          <tr key={weather.date} className="border-b border-green-100 hover:bg-green-50/50">
+                            <td className="py-3 text-green-900">
+                              {new Date(weather.date + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' })}
+                            </td>
+                            <td className="py-3 text-right text-xs text-green-600">
+                              {totalBoxes}
+                            </td>
+                            <td className="py-3 text-right font-semibold text-green-900">
+                              {totalWeight.toFixed(2)}
+                            </td>
+                            <td className="py-3 text-right text-green-900">
+                              {firstQualityWeight.toFixed(2)}
+                            </td>
+                            <td className="py-3 text-right text-red-600">
+                              {weather.temperatureMax.toFixed(1)}
+                            </td>
+                            <td className="py-3 text-right text-blue-600">
+                              {weather.temperatureMin.toFixed(1)}
+                            </td>
+                            <td className="py-3 text-right text-orange-600">
+                              {weather.temperatureMean.toFixed(1)}
+                            </td>
+                          </tr>
+                        );
+                      })
+                  ) : (
                     <tr>
                       <td colSpan={7} className="py-8 text-center text-green-600">
-                        Cargando datos meteorológicos...
+                        No hay datos disponibles
                       </td>
                     </tr>
                   )}

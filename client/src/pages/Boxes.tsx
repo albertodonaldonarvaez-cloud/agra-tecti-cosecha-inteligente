@@ -68,7 +68,8 @@ function BoxesContent() {
   const { user, loading } = useAuth();
   const [selectedBox, setSelectedBox] = useState<Box | null>(null);
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(50);
+  // Reducir pageSize en móvil para mejor rendimiento
+  const [pageSize] = useState(window.innerWidth < 768 ? 25 : 50);
   const [filterDate, setFilterDate] = useState<string>("all");
   const [filterParcel, setFilterParcel] = useState<string>("all");
   const [filterHarvester, setFilterHarvester] = useState<string>("all");
@@ -105,7 +106,7 @@ function BoxesContent() {
     },
     {
       enabled: !!user,
-      keepPreviousData: true, // Mantener datos anteriores mientras carga
+      placeholderData: (prev) => prev, // Mantener datos anteriores mientras carga
     }
   );
 
@@ -274,7 +275,32 @@ function BoxesContent() {
             <TableSkeleton />
           ) : boxes.length > 0 ? (
             <>
-              <div className="overflow-x-auto">
+              {/* Vista de tarjetas para móvil */}
+              <div className="block md:hidden space-y-3">
+                {boxes.map((box) => {
+                  const quality = getQualityType(box.harvesterId);
+                  return (
+                    <div
+                      key={box.id}
+                      className="cursor-pointer rounded-lg border border-green-200 p-4 transition-colors hover:bg-green-50/50 active:bg-green-100/50"
+                      onClick={() => setSelectedBox(box as Box)}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-bold text-green-900">{box.boxCode}</span>
+                        <span className="font-semibold text-green-900">{box.weight ? (box.weight / 1000).toFixed(2) : '0.00'} kg</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className={`${quality.color} font-medium`}>#{box.harvesterId} - {quality.label}</span>
+                        <span className="text-green-600">{new Date(box.submissionTime).toLocaleDateString('es-MX')}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-green-600">{box.parcelName} ({box.parcelCode})</div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Vista de tabla para desktop */}
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full">
                   <thead>
                     <tr className="border-b-2 border-green-200">

@@ -61,6 +61,30 @@ export const appRouter = router({
       return await db.getAllBoxes();
     }),
 
+    // Estadísticas agregadas para Dashboard (no descarga todas las cajas)
+    dashboardStats: protectedProcedure.query(async () => {
+      return await db.getDashboardStats();
+    }),
+
+    // Datos diarios agregados para gráfica de evolución
+    dailyChartData: protectedProcedure
+      .input(z.object({ month: z.string().optional() }).optional())
+      .query(async ({ input }) => {
+        return await db.getDailyChartData(input?.month);
+      }),
+
+    // Meses disponibles con datos de cosecha
+    availableMonths: protectedProcedure.query(async () => {
+      return await db.getAvailableMonths();
+    }),
+
+    // Últimas cajas con fotos (para carrusel)
+    recentWithPhotos: protectedProcedure
+      .input(z.object({ limit: z.number().min(1).max(20).default(5) }).optional())
+      .query(async ({ input }) => {
+        return await db.getRecentBoxesWithPhotos(input?.limit);
+      }),
+
     // Endpoint paginado para carga rápida
     listPaginated: protectedProcedure
       .input(z.object({
