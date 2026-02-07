@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save, Clock, Timer, CheckCircle, XCircle, Zap } from "lucide-react";
+import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save, Clock, Timer, CheckCircle, XCircle, Zap, Send, MessageCircle, Eye, EyeOff } from "lucide-react";
 import LocationMapPicker from "@/components/LocationMapPicker";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -489,6 +489,9 @@ export default function Settings() {
           {/* Sincronización Automática */}
           <AutoSyncSection />
 
+          {/* Notificaciones Telegram */}
+          <TelegramSection />
+
           {/* Carga Manual */}
           <GlassCard className="p-6">
             <div className="mb-4 flex items-center gap-2">
@@ -832,6 +835,176 @@ function AutoSyncSection() {
           </div>
         </div>
       )}
+    </GlassCard>
+  );
+}
+
+// Componente de Configuración de Telegram
+function TelegramSection() {
+  const [botToken, setBotToken] = useState("");
+  const [chatId, setChatId] = useState("");
+  const [showToken, setShowToken] = useState(false);
+
+  const { data: telegramConfig, refetch } = trpc.telegram.getConfig.useQuery(undefined, {
+    retry: false,
+  });
+
+  const saveTelegramConfig = trpc.telegram.saveConfig.useMutation({
+    onSuccess: () => {
+      toast.success("Configuración de Telegram guardada correctamente");
+      refetch();
+    },
+    onError: (error: any) => {
+      toast.error(error.message);
+    },
+  });
+
+  const testTelegram = trpc.telegram.test.useMutation({
+    onSuccess: (data: any) => {
+      if (data.success) {
+        toast.success("Mensaje de prueba enviado correctamente. Revisa tu chat de Telegram.");
+      } else {
+        toast.error(`Error: ${data.error}`);
+      }
+    },
+    onError: (error: any) => {
+      toast.error(error.message);
+    },
+  });
+
+  useEffect(() => {
+    if (telegramConfig) {
+      setBotToken(telegramConfig.botToken || "");
+      setChatId(telegramConfig.chatId || "");
+    }
+  }, [telegramConfig]);
+
+  const handleSave = () => {
+    if (!botToken.trim() || !chatId.trim()) {
+      toast.error("Por favor completa ambos campos");
+      return;
+    }
+    saveTelegramConfig.mutate({ botToken: botToken.trim(), chatId: chatId.trim() });
+  };
+
+  const handleTest = () => {
+    if (!botToken.trim() || !chatId.trim()) {
+      toast.error("Por favor completa ambos campos antes de probar");
+      return;
+    }
+    testTelegram.mutate({ botToken: botToken.trim(), chatId: chatId.trim() });
+  };
+
+  const isConfigured = !!(telegramConfig?.botToken && telegramConfig?.chatId);
+
+  return (
+    <GlassCard className="p-6 border-2 border-purple-200 bg-purple-50/30">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <MessageCircle className="h-6 w-6 text-purple-600" />
+          <h2 className="text-2xl font-semibold text-purple-900">Notificaciones Telegram</h2>
+        </div>
+        {isConfigured && (
+          <span className="flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
+            <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+            Configurado
+          </span>
+        )}
+      </div>
+
+      <p className="mb-4 text-sm text-purple-700">
+        Recibe notificaciones en un grupo o chat de Telegram después de cada sincronización con detalles de errores detectados: códigos duplicados, peso mayor a 15 kg, parcelas sin polígono, etc.
+      </p>
+
+      {/* Instrucciones */}
+      <div className="mb-4 rounded-lg bg-purple-100/60 p-4 text-sm text-purple-800">
+        <p className="font-semibold mb-2">Cómo configurar:</p>
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Busca <strong>@BotFather</strong> en Telegram y crea un bot con <code className="bg-purple-200 px-1 rounded">/newbot</code></li>
+          <li>Copia el <strong>Token</strong> que te da BotFather</li>
+          <li>Agrega el bot a tu grupo de Telegram</li>
+          <li>Obtén el <strong>Chat ID</strong> del grupo (busca <strong>@getmyid_bot</strong> en Telegram)</li>
+          <li>Pega ambos valores aquí y haz clic en "Probar Conexión"</li>
+        </ol>
+      </div>
+
+      <div className="space-y-4">
+        {/* Bot Token */}
+        <div>
+          <Label htmlFor="telegramToken" className="text-purple-800">Token del Bot</Label>
+          <div className="relative">
+            <Input
+              id="telegramToken"
+              type={showToken ? "text" : "password"}
+              value={botToken}
+              onChange={(e) => setBotToken(e.target.value)}
+              placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+              className="pr-10"
+            />
+            <button
+              type="button"
+              onClick={() => setShowToken(!showToken)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+
+        {/* Chat ID */}
+        <div>
+          <Label htmlFor="telegramChatId" className="text-purple-800">Chat ID del Grupo</Label>
+          <Input
+            id="telegramChatId"
+            value={chatId}
+            onChange={(e) => setChatId(e.target.value)}
+            placeholder="-1001234567890"
+          />
+          <p className="mt-1 text-xs text-purple-600">
+            Para grupos, el Chat ID suele empezar con <code className="bg-purple-100 px-1 rounded">-100</code>
+          </p>
+        </div>
+
+        {/* Botones */}
+        <div className="flex gap-3">
+          <Button
+            onClick={handleSave}
+            disabled={saveTelegramConfig.isPending}
+            className="flex-1 bg-purple-600 hover:bg-purple-700"
+          >
+            <Save className="mr-2 h-4 w-4" />
+            {saveTelegramConfig.isPending ? "Guardando..." : "Guardar"}
+          </Button>
+          <Button
+            onClick={handleTest}
+            disabled={testTelegram.isPending || !botToken.trim() || !chatId.trim()}
+            variant="outline"
+            className="flex-1 border-purple-300 text-purple-700 hover:bg-purple-100"
+          >
+            <Send className="mr-2 h-4 w-4" />
+            {testTelegram.isPending ? "Enviando..." : "Probar Conexión"}
+          </Button>
+        </div>
+
+        {/* Info de notificaciones */}
+        <div className="rounded-lg bg-white/60 p-4 text-sm">
+          <p className="font-semibold text-purple-900 mb-2">Las notificaciones incluyen:</p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="flex items-center gap-2 text-gray-700">
+              <span className="text-red-500">🔴</span> Códigos de caja duplicados
+            </div>
+            <div className="flex items-center gap-2 text-gray-700">
+              <span className="text-yellow-500">🟡</span> Cajas con peso mayor a 15 kg
+            </div>
+            <div className="flex items-center gap-2 text-gray-700">
+              <span className="text-orange-500">🟠</span> Parcelas sin polígono definido
+            </div>
+            <div className="flex items-center gap-2 text-gray-700">
+              <span className="text-blue-500">📊</span> Resumen de sincronización
+            </div>
+          </div>
+        </div>
+      </div>
     </GlassCard>
   );
 }

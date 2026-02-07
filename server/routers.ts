@@ -79,6 +79,37 @@ export const appRouter = router({
       }),
   }),
 
+  // Telegram
+  telegram: router({
+    getConfig: adminProcedure.query(async () => {
+      const config = await db.getApiConfig();
+      if (!config) return { botToken: "", chatId: "" };
+      return {
+        botToken: (config as any).telegramBotToken || "",
+        chatId: (config as any).telegramChatId || "",
+      };
+    }),
+
+    saveConfig: adminProcedure
+      .input(z.object({ botToken: z.string(), chatId: z.string() }))
+      .mutation(async ({ input }) => {
+        const { sql } = await import("drizzle-orm");
+        const database = await db.getDb();
+        if (!database) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB not available" });
+        await database.execute(
+          sql`UPDATE apiConfig SET telegramBotToken = ${input.botToken}, telegramChatId = ${input.chatId}`
+        );
+        return { success: true };
+      }),
+
+    test: adminProcedure
+      .input(z.object({ botToken: z.string(), chatId: z.string() }))
+      .mutation(async ({ input }) => {
+        const { sendTestMessage } = await import("./telegramBot");
+        return await sendTestMessage(input.botToken, input.chatId);
+      }),
+  }),
+
   boxes: router({
     list: protectedProcedure.query(async () => {
       return await db.getAllBoxes();
@@ -201,8 +232,34 @@ export const appRouter = router({
             );
             await db.updateLastSync();
             console.log('✅ Sincronización completada:', result);
+            
+            // Enviar notificación por Telegram
+            try {
+              const { sendSyncNotification } = await import("./telegramBot");
+              await sendSyncNotification({
+                trigger: "manual",
+                processedCount: result.processedCount,
+                totalCount: result.totalCount,
+                errors: result.errors || [],
+              });
+            } catch (telegramError) {
+              console.error("Error al enviar notificación Telegram:", telegramError);
+            }
           } catch (error) {
             console.error('❌ Error en sincronización:', error);
+            
+            // Notificar error por Telegram
+            try {
+              const { sendSyncNotification } = await import("./telegramBot");
+              await sendSyncNotification({
+                trigger: "manual",
+                processedCount: 0,
+                totalCount: 0,
+                errors: [`Error de sincronización: ${(error as any).message || error}`],
+              });
+            } catch (telegramError) {
+              console.error("Error al enviar notificación Telegram:", telegramError);
+            }
           }
         });
         

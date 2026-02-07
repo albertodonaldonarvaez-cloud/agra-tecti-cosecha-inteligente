@@ -1,5 +1,6 @@
 import { getApiConfig, updateLastSync } from "./db";
 import { syncFromKoboAPI } from "./koboSync";
+import { sendSyncNotification } from "./telegramBot";
 
 // ============================================================
 // Sincronización Automática de KoboToolbox
@@ -83,6 +84,19 @@ async function runSync(trigger: string = "auto"): Promise<SyncLog> {
     };
     addToHistory(log);
     console.log(`✅ [AutoSync] ${log.message}`);
+
+    // Enviar notificación por Telegram
+    try {
+      await sendSyncNotification({
+        trigger,
+        processedCount: result.processedCount,
+        totalCount: result.totalCount,
+        errors: result.errors || [],
+      });
+    } catch (telegramError) {
+      console.error("[AutoSync] Error al enviar notificación Telegram:", telegramError);
+    }
+
     return log;
   } catch (error: any) {
     const log: SyncLog = {
@@ -92,6 +106,19 @@ async function runSync(trigger: string = "auto"): Promise<SyncLog> {
     };
     addToHistory(log);
     console.error(`❌ [AutoSync] ${log.message}`);
+
+    // Notificar error por Telegram
+    try {
+      await sendSyncNotification({
+        trigger,
+        processedCount: 0,
+        totalCount: 0,
+        errors: [`Error de sincronización: ${error.message || error}`],
+      });
+    } catch (telegramError) {
+      console.error("[AutoSync] Error al enviar notificación Telegram:", telegramError);
+    }
+
     return log;
   } finally {
     isRunning = false;

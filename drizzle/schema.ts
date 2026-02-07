@@ -92,6 +92,8 @@ export const apiConfig = mysqlTable("apiConfig", {
   apiUrl: varchar("apiUrl", { length: 512 }).notNull(),
   apiToken: varchar("apiToken", { length: 512 }).notNull(),
   assetId: varchar("assetId", { length: 128 }).notNull(),
+  telegramBotToken: varchar("telegramBotToken", { length: 512 }),
+  telegramChatId: varchar("telegramChatId", { length: 128 }),
   lastSync: timestamp("lastSync"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
