@@ -751,3 +751,50 @@ export async function getRecentBoxesWithPhotos(limit: number = 5) {
     .orderBy(desc(boxes.submissionTime))
     .limit(limit);
 }
+
+// Obtener datos de cosecha agrupados por día para correlación con clima
+// Devuelve solo días con cajas (boxes > 0) con estadísticas agregadas
+export async function getHarvestByDay() {
+  const db = await getDb();
+  if (!db) return [];
+  
+  const { sql } = await import("drizzle-orm");
+  
+  const result = await db.execute(sql`
+    SELECT 
+      DATE(submissionTime) as date,
+      COUNT(*) as boxes,
+      COALESCE(SUM(weight), 0) as totalWeight,
+      SUM(CASE WHEN quality = 'primera' THEN 1 ELSE 0 END) as firstQuality
+    FROM boxes 
+    WHERE archived = 0
+    GROUP BY DATE(submissionTime)
+    HAVING COUNT(*) > 0
+    ORDER BY date ASC
+  `);
+  
+  return (result[0] as unknown as any[]).map(row => ({
+    date: String(row.date).split('T')[0],
+    boxes: Number(row.boxes),
+    totalWeight: Number(row.totalWeight),
+    firstQuality: Number(row.firstQuality),
+  }));
+}
+
+// Obtener la fecha de inicio de cosecha (primera caja registrada)
+export async function getHarvestStartDate() {
+  const db = await getDb();
+  if (!db) return null;
+  
+  const { sql } = await import("drizzle-orm");
+  
+  const result = await db.execute(sql`
+    SELECT MIN(DATE(submissionTime)) as startDate
+    FROM boxes 
+    WHERE archived = 0
+  `);
+  
+  const rows = result[0] as unknown as any[];
+  if (rows.length === 0 || !rows[0].startDate) return null;
+  return String(rows[0].startDate).split('T')[0];
+}

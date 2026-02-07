@@ -132,6 +132,16 @@ export const appRouter = router({
       return await db.getAvailableMonths();
     }),
 
+    // Datos de cosecha agrupados por día (para correlación clima-cosecha)
+    harvestByDay: protectedProcedure.query(async () => {
+      return await db.getHarvestByDay();
+    }),
+
+    // Fecha de inicio de cosecha
+    harvestStartDate: protectedProcedure.query(async () => {
+      return await db.getHarvestStartDate();
+    }),
+
     // Últimas cajas con fotos (para carrusel)
     recentWithPhotos: protectedProcedure
       .input(z.object({ limit: z.number().min(1).max(20).default(5) }).optional())
