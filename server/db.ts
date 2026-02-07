@@ -753,7 +753,7 @@ export async function getRecentBoxesWithPhotos(limit: number = 5) {
 }
 
 // Obtener datos de cosecha agrupados por día para correlación con clima
-// Devuelve solo días con cajas (boxes > 0) con estadísticas agregadas
+// OPTIMIZADO: Solo campos mínimos, usa harvesterId para calidad, índice en submissionTime
 export async function getHarvestByDay() {
   const db = await getDb();
   if (!db) return [];
@@ -765,7 +765,12 @@ export async function getHarvestByDay() {
       DATE(submissionTime) as date,
       COUNT(*) as boxes,
       COALESCE(SUM(weight), 0) as totalWeight,
-      SUM(CASE WHEN quality = 'primera' THEN 1 ELSE 0 END) as firstQuality
+      SUM(CASE WHEN harvesterId NOT IN (98, 99) THEN 1 ELSE 0 END) as firstQuality,
+      SUM(CASE WHEN harvesterId = 98 THEN 1 ELSE 0 END) as secondQuality,
+      SUM(CASE WHEN harvesterId = 99 THEN 1 ELSE 0 END) as waste,
+      COALESCE(SUM(CASE WHEN harvesterId NOT IN (98, 99) THEN weight ELSE 0 END), 0) as firstQualityWeight,
+      COALESCE(SUM(CASE WHEN harvesterId = 98 THEN weight ELSE 0 END), 0) as secondQualityWeight,
+      COALESCE(SUM(CASE WHEN harvesterId = 99 THEN weight ELSE 0 END), 0) as wasteWeight
     FROM boxes 
     WHERE archived = 0
     GROUP BY DATE(submissionTime)
@@ -778,6 +783,11 @@ export async function getHarvestByDay() {
     boxes: Number(row.boxes),
     totalWeight: Number(row.totalWeight),
     firstQuality: Number(row.firstQuality),
+    secondQuality: Number(row.secondQuality || 0),
+    waste: Number(row.waste || 0),
+    firstQualityWeight: Number(row.firstQualityWeight || 0),
+    secondQualityWeight: Number(row.secondQualityWeight || 0),
+    wasteWeight: Number(row.wasteWeight || 0),
   }));
 }
 
