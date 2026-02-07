@@ -2,66 +2,78 @@
 -- Script de Migración: Índices de Rendimiento
 -- AGRA-TECTI Cosecha Inteligente
 -- =====================================================
--- Este script agrega índices a las tablas para acelerar
--- las consultas de agrupación por día, filtrado y búsqueda.
--- Es seguro ejecutar múltiples veces (usa IF NOT EXISTS).
+-- Compatible con MySQL 5.7 y 8.0
+-- Seguro ejecutar múltiples veces (verifica antes de crear)
 -- =====================================================
 
--- 1. TABLA BOXES: Índice en submissionTime para GROUP BY DATE(submissionTime)
--- Acelera: getHarvestByDay, getDashboardStats, getDailyChartData
-CREATE INDEX IF NOT EXISTS idx_boxes_submission_time 
-ON boxes (submissionTime);
+DELIMITER //
 
--- 2. TABLA BOXES: Índice compuesto para filtros frecuentes (archived + submissionTime)
--- Acelera: Todas las consultas que filtran WHERE archived = 0 GROUP BY DATE(submissionTime)
-CREATE INDEX IF NOT EXISTS idx_boxes_archived_submission 
-ON boxes (archived, submissionTime);
+DROP PROCEDURE IF EXISTS add_index_if_not_exists//
 
--- 3. TABLA BOXES: Índice en boxCode para búsqueda de duplicados
--- Acelera: Detección de duplicados en sincronización, búsqueda por código
-CREATE INDEX IF NOT EXISTS idx_boxes_box_code 
-ON boxes (boxCode);
+CREATE PROCEDURE add_index_if_not_exists(
+  IN p_table VARCHAR(64),
+  IN p_index VARCHAR(64),
+  IN p_columns VARCHAR(255)
+)
+BEGIN
+  DECLARE index_exists INT DEFAULT 0;
+  
+  SELECT COUNT(*) INTO index_exists
+  FROM INFORMATION_SCHEMA.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = p_table
+    AND INDEX_NAME = p_index;
+  
+  IF index_exists = 0 THEN
+    SET @sql = CONCAT('CREATE INDEX ', p_index, ' ON ', p_table, ' (', p_columns, ')');
+    PREPARE stmt FROM @sql;
+    EXECUTE stmt;
+    DEALLOCATE PREPARE stmt;
+    SELECT CONCAT('✅ Índice creado: ', p_index, ' en ', p_table) AS resultado;
+  ELSE
+    SELECT CONCAT('⏭️  Índice ya existe: ', p_index, ' en ', p_table) AS resultado;
+  END IF;
+END//
 
--- 4. TABLA BOXES: Índice compuesto para detección de duplicados en sincronización
--- Acelera: koboSync, excelProcessor, historicalDataSync
-CREATE INDEX IF NOT EXISTS idx_boxes_code_submission 
-ON boxes (boxCode, submissionTime);
+DELIMITER ;
 
--- 5. TABLA BOXES: Índice en koboId para sincronización con KoboToolbox
--- Acelera: koboSync detección de registros existentes
-CREATE INDEX IF NOT EXISTS idx_boxes_kobo_id 
-ON boxes (koboId);
+-- 1. submissionTime para GROUP BY DATE(submissionTime)
+CALL add_index_if_not_exists('boxes', 'idx_boxes_submission_time', 'submissionTime');
 
--- 6. TABLA BOXES: Índice en harvesterId para filtrado por calidad
--- Acelera: Consultas de primera calidad (NOT IN 98,99), segunda (98), desperdicio (99)
-CREATE INDEX IF NOT EXISTS idx_boxes_harvester_id 
-ON boxes (harvesterId);
+-- 2. Compuesto archived + submissionTime
+CALL add_index_if_not_exists('boxes', 'idx_boxes_archived_submission', 'archived, submissionTime');
 
--- 7. TABLA BOXES: Índice en parcelCode para agrupación por parcela
--- Acelera: Estadísticas por parcela, rendimiento de cortadoras
-CREATE INDEX IF NOT EXISTS idx_boxes_parcel_code 
-ON boxes (parcelCode);
+-- 3. boxCode para búsqueda de duplicados
+CALL add_index_if_not_exists('boxes', 'idx_boxes_box_code', 'boxCode');
 
--- 8. TABLA BOXES: Índice en originalBoxCode para protección de cajas editadas
--- Acelera: Detección de cajas editadas durante sincronización
-CREATE INDEX IF NOT EXISTS idx_boxes_original_code 
-ON boxes (originalBoxCode);
+-- 4. Compuesto boxCode + submissionTime para sincronización
+CALL add_index_if_not_exists('boxes', 'idx_boxes_code_submission', 'boxCode, submissionTime');
 
--- 9. TABLA BOXES: Índice en manuallyEdited para filtrar cajas editadas
--- Acelera: Consultas que necesitan saber si una caja fue editada
-CREATE INDEX IF NOT EXISTS idx_boxes_manually_edited 
-ON boxes (manuallyEdited);
+-- 5. koboId para sincronización con KoboToolbox
+CALL add_index_if_not_exists('boxes', 'idx_boxes_kobo_id', 'koboId');
 
--- 10. TABLA UPLOAD_ERRORS: Índice en uploadBatchId
--- Acelera: Consulta de errores por lote
-CREATE INDEX IF NOT EXISTS idx_upload_errors_batch 
-ON uploadErrors (uploadBatchId);
+-- 6. harvesterId para filtrado por calidad
+CALL add_index_if_not_exists('boxes', 'idx_boxes_harvester_id', 'harvesterId');
 
--- 11. TABLA UPLOAD_ERRORS: Índice en resolved para filtrar errores pendientes
-CREATE INDEX IF NOT EXISTS idx_upload_errors_resolved 
-ON uploadErrors (resolved);
+-- 7. parcelCode para agrupación por parcela
+CALL add_index_if_not_exists('boxes', 'idx_boxes_parcel_code', 'parcelCode');
 
--- Verificar que los índices se crearon correctamente
+-- 8. originalBoxCode para protección de cajas editadas
+CALL add_index_if_not_exists('boxes', 'idx_boxes_original_code', 'originalBoxCode');
+
+-- 9. manuallyEdited para filtrar cajas editadas
+CALL add_index_if_not_exists('boxes', 'idx_boxes_manually_edited', 'manuallyEdited');
+
+-- 10. uploadBatchId en uploadErrors
+CALL add_index_if_not_exists('uploadErrors', 'idx_upload_errors_batch', 'uploadBatchId');
+
+-- 11. resolved en uploadErrors para filtrar errores pendientes
+CALL add_index_if_not_exists('uploadErrors', 'idx_upload_errors_resolved', 'resolved');
+
+-- Limpiar el procedimiento temporal
+DROP PROCEDURE IF EXISTS add_index_if_not_exists;
+
+-- Verificar índices creados
 SELECT 
   TABLE_NAME, 
   INDEX_NAME, 
