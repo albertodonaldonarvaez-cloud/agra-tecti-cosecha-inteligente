@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, apiConfig, harvesters, boxes, InsertBox } from "../drizzle/schema";
+import { InsertUser, users, apiConfig, harvesters, boxes, InsertBox, userActivityLogs } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -982,4 +982,212 @@ export async function autoResolveDuplicates() {
   console.log(`🔧 ${message}`);
   
   return { renamed, archived, message };
+}
+
+
+// ============================================================
+// Funciones de Gestión de Usuarios (eliminar, contraseña, perfil, logs)
+// ============================================================
+
+/**
+ * Eliminar un usuario por ID (no permite eliminar al propio admin)
+ */
+export async function deleteUser(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  // Primero eliminar logs de actividad del usuario
+  await db.delete(userActivityLogs).where(eq(userActivityLogs.userId, userId));
+  // Luego eliminar el usuario
+  await db.delete(users).where(eq(users.id, userId));
+}
+
+/**
+ * Cambiar la contraseña de un usuario (admin o el propio usuario)
+ */
+export async function changeUserPassword(userId: number, hashedPassword: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  await db.update(users).set({ 
+    password: hashedPassword, 
+    updatedAt: new Date() 
+  }).where(eq(users.id, userId));
+}
+
+/**
+ * Actualizar perfil de usuario (nombre, bio, teléfono, avatar)
+ */
+export async function updateUserProfile(userId: number, data: {
+  name?: string;
+  bio?: string | null;
+  phone?: string | null;
+  avatarColor?: string;
+  avatarEmoji?: string;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  const updateData: Record<string, any> = { updatedAt: new Date() };
+  if (data.name !== undefined) updateData.name = data.name;
+  if (data.bio !== undefined) updateData.bio = data.bio;
+  if (data.phone !== undefined) updateData.phone = data.phone;
+  if (data.avatarColor !== undefined) updateData.avatarColor = data.avatarColor;
+  if (data.avatarEmoji !== undefined) updateData.avatarEmoji = data.avatarEmoji;
+  
+  await db.update(users).set(updateData).where(eq(users.id, userId));
+}
+
+// ============================================================
+// Funciones de Logs de Actividad
+// ============================================================
+
+/**
+ * Registrar una actividad de usuario
+ */
+export async function logUserActivity(data: {
+  userId: number;
+  action: "login" | "logout" | "page_view" | "page_leave";
+  page?: string;
+  pageName?: string;
+  sessionId?: string;
+  durationSeconds?: number;
+  ipAddress?: string;
+  userAgent?: string;
+}) {
+  const db = await getDb();
+  if (!db) return;
+  
+  try {
+    await db.insert(userActivityLogs).values({
+      userId: data.userId,
+      action: data.action,
+      page: data.page || null,
+      pageName: data.pageName || null,
+      sessionId: data.sessionId || null,
+      durationSeconds: data.durationSeconds || null,
+      ipAddress: data.ipAddress || null,
+      userAgent: data.userAgent || null,
+    });
+  } catch (err) {
+    console.error("[DB] Error al registrar actividad:", err);
+  }
+}
+
+/**
+ * Obtener logs de actividad de un usuario específico
+ */
+export async function getUserActivityLogs(userId: number, limit: number = 100) {
+  const db = await getDb();
+  if (!db) return [];
+  
+  const { sql, desc } = await import("drizzle-orm");
+  
+  const result = await db.select()
+    .from(userActivityLogs)
+    .where(eq(userActivityLogs.userId, userId))
+    .orderBy(desc(userActivityLogs.createdAt))
+    .limit(limit);
+  
+  return result;
+}
+
+/**
+ * Obtener todos los logs de actividad (admin)
+ */
+export async function getAllActivityLogs(limit: number = 200) {
+  const db = await getDb();
+  if (!db) return [];
+  
+  const { sql, desc } = await import("drizzle-orm");
+  
+  const result = await db.execute(sql`
+    SELECT 
+      l.*,
+      u.name as userName,
+      u.email as userEmail,
+      u.avatarColor,
+      u.avatarEmoji
+    FROM userActivityLogs l
+    LEFT JOIN users u ON l.userId = u.id
+    ORDER BY l.createdAt DESC
+    LIMIT ${limit}
+  `);
+  
+  return (result[0] as unknown as any[]);
+}
+
+/**
+ * Obtener resumen de actividad por usuario (admin)
+ */
+export async function getUserActivitySummary() {
+  const db = await getDb();
+  if (!db) return [];
+  
+  const { sql } = await import("drizzle-orm");
+  
+  const result = await db.execute(sql`
+    SELECT 
+      u.id,
+      u.name,
+      u.email,
+      u.role,
+      u.avatarColor,
+      u.avatarEmoji,
+      u.lastSignedIn,
+      COUNT(CASE WHEN l.action = 'login' THEN 1 END) as totalLogins,
+      COUNT(CASE WHEN l.action = 'page_view' THEN 1 END) as totalPageViews,
+      COALESCE(SUM(CASE WHEN l.action = 'page_leave' THEN l.durationSeconds ELSE 0 END), 0) as totalDurationSeconds,
+      MAX(l.createdAt) as lastActivity,
+      (SELECT l2.page FROM userActivityLogs l2 WHERE l2.userId = u.id AND l2.action = 'page_view' ORDER BY l2.createdAt DESC LIMIT 1) as lastPage
+    FROM users u
+    LEFT JOIN userActivityLogs l ON u.id = l.userId
+    GROUP BY u.id
+    ORDER BY lastActivity DESC
+  `);
+  
+  return (result[0] as unknown as any[]);
+}
+
+/**
+ * Obtener las páginas más visitadas por un usuario
+ */
+export async function getUserTopPages(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  
+  const { sql } = await import("drizzle-orm");
+  
+  const result = await db.execute(sql`
+    SELECT 
+      page,
+      pageName,
+      COUNT(*) as visits,
+      COALESCE(SUM(durationSeconds), 0) as totalDuration,
+      COALESCE(AVG(durationSeconds), 0) as avgDuration,
+      MAX(createdAt) as lastVisit
+    FROM userActivityLogs
+    WHERE userId = ${userId} AND action = 'page_view' AND page IS NOT NULL
+    GROUP BY page, pageName
+    ORDER BY visits DESC
+  `);
+  
+  return (result[0] as unknown as any[]);
+}
+
+/**
+ * Limpiar logs antiguos (más de 90 días)
+ */
+export async function cleanOldActivityLogs() {
+  const db = await getDb();
+  if (!db) return 0;
+  
+  const { sql } = await import("drizzle-orm");
+  
+  const result = await db.execute(sql`
+    DELETE FROM userActivityLogs 
+    WHERE createdAt < DATE_SUB(NOW(), INTERVAL 90 DAY)
+  `);
+  
+  return (result[0] as any).affectedRows || 0;
 }

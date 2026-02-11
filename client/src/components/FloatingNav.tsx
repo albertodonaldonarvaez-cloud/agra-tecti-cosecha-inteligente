@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { LogOut, ChevronLeft, ChevronRight, Users, Settings } from "lucide-react";
+import { LogOut, ChevronLeft, ChevronRight, Users, Settings, User } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
@@ -166,6 +166,20 @@ export function FloatingNav({ isAdmin = false }: FloatingNavProps) {
             
             {/* Separador */}
             <div className="h-6 w-px bg-green-300/30 flex-shrink-0" />
+
+            {/* Botón de perfil */}
+            <Link
+              href="/profile"
+              className={cn(
+                "flex items-center justify-center rounded-full p-3 transition-all duration-300 flex-shrink-0",
+                location === "/profile"
+                  ? "bg-white/30 text-green-700 shadow-md backdrop-blur-sm border border-green-400/50"
+                  : "text-green-600 hover:bg-white/20 hover:text-green-700"
+              )}
+              title="Mi Perfil"
+            >
+              <User className="h-5 w-5" />
+            </Link>
             
             {/* Botón de cerrar sesión */}
             <button

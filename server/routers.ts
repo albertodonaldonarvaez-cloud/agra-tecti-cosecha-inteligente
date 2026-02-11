@@ -2,7 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, protectedProcedure, adminProcedure } from "./_core/trpcNew";
 import { COOKIE_NAME } from "./_core/authContext";
-import { loginUser, registerUser, hashPassword } from "./auth";
+import { loginUser, registerUser, hashPassword, comparePassword } from "./auth";
 import * as db from "./db";
 import * as dbExt from "./db_extended";
 import { getDb } from "./db";
@@ -831,6 +831,132 @@ export const appRouter = router({
           role: input.role,
         });
         return { success: true };
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ userId: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        // No permitir que el admin se elimine a sí mismo
+        if (ctx.user && ctx.user.id === input.userId) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "No puedes eliminarte a ti mismo" });
+        }
+        await db.deleteUser(input.userId);
+        return { success: true };
+      }),
+
+    changePassword: adminProcedure
+      .input(z.object({
+        userId: z.number(),
+        newPassword: z.string().min(6),
+      }))
+      .mutation(async ({ input }) => {
+        const hashedPassword = await hashPassword(input.newPassword);
+        await db.changeUserPassword(input.userId, hashedPassword);
+        return { success: true };
+      }),
+
+    // Logs de actividad
+    activityLogs: adminProcedure
+      .input(z.object({ userId: z.number().optional(), limit: z.number().optional() }))
+      .query(async ({ input }) => {
+        if (input.userId) {
+          return await db.getUserActivityLogs(input.userId, input.limit || 100);
+        }
+        return await db.getAllActivityLogs(input.limit || 200);
+      }),
+
+    activitySummary: adminProcedure.query(async () => {
+      return await db.getUserActivitySummary();
+    }),
+
+    userTopPages: adminProcedure
+      .input(z.object({ userId: z.number() }))
+      .query(async ({ input }) => {
+        return await db.getUserTopPages(input.userId);
+      }),
+  }),
+
+  // Perfil de usuario (accesible por el propio usuario)
+  profile: router({
+    get: protectedProcedure.query(async ({ ctx }) => {
+      if (!ctx.user) throw new TRPCError({ code: "UNAUTHORIZED" });
+      const user = await db.getUserById(ctx.user.id);
+      if (!user) throw new TRPCError({ code: "NOT_FOUND" });
+      return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        bio: user.bio || "",
+        phone: user.phone || "",
+        avatarColor: user.avatarColor || "#16a34a",
+        avatarEmoji: user.avatarEmoji || "🌿",
+        createdAt: user.createdAt,
+        lastSignedIn: user.lastSignedIn,
+      };
+    }),
+
+    update: protectedProcedure
+      .input(z.object({
+        name: z.string().min(1).optional(),
+        bio: z.string().max(255).optional(),
+        phone: z.string().max(32).optional(),
+        avatarColor: z.string().optional(),
+        avatarEmoji: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        if (!ctx.user) throw new TRPCError({ code: "UNAUTHORIZED" });
+        await db.updateUserProfile(ctx.user.id, input);
+        return { success: true };
+      }),
+
+    changePassword: protectedProcedure
+      .input(z.object({
+        currentPassword: z.string(),
+        newPassword: z.string().min(6),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        if (!ctx.user) throw new TRPCError({ code: "UNAUTHORIZED" });
+        const user = await db.getUserById(ctx.user.id);
+        if (!user) throw new TRPCError({ code: "NOT_FOUND" });
+        
+        const isValid = await comparePassword(input.currentPassword, user.password);
+        if (!isValid) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "La contrase\u00f1a actual es incorrecta" });
+        }
+        
+        const hashedPassword = await hashPassword(input.newPassword);
+        await db.changeUserPassword(ctx.user.id, hashedPassword);
+        return { success: true };
+      }),
+
+    // Log de actividad (el usuario registra su propia actividad)
+    logActivity: protectedProcedure
+      .input(z.object({
+        action: z.enum(["login", "logout", "page_view", "page_leave"]),
+        page: z.string().optional(),
+        pageName: z.string().optional(),
+        sessionId: z.string().optional(),
+        durationSeconds: z.number().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        if (!ctx.user) return { success: false };
+        await db.logUserActivity({
+          userId: ctx.user.id,
+          action: input.action,
+          page: input.page,
+          pageName: input.pageName,
+          sessionId: input.sessionId,
+          durationSeconds: input.durationSeconds,
+        });
+        return { success: true };
+      }),
+
+    myActivity: protectedProcedure
+      .input(z.object({ limit: z.number().optional() }))
+      .query(async ({ ctx, input }) => {
+        if (!ctx.user) return [];
+        return await db.getUserActivityLogs(ctx.user.id, input.limit || 50);
       }),
   }),
 

@@ -5,6 +5,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { FloatingNav } from "./components/FloatingNav";
 import { useAuth } from "./_core/hooks/useAuth";
+import { useActivityTracker } from "./hooks/useActivityTracker";
 import { Suspense, lazy } from "react";
 
 // ====== CODE SPLITTING: Carga diferida de páginas ======
@@ -23,6 +24,7 @@ const HarvesterPerformance = lazy(() => import("./pages/HarvesterPerformance"));
 const Parcels = lazy(() => import("./pages/Parcels"));
 const BoxEditor = lazy(() => import("./pages/BoxEditor"));
 const ClimateAnalysis = lazy(() => import("./pages/ClimateAnalysis"));
+const Profile = lazy(() => import("./pages/Profile"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 // Componente de carga para Suspense
@@ -39,6 +41,9 @@ function PageLoader() {
 
 function Router() {
   const { user, loading } = useAuth();
+  
+  // Registrar actividad del usuario automáticamente
+  useActivityTracker();
 
   if (loading) {
     return <PageLoader />;
@@ -62,6 +67,7 @@ function Router() {
           <Route path="/parcels" component={Parcels} />
           <Route path="/editor" component={BoxEditor} />
           <Route path="/climate" component={ClimateAnalysis} />
+          <Route path="/profile" component={Profile} />
           <Route path="/users" component={Users} />
           <Route path="/settings" component={Settings} />
           <Route path={"/404"} component={NotFound} />

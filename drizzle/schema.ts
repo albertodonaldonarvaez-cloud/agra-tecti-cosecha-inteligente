@@ -23,6 +23,11 @@ export const users = mysqlTable("users", {
   canViewHarvesters: boolean("canViewHarvesters").default(false).notNull(),
   canViewEditor: boolean("canViewEditor").default(false).notNull(),
   canViewErrors: boolean("canViewErrors").default(false).notNull(),
+  // Campos de personalización de perfil
+  avatarColor: varchar("avatarColor", { length: 32 }).default("#16a34a"),
+  avatarEmoji: varchar("avatarEmoji", { length: 16 }).default("🌿"),
+  bio: varchar("bio", { length: 255 }),
+  phone: varchar("phone", { length: 32 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -30,6 +35,23 @@ export const users = mysqlTable("users", {
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
+
+// Tabla de logs de actividad de usuarios
+export const userActivityLogs = mysqlTable("userActivityLogs", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  action: mysqlEnum("action", ["login", "logout", "page_view", "page_leave"]).notNull(),
+  page: varchar("page", { length: 255 }),
+  pageName: varchar("pageName", { length: 255 }),
+  sessionId: varchar("sessionId", { length: 128 }),
+  durationSeconds: int("durationSeconds"), // Duración en la página (solo para page_leave)
+  ipAddress: varchar("ipAddress", { length: 64 }),
+  userAgent: varchar("userAgent", { length: 512 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type UserActivityLog = typeof userActivityLogs.$inferSelect;
+export type InsertUserActivityLog = typeof userActivityLogs.$inferInsert;
 
 // Tabla de parcelas con polígonos geográficos
 export const parcels = mysqlTable("parcels", {
