@@ -644,6 +644,8 @@ export default function Settings() {
 
 // Componente de Sincronización Automática
 function AutoSyncSection() {
+  const TIMEZONE = "America/Mexico_City";
+
   const { data: syncStatus, refetch } = trpc.autoSync.status.useQuery(undefined, {
     refetchInterval: 30000, // Actualizar cada 30 segundos
   });
@@ -692,6 +694,7 @@ function AutoSyncSection() {
     if (!dateStr) return "Nunca";
     const date = new Date(dateStr);
     return date.toLocaleString("es-MX", {
+      timeZone: TIMEZONE,
       day: "numeric",
       month: "short",
       year: "numeric",
@@ -743,7 +746,7 @@ function AutoSyncSection() {
 
       {/* Configuración de horarios */}
       <div className="mb-4 space-y-3">
-        <Label className="text-blue-800 font-medium">Horarios de sincronización (hora del servidor)</Label>
+        <Label className="text-blue-800 font-medium">Horarios de sincronización (hora de México)</Label>
         <div className="flex items-center gap-3">
           <div className="flex-1">
             <Label htmlFor="hour1" className="text-xs text-gray-500">Mañana</Label>
@@ -788,6 +791,7 @@ function AutoSyncSection() {
             </Button>
           </div>
         </div>
+        <p className="text-xs text-gray-400">Zona horaria: America/Mexico_City (CST/CDT)</p>
       </div>
 
       {/* Botón de sincronización manual */}
@@ -823,6 +827,7 @@ function AutoSyncSection() {
                   <p>{log.message}</p>
                   <p className="text-gray-400">
                     {new Date(log.timestamp).toLocaleString("es-MX", {
+                      timeZone: TIMEZONE,
                       day: "numeric",
                       month: "short",
                       hour: "2-digit",
