@@ -480,6 +480,33 @@ export const appRouter = router({
         await db.updateBoxCode(input.id, input.boxCode);
         return { success: true };
       }),
+
+    // Auto-resolver duplicados
+    autoResolveDuplicates: adminProcedure
+      .mutation(async () => {
+        const result = await db.autoResolveDuplicates();
+        return result;
+      }),
+
+    // Restaurar múltiples cajas archivadas
+    restoreBatch: adminProcedure
+      .input(z.object({
+        boxIds: z.array(z.number()),
+      }))
+      .mutation(async ({ input }) => {
+        const database = await getDb();
+        if (!database) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available" });
+        
+        const { inArray } = await import("drizzle-orm");
+        
+        await database.update(boxes).set({
+          archived: false,
+          archivedAt: null,
+          updatedAt: new Date(),
+        }).where(inArray(boxes.id, input.boxIds));
+        
+        return { success: true, restored: input.boxIds.length };
+      }),
   }),
 
   parcels: router({

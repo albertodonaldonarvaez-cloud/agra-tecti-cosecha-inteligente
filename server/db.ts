@@ -808,3 +808,178 @@ export async function getHarvestStartDate() {
   if (rows.length === 0 || !rows[0].startDate) return null;
   return String(rows[0].startDate).split('T')[0];
 }
+
+
+// ==========================================
+// AUTO-RESOLUCIÓN DE DUPLICADOS
+// ==========================================
+
+/**
+ * Auto-resolver códigos de caja duplicados:
+ * 1. Si un código se repite en DÍAS DISTINTOS → agregar "1" al final del código más nuevo
+ * 2. Si un código se repite con <10 min de diferencia → archivar la más nueva O la de menor peso
+ * 
+ * Retorna un resumen de las acciones realizadas.
+ */
+export async function autoResolveDuplicates() {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  const { sql } = await import("drizzle-orm");
+  
+  const renamed: { id: number; oldCode: string; newCode: string; reason: string }[] = [];
+  const archived: { id: number; code: string; reason: string }[] = [];
+  
+  // 1. Obtener todos los códigos duplicados (no archivados)
+  const duplicateResult = await db.execute(sql`
+    SELECT boxCode, COUNT(*) as cnt 
+    FROM boxes 
+    WHERE archived = 0
+    GROUP BY boxCode 
+    HAVING COUNT(*) > 1
+  `);
+  
+  const duplicateCodes = (duplicateResult[0] as unknown as any[]).map(r => r.boxCode);
+  
+  if (duplicateCodes.length === 0) {
+    return { renamed, archived, message: "No se encontraron duplicados para resolver." };
+  }
+  
+  // 2. Para cada código duplicado, obtener todas las cajas con ese código
+  for (const code of duplicateCodes) {
+    const boxesResult = await db.execute(sql`
+      SELECT id, boxCode, weight, submissionTime, manuallyEdited
+      FROM boxes 
+      WHERE boxCode = ${code} AND archived = 0
+      ORDER BY submissionTime ASC
+    `);
+    
+    const dupes = (boxesResult[0] as unknown as any[]);
+    if (dupes.length < 2) continue;
+    
+    // Agrupar por día (YYYY-MM-DD)
+    const byDay: Map<string, any[]> = new Map();
+    for (const box of dupes) {
+      const day = new Date(box.submissionTime).toISOString().split('T')[0];
+      if (!byDay.has(day)) byDay.set(day, []);
+      byDay.get(day)!.push(box);
+    }
+    
+    const days = Array.from(byDay.keys()).sort();
+    
+    if (days.length > 1) {
+      // === CASO 1: Código repetido en DÍAS DISTINTOS ===
+      // Renombrar las cajas de los días posteriores agregando "1" al final
+      // Mantener el primer día sin cambios
+      for (let i = 1; i < days.length; i++) {
+        const dayBoxes = byDay.get(days[i])!;
+        for (const box of dayBoxes) {
+          // No renombrar cajas editadas manualmente
+          if (box.manuallyEdited) continue;
+          
+          // Generar nuevo código: agregar "1" al final
+          let newCode = box.boxCode + "1";
+          
+          // Verificar que el nuevo código no exista ya
+          const existsResult = await db.execute(sql`
+            SELECT COUNT(*) as cnt FROM boxes WHERE boxCode = ${newCode} AND archived = 0
+          `);
+          const exists = (existsResult[0] as unknown as any[])[0]?.cnt > 0;
+          if (exists) {
+            // Si ya existe, agregar "2", "3", etc.
+            let suffix = 2;
+            while (true) {
+              newCode = box.boxCode + String(suffix);
+              const checkResult = await db.execute(sql`
+                SELECT COUNT(*) as cnt FROM boxes WHERE boxCode = ${newCode} AND archived = 0
+              `);
+              if ((checkResult[0] as unknown as any[])[0]?.cnt === 0) break;
+              suffix++;
+              if (suffix > 9) break; // Seguridad
+            }
+          }
+          
+          // Renombrar la caja
+          await db.execute(sql`
+            UPDATE boxes 
+            SET boxCode = ${newCode}, 
+                originalBoxCode = COALESCE(originalBoxCode, ${box.boxCode}),
+                updatedAt = NOW()
+            WHERE id = ${box.id}
+          `);
+          
+          renamed.push({
+            id: box.id,
+            oldCode: box.boxCode,
+            newCode,
+            reason: `Código repetido en día distinto (${days[0]} vs ${days[i]})`
+          });
+        }
+      }
+    } else {
+      // === CASO 2: Código repetido en el MISMO DÍA ===
+      // Verificar si están a menos de 10 minutos
+      const dayBoxes = byDay.get(days[0])!;
+      
+      // Ordenar por submissionTime
+      dayBoxes.sort((a: any, b: any) => new Date(a.submissionTime).getTime() - new Date(b.submissionTime).getTime());
+      
+      // Comparar pares consecutivos
+      const toArchive: Set<number> = new Set();
+      
+      for (let i = 0; i < dayBoxes.length - 1; i++) {
+        for (let j = i + 1; j < dayBoxes.length; j++) {
+          const timeA = new Date(dayBoxes[i].submissionTime).getTime();
+          const timeB = new Date(dayBoxes[j].submissionTime).getTime();
+          const diffMinutes = Math.abs(timeB - timeA) / (1000 * 60);
+          
+          if (diffMinutes < 10) {
+            // Archivar la más nueva O la de menor peso
+            // Prioridad: archivar la de menor peso; si pesan igual, archivar la más nueva
+            const weightA = Number(dayBoxes[i].weight);
+            const weightB = Number(dayBoxes[j].weight);
+            
+            let archiveId: number;
+            if (weightA < weightB) {
+              archiveId = dayBoxes[i].id;
+            } else if (weightB < weightA) {
+              archiveId = dayBoxes[j].id;
+            } else {
+              // Mismo peso: archivar la más nueva (j es más nueva)
+              archiveId = dayBoxes[j].id;
+            }
+            
+            // No archivar cajas editadas manualmente
+            const archiveBox = dayBoxes.find((b: any) => b.id === archiveId);
+            if (archiveBox && !archiveBox.manuallyEdited) {
+              toArchive.add(archiveId);
+            }
+          }
+        }
+      }
+      
+      // Ejecutar archivado
+      for (const archiveId of Array.from(toArchive)) {
+        const box = dayBoxes.find((b: any) => b.id === archiveId);
+        if (!box) continue;
+        
+        await db.execute(sql`
+          UPDATE boxes 
+          SET archived = 1, archivedAt = NOW(), updatedAt = NOW()
+          WHERE id = ${archiveId}
+        `);
+        
+        archived.push({
+          id: archiveId,
+          code: box.boxCode,
+          reason: `Duplicado cercano (<10 min) en el mismo día - peso: ${(Number(box.weight) / 1000).toFixed(2)} kg`
+        });
+      }
+    }
+  }
+  
+  const message = `Auto-resolución completada: ${renamed.length} renombradas, ${archived.length} archivadas.`;
+  console.log(`🔧 ${message}`);
+  
+  return { renamed, archived, message };
+}
