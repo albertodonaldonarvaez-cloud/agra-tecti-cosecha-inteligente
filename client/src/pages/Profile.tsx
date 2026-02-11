@@ -75,9 +75,11 @@ export default function Profile() {
     enabled: !!user,
   });
 
+  const isAdmin = user?.role === "admin";
+
   const { data: myActivity } = trpc.profile.myActivity.useQuery(
     { limit: 20 },
-    { enabled: !!user }
+    { enabled: !!user && isAdmin }
   );
 
   const updateProfile = trpc.profile.update.useMutation({
@@ -303,38 +305,40 @@ export default function Profile() {
           )}
         </GlassCard>
 
-        {/* Mi actividad reciente */}
-        <GlassCard className="p-6">
-          <h2 className="text-lg font-semibold text-green-900 mb-4 flex items-center gap-2">
-            <Activity className="h-5 w-5" />
-            Mi Actividad Reciente
-          </h2>
-          {myActivity && myActivity.length > 0 ? (
-            <div className="space-y-1 max-h-[300px] overflow-y-auto">
-              {myActivity.map((log: any, i: number) => (
-                <div key={log.id || i} className="flex items-center gap-3 p-2 rounded hover:bg-gray-50 text-sm">
-                  <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${
-                    log.action === "login" ? "text-green-700 bg-green-100" :
-                    log.action === "logout" ? "text-red-700 bg-red-100" :
-                    log.action === "page_view" ? "text-blue-700 bg-blue-100" :
-                    "text-gray-700 bg-gray-100"
-                  }`}>
-                    {log.action === "login" ? "Inicio" :
-                     log.action === "logout" ? "Cierre" :
-                     log.action === "page_view" ? "Visita" : "Salida"}
-                  </span>
-                  <span className="text-gray-700 truncate flex-1">{log.pageName || log.page || "-"}</span>
-                  {log.durationSeconds > 0 && (
-                    <span className="text-xs text-purple-600 whitespace-nowrap">{formatDuration(log.durationSeconds)}</span>
-                  )}
-                  <span className="text-xs text-gray-400 whitespace-nowrap">{formatDate(log.createdAt)}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-center text-gray-500 py-4">No hay actividad registrada aún</p>
-          )}
-        </GlassCard>
+        {/* Mi actividad reciente - solo visible para admin */}
+        {isAdmin && (
+          <GlassCard className="p-6">
+            <h2 className="text-lg font-semibold text-green-900 mb-4 flex items-center gap-2">
+              <Activity className="h-5 w-5" />
+              Mi Actividad Reciente
+            </h2>
+            {myActivity && myActivity.length > 0 ? (
+              <div className="space-y-1 max-h-[300px] overflow-y-auto">
+                {myActivity.map((log: any, i: number) => (
+                  <div key={log.id || i} className="flex items-center gap-3 p-2 rounded hover:bg-gray-50 text-sm">
+                    <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${
+                      log.action === "login" ? "text-green-700 bg-green-100" :
+                      log.action === "logout" ? "text-red-700 bg-red-100" :
+                      log.action === "page_view" ? "text-blue-700 bg-blue-100" :
+                      "text-gray-700 bg-gray-100"
+                    }`}>
+                      {log.action === "login" ? "Inicio" :
+                       log.action === "logout" ? "Cierre" :
+                       log.action === "page_view" ? "Visita" : "Salida"}
+                    </span>
+                    <span className="text-gray-700 truncate flex-1">{log.pageName || log.page || "-"}</span>
+                    {log.durationSeconds > 0 && (
+                      <span className="text-xs text-purple-600 whitespace-nowrap">{formatDuration(log.durationSeconds)}</span>
+                    )}
+                    <span className="text-xs text-gray-400 whitespace-nowrap">{formatDate(log.createdAt)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-center text-gray-500 py-4">No hay actividad registrada aún</p>
+            )}
+          </GlassCard>
+        )}
       </div>
     </div>
   );

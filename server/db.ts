@@ -217,26 +217,27 @@ export async function getBoxFilterOptions() {
   const { sql } = await import("drizzle-orm");
   
   // Obtener fechas únicas (solo los últimos 60 días para rapidez)
-  // Usar nombres de columnas en camelCase
+  // Usar nombres de columnas en camelCase - excluir archivadas
   const datesResult = await db.execute(sql`
     SELECT DISTINCT DATE(submissionTime) as date 
     FROM boxes 
-    WHERE submissionTime >= DATE_SUB(NOW(), INTERVAL 60 DAY)
+    WHERE archived = 0 AND submissionTime >= DATE_SUB(NOW(), INTERVAL 60 DAY)
     ORDER BY date DESC
   `);
   
-  // Obtener parcelas únicas
+  // Obtener parcelas únicas - excluir archivadas
   const parcelsResult = await db.execute(sql`
     SELECT DISTINCT parcelCode as code, parcelName as name 
     FROM boxes 
-    WHERE parcelCode IS NOT NULL AND parcelCode != ''
+    WHERE archived = 0 AND parcelCode IS NOT NULL AND parcelCode != ''
     ORDER BY parcelCode
   `);
   
-  // Obtener cortadoras únicas
+  // Obtener cortadoras únicas - excluir archivadas
   const harvestersResult = await db.execute(sql`
     SELECT DISTINCT harvesterId as id 
     FROM boxes 
+    WHERE archived = 0
     ORDER BY harvesterId
   `);
   
@@ -324,35 +325,33 @@ export async function getBoxesWithFilters(startDate?: string, endDate?: string) 
   const db = await getDb();
   if (!db) return [];
   
-  let query = db.select().from(boxes);
+  const { and, gte, lte, desc, eq } = await import("drizzle-orm");
   
-  if (startDate && endDate) {
-    const { and, gte, lte } = await import("drizzle-orm");
-    query = query.where(
-      and(
-        gte(boxes.submissionTime, new Date(startDate)),
-        lte(boxes.submissionTime, new Date(endDate))
-      )
-    ) as any;
-  } else if (startDate) {
-    const { gte } = await import("drizzle-orm");
-    query = query.where(gte(boxes.submissionTime, new Date(startDate))) as any;
-  } else if (endDate) {
-    const { lte } = await import("drizzle-orm");
-    query = query.where(lte(boxes.submissionTime, new Date(endDate))) as any;
+  // Siempre excluir cajas archivadas
+  const conditions: any[] = [eq(boxes.archived, false)];
+  
+  if (startDate) {
+    conditions.push(gte(boxes.submissionTime, new Date(startDate)));
+  }
+  if (endDate) {
+    conditions.push(lte(boxes.submissionTime, new Date(endDate)));
   }
   
-  const { desc } = await import("drizzle-orm");
-  return await query.orderBy(desc(boxes.submissionTime));
+  return await db.select().from(boxes)
+    .where(and(...conditions))
+    .orderBy(desc(boxes.submissionTime));
 }
 
 export async function getAvailableDates() {
   const db = await getDb();
   if (!db) return [];
   
+  const { eq } = await import("drizzle-orm");
+  
+  // Solo cajas activas (no archivadas)
   const allBoxes = await db.select({
     submissionTime: boxes.submissionTime
-  }).from(boxes);
+  }).from(boxes).where(eq(boxes.archived, false));
   
   // Extraer solo las fechas únicas (sin hora)
   const uniqueDates = new Set(
