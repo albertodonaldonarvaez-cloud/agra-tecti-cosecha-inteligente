@@ -275,32 +275,19 @@ export async function syncFromKoboAPI(apiUrl: string, apiToken: string, assetId:
     console.log('\u2705 Sincronización completada:', result.processedCount, 'registros procesados');
     
     // Auto-resolver duplicados después de sincronizar
+    let autoResolveResult = null;
     if (result.processedCount > 0) {
       try {
         const { autoResolveDuplicates } = await import("./db");
-        const resolveResult = await autoResolveDuplicates();
-        console.log(`\ud83d\udd27 Auto-resoluci\u00f3n: ${resolveResult.renamed.length} renombradas, ${resolveResult.archived.length} archivadas`);
-        
-        // Agregar info de auto-resolución a los errores/logs
-        if (resolveResult.renamed.length > 0) {
-          result.errors.push(`Auto-resoluci\u00f3n: ${resolveResult.renamed.length} cajas renombradas (d\u00edas distintos)`);
-          for (const r of resolveResult.renamed) {
-            result.errors.push(`  Renombrada: ${r.oldCode} \u2192 ${r.newCode}`);
-          }
-        }
-        if (resolveResult.archived.length > 0) {
-          result.errors.push(`Auto-resoluci\u00f3n: ${resolveResult.archived.length} cajas archivadas (duplicados <10 min)`);
-          for (const a of resolveResult.archived) {
-            result.errors.push(`  Archivada: ${a.code} - ${a.reason}`);
-          }
-        }
+        autoResolveResult = await autoResolveDuplicates();
+        console.log(`🔧 Auto-resolución: ${autoResolveResult.renamed.length} renombradas, ${autoResolveResult.archived.length} archivadas`);
       } catch (resolveError) {
-        console.error('\u26a0\ufe0f Error en auto-resoluci\u00f3n de duplicados:', resolveError);
-        result.errors.push(`Error en auto-resoluci\u00f3n: ${(resolveError as any).message || resolveError}`);
+        console.error('⚠️ Error en auto-resolución de duplicados:', resolveError);
+        result.errors.push(`Error en auto-resolución: ${(resolveError as any).message || resolveError}`);
       }
     }
     
-    return result;
+    return { ...result, autoResolveResult };
   } catch (error: any) {
     console.error('\u274c Error en sincronización:', error);
     

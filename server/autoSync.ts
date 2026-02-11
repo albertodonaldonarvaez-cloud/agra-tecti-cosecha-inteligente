@@ -92,6 +92,7 @@ async function runSync(trigger: string = "auto"): Promise<SyncLog> {
         processedCount: result.processedCount,
         totalCount: result.totalCount,
         errors: result.errors || [],
+        autoResolveResult: result.autoResolveResult || null,
       });
     } catch (telegramError) {
       console.error("[AutoSync] Error al enviar notificación Telegram:", telegramError);

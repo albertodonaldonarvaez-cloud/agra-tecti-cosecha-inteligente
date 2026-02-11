@@ -251,6 +251,7 @@ export const appRouter = router({
                 processedCount: result.processedCount,
                 totalCount: result.totalCount,
                 errors: result.errors || [],
+                autoResolveResult: result.autoResolveResult || null,
               });
             } catch (telegramError) {
               console.error("Error al enviar notificación Telegram:", telegramError);

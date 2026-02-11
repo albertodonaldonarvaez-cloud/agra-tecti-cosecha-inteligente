@@ -12,11 +12,18 @@ interface TelegramConfig {
   chatId: string;
 }
 
+interface AutoResolveResult {
+  renamed: { id: number; oldCode: string; newCode: string; reason: string }[];
+  archived: { id: number; code: string; reason: string }[];
+  message: string;
+}
+
 interface SyncSummary {
-  trigger: string; // "auto", "manual", "startup"
+  trigger: string; // "auto", "manual", "startup", "scheduled"
   processedCount: number;
   totalCount: number;
   errors: string[];
+  autoResolveResult?: AutoResolveResult | null;
 }
 
 interface DatabaseIssues {
@@ -195,11 +202,14 @@ function buildSyncMessage(summary: SyncSummary, issues: DatabaseIssues | null): 
   msg += `• Nuevos importados: ${summary.processedCount}\n`;
   msg += `• Omitidos/existentes: ${summary.totalCount - summary.processedCount}\n\n`;
 
-  // Errores de la sincronización actual
+  // Errores de la sincronización actual (excluir los de auto-resolución que ahora van en su sección)
   const realErrors = summary.errors.filter(e => 
     !e.startsWith("Ya importado") && 
     !e.startsWith("Omitido") && 
-    !e.startsWith("Registro duplicado exacto")
+    !e.startsWith("Registro duplicado exacto") &&
+    !e.startsWith("Auto-resolución:") &&
+    !e.startsWith("  Renombrada:") &&
+    !e.startsWith("  Archivada:")
   );
   
   if (realErrors.length > 0) {
@@ -212,6 +222,52 @@ function buildSyncMessage(summary: SyncSummary, issues: DatabaseIssues | null): 
       msg += `  ... y ${realErrors.length - 5} más\n`;
     }
     msg += `\n`;
+  }
+
+  // === SECCIÓN DEL AUTO-RESOLVEDOR DE DUPLICADOS ===
+  const resolve = summary.autoResolveResult;
+  if (resolve) {
+    const hasActions = resolve.renamed.length > 0 || resolve.archived.length > 0;
+    
+    if (hasActions) {
+      msg += `🔧 <b>Auto-Resolución de Duplicados</b>\n`;
+      msg += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    }
+
+    // Cajas renombradas (días distintos)
+    if (resolve.renamed.length > 0) {
+      msg += `🔄 <b>Renombradas (días distintos): ${resolve.renamed.length}</b>\n`;
+      const maxShow = Math.min(resolve.renamed.length, 8);
+      for (let i = 0; i < maxShow; i++) {
+        const r = resolve.renamed[i];
+        msg += `  • ${r.oldCode} → ${r.newCode}\n`;
+        // Mostrar razón en línea más pequeña
+        msg += `    <i>${r.reason}</i>\n`;
+      }
+      if (resolve.renamed.length > 8) {
+        msg += `  ... y ${resolve.renamed.length - 8} más\n`;
+      }
+      msg += `\n`;
+    }
+
+    // Cajas archivadas (duplicados cercanos)
+    if (resolve.archived.length > 0) {
+      msg += `📦 <b>Archivadas (duplicados &lt;10 min): ${resolve.archived.length}</b>\n`;
+      const maxShow = Math.min(resolve.archived.length, 8);
+      for (let i = 0; i < maxShow; i++) {
+        const a = resolve.archived[i];
+        msg += `  • ${a.code}\n`;
+        msg += `    <i>${a.reason}</i>\n`;
+      }
+      if (resolve.archived.length > 8) {
+        msg += `  ... y ${resolve.archived.length - 8} más\n`;
+      }
+      msg += `\n`;
+    }
+
+    if (!hasActions) {
+      msg += `✅ <b>Auto-Resolución:</b> Sin duplicados nuevos para resolver\n\n`;
+    }
   }
 
   // Estado de la base de datos
