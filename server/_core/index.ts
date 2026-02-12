@@ -81,6 +81,12 @@ async function startServer() {
   const { proxyKoboImage } = await import("../imageProxy");
   app.get("/api/image-proxy", proxyKoboImage);
   
+  // WebODM tile proxy - orthofotos, DSM, DTM, NDVI, VARI
+  const { proxyOdmTile, getOdmTaskBounds, getOdmAvailableLayers } = await import("../odmTileProxy");
+  app.get("/api/odm-tiles/:projectId/:taskUuid/:type/:z/:x/:y", proxyOdmTile);
+  app.get("/api/odm-bounds/:projectId/:taskUuid", getOdmTaskBounds);
+  app.get("/api/odm-layers/:projectId/:taskUuid", getOdmAvailableLayers);
+  
   // Servir fotos estáticas desde /app/photos
   app.use("/app/photos", express.static("/app/photos"));
   

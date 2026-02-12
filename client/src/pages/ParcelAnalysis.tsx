@@ -1,11 +1,12 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { GlassCard } from "@/components/GlassCard";
 import { ProtectedPage } from "@/components/ProtectedPage";
+import { APP_LOGO } from "@/const";
 import { trpc } from "@/lib/trpc";
 import {
   MapPin, TreePine, Ruler, Sprout, Package, TrendingUp, Calendar,
-  ChevronDown, ChevronUp, Edit3, Save, X, Layers, Eye, EyeOff,
-  Plane, Clock, ImageIcon, BarChart3, Leaf, ArrowUpDown
+  ChevronDown, ChevronUp, Edit3, Save, X, Layers, Eye,
+  Plane, Clock, ImageIcon, BarChart3, Leaf, ArrowUpDown, ArrowLeft, Activity
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
@@ -14,9 +15,15 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import Map from "ol/Map";
 import View from "ol/View";
 import TileLayer from "ol/layer/Tile";
+import VectorLayer from "ol/layer/Vector";
+import VectorSource from "ol/source/Vector";
 import XYZ from "ol/source/XYZ";
 import OSM from "ol/source/OSM";
-import { fromLonLat } from "ol/proj";
+import Feature from "ol/Feature";
+import Polygon from "ol/geom/Polygon";
+import { fromLonLat, transformExtent } from "ol/proj";
+import { Style, Fill, Stroke, Text as OlText } from "ol/style";
+import { boundingExtent } from "ol/extent";
 import "ol/ol.css";
 
 export default function ParcelAnalysis() {
@@ -35,6 +42,16 @@ const STATUS_MAP: Record<number, { label: string; color: string; bg: string }> =
   40: { label: "Completado", color: "text-green-700", bg: "bg-green-100" },
   50: { label: "Cancelado", color: "text-gray-700", bg: "bg-gray-100" },
 };
+
+const LAYER_TYPES = [
+  { key: "orthophoto", label: "Ortofoto", shortLabel: "Orto", color: "from-green-500 to-emerald-600" },
+  { key: "ndvi", label: "NDVI (Salud)", shortLabel: "NDVI", color: "from-lime-500 to-green-600" },
+  { key: "vari", label: "VARI (RGB)", shortLabel: "VARI", color: "from-teal-500 to-cyan-600" },
+  { key: "dsm", label: "DSM", shortLabel: "DSM", color: "from-blue-500 to-indigo-600" },
+  { key: "dtm", label: "DTM", shortLabel: "DTM", color: "from-purple-500 to-violet-600" },
+] as const;
+
+type LayerType = typeof LAYER_TYPES[number]["key"];
 
 function formatDate(dateStr: string) {
   if (!dateStr) return "-";
@@ -83,16 +100,18 @@ function ParcelAnalysisContent() {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Seleccionar primera parcela automáticamente
-  useEffect(() => {
-    if (parcels && parcels.length > 0 && !selectedParcelId) {
-      setSelectedParcelId(parcels[0].id);
-    }
-  }, [parcels, selectedParcelId]);
-
   const selectedParcel = parcels?.find((p: any) => p.id === selectedParcelId);
   const selectedMapping = odmMappings?.find((m: any) => m.parcelId === selectedParcelId);
   const selectedDetails = allDetails?.find((d: any) => d.parcelId === selectedParcelId);
+
+  const handleSelectParcel = useCallback((id: number) => {
+    setSelectedParcelId(id);
+    setActiveTab("map");
+  }, []);
+
+  const handleBack = useCallback(() => {
+    setSelectedParcelId(null);
+  }, []);
 
   if (parcelsLoading) {
     return (
@@ -108,52 +127,60 @@ function ParcelAnalysisContent() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 md:h-16 md:w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-green-400 to-emerald-600 shadow-lg">
-              <Leaf className="h-6 w-6 md:h-8 md:w-8 text-white" />
-            </div>
+            <img src={APP_LOGO} alt="Agratec" className="h-12 w-12 md:h-16 md:w-16" />
             <div>
               <h1 className="text-2xl md:text-4xl font-bold bg-gradient-to-r from-green-800 to-emerald-600 bg-clip-text text-transparent">
                 Análisis de Parcela
               </h1>
               <p className="text-xs md:text-base text-green-600/80">
-                Vuelos, ortomosaicos y rendimiento por parcela
+                Vuelos, ortomosaicos, salud vegetal y rendimiento
               </p>
             </div>
           </div>
+          {selectedParcelId && (
+            <button
+              onClick={handleBack}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white/60 text-green-700 rounded-xl text-sm font-medium hover:bg-green-100 transition-all border border-green-200/50 sm:ml-auto"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span className="hidden sm:inline">Vista General</span>
+              <span className="sm:hidden">Atrás</span>
+            </button>
+          )}
         </div>
 
-        {/* Selector de Parcela */}
-        <GlassCard className="p-3 md:p-4" hover={false}>
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-            <div className="flex items-center gap-2 text-green-700 font-medium text-sm">
-              <MapPin className="h-4 w-4" />
-              <span>Parcela:</span>
-            </div>
-            <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-              {parcels?.map((p: any) => {
-                const hasOdm = odmMappings?.some((m: any) => m.parcelId === p.id);
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => { setSelectedParcelId(p.id); setActiveTab("map"); }}
-                    className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center gap-1.5 ${
-                      selectedParcelId === p.id
-                        ? "bg-green-600 text-white shadow-lg shadow-green-200"
-                        : "bg-white/60 text-green-700 hover:bg-green-100 border border-green-200/50"
-                    }`}
-                  >
-                    {p.name || p.code}
-                    {hasOdm && <Plane className="h-3 w-3 opacity-70" />}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </GlassCard>
+        {/* Vista General (sin parcela seleccionada) */}
+        {!selectedParcelId && (
+          <OverviewView
+            parcels={parcels || []}
+            odmMappings={odmMappings || []}
+            allDetails={allDetails || []}
+            onSelectParcel={handleSelectParcel}
+          />
+        )}
 
-        {/* Tabs */}
-        {selectedParcel && (
+        {/* Vista de Detalle (parcela seleccionada) */}
+        {selectedParcelId && selectedParcel && (
           <>
+            {/* Nombre de parcela */}
+            <GlassCard className="p-3 md:p-4" hover={false}>
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-green-400 to-emerald-600 shadow">
+                  <MapPin className="h-5 w-5 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-lg md:text-xl font-bold text-green-900">{selectedParcel.name || selectedParcel.code}</h2>
+                  <p className="text-xs text-green-500">Código: {selectedParcel.code}</p>
+                </div>
+                {selectedMapping && (
+                  <span className="ml-auto text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full flex items-center gap-1">
+                    <Plane className="h-3 w-3" /> WebODM vinculado
+                  </span>
+                )}
+              </div>
+            </GlassCard>
+
+            {/* Tabs */}
             <div className="flex gap-1 bg-white/40 backdrop-blur-sm rounded-2xl p-1 border border-green-200/30">
               {[
                 { key: "map" as const, icon: Layers, label: "Mapa & Vuelos", shortLabel: "Mapa" },
@@ -178,18 +205,10 @@ function ParcelAnalysisContent() {
 
             {/* Content */}
             {activeTab === "map" && (
-              <MapAndFlightsTab
-                parcel={selectedParcel}
-                mapping={selectedMapping}
-                isAdmin={isAdmin}
-              />
+              <MapAndFlightsTab parcel={selectedParcel} mapping={selectedMapping} isAdmin={isAdmin} />
             )}
             {activeTab === "details" && (
-              <ParcelDetailsTab
-                parcel={selectedParcel}
-                details={selectedDetails}
-                isAdmin={isAdmin}
-              />
+              <ParcelDetailsTab parcel={selectedParcel} details={selectedDetails} isAdmin={isAdmin} />
             )}
             {activeTab === "harvest" && (
               <HarvestTab parcel={selectedParcel} />
@@ -201,14 +220,203 @@ function ParcelAnalysisContent() {
   );
 }
 
+// ============ VISTA GENERAL ============
+function OverviewView({ parcels, odmMappings, allDetails, onSelectParcel }: {
+  parcels: any[];
+  odmMappings: any[];
+  allDetails: any[];
+  onSelectParcel: (id: number) => void;
+}) {
+  const { user } = useAuth();
+  const mapRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<Map | null>(null);
+
+  // Cargar stats de cosecha para cada parcela
+  const parcelCodes = useMemo(() => parcels.map((p: any) => p.code || p.name || ""), [parcels]);
+
+  // Inicializar mapa con polígonos de todas las parcelas
+  useEffect(() => {
+    if (!mapRef.current || mapInstanceRef.current) return;
+
+    const baseLayer = new TileLayer({ source: new OSM() });
+
+    // Crear features para cada parcela con polígono
+    const features: Feature[] = [];
+    const allCoords: number[][] = [];
+
+    parcels.forEach((p: any) => {
+      if (!p.polygon) return;
+      try {
+        const poly = typeof p.polygon === "string" ? JSON.parse(p.polygon) : p.polygon;
+        if (!poly.coordinates || !poly.coordinates[0] || poly.coordinates[0].length < 3) return;
+
+        const coords = poly.coordinates[0].map((c: number[]) => fromLonLat([c[0], c[1]]));
+        allCoords.push(...poly.coordinates[0]);
+
+        const feature = new Feature({
+          geometry: new Polygon([coords]),
+          name: p.name || p.code,
+          id: p.id,
+        });
+
+        feature.setStyle(new Style({
+          fill: new Fill({ color: "rgba(16, 185, 129, 0.2)" }),
+          stroke: new Stroke({ color: "#10b981", width: 2.5 }),
+          text: new OlText({
+            text: p.name || p.code,
+            font: "bold 13px sans-serif",
+            fill: new Fill({ color: "#065f46" }),
+            stroke: new Stroke({ color: "rgba(255,255,255,0.9)", width: 3 }),
+            overflow: true,
+          }),
+        }));
+
+        features.push(feature);
+      } catch (e) {
+        console.warn("Error parsing polygon for", p.code, e);
+      }
+    });
+
+    const vectorSource = new VectorSource({ features });
+    const vectorLayer = new VectorLayer({ source: vectorSource });
+
+    // Centro por defecto (México)
+    let center = fromLonLat([-105.0, 23.0]);
+    let zoom = 5;
+
+    const map = new Map({
+      target: mapRef.current,
+      layers: [baseLayer, vectorLayer],
+      view: new View({ center, zoom, maxZoom: 22 }),
+    });
+
+    // Ajustar vista a los polígonos
+    if (features.length > 0) {
+      const extent = vectorSource.getExtent();
+      map.getView().fit(extent, { padding: [50, 50, 50, 50], maxZoom: 17, duration: 500 });
+    }
+
+    // Click en polígono para seleccionar parcela
+    map.on("click", (evt) => {
+      const feature = map.forEachFeatureAtPixel(evt.pixel, (f) => f);
+      if (feature) {
+        const id = feature.get("id");
+        if (id) onSelectParcel(id);
+      }
+    });
+
+    // Cursor pointer al hover
+    map.on("pointermove", (evt) => {
+      const hit = map.hasFeatureAtPixel(evt.pixel);
+      const target = map.getTargetElement();
+      if (target) (target as HTMLElement).style.cursor = hit ? "pointer" : "";
+    });
+
+    mapInstanceRef.current = map;
+
+    return () => {
+      map.setTarget(undefined);
+      mapInstanceRef.current = null;
+    };
+  }, [parcels]);
+
+  return (
+    <div className="space-y-4">
+      {/* Mapa general */}
+      <GlassCard className="overflow-hidden" hover={false}>
+        <div className="p-3 md:p-4 border-b border-green-200/30">
+          <h3 className="text-base md:text-lg font-semibold text-green-800 flex items-center gap-2">
+            <MapPin className="h-5 w-5" />
+            Vista General de Parcelas
+            <span className="text-xs font-normal text-green-500 bg-green-50 px-2 py-0.5 rounded-full">
+              {parcels.length} parcelas
+            </span>
+          </h3>
+          <p className="text-xs text-green-500 mt-1">Haz clic en una parcela del mapa o de la lista para ver su detalle</p>
+        </div>
+        <div
+          ref={mapRef}
+          className="w-full h-[250px] sm:h-[350px] md:h-[450px]"
+          style={{ background: "#f0f9f0" }}
+        />
+      </GlassCard>
+
+      {/* Lista de parcelas con resumen */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
+        {parcels.map((p: any) => {
+          const hasOdm = odmMappings.some((m: any) => m.parcelId === p.id);
+          const detail = allDetails.find((d: any) => d.parcelId === p.id);
+
+          return (
+            <GlassCard
+              key={p.id}
+              className="p-4 cursor-pointer hover:shadow-lg hover:border-green-300 transition-all duration-200 border border-transparent"
+              hover={true}
+              onClick={() => onSelectParcel(p.id)}
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-green-400 to-emerald-600 shadow">
+                  <MapPin className="h-5 w-5 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-semibold text-green-900 truncate">{p.name || p.code}</h4>
+                  <p className="text-xs text-green-500">Código: {p.code}</p>
+                </div>
+                {hasOdm && (
+                  <span className="flex-shrink-0 text-[10px] text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                    <Plane className="h-2.5 w-2.5" /> ODM
+                  </span>
+                )}
+              </div>
+
+              {/* Stats rápidos */}
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                {detail?.totalHectares && (
+                  <div className="bg-white/40 rounded-lg px-2 py-1.5">
+                    <div className="text-[10px] text-green-500">Hectáreas</div>
+                    <div className="text-sm font-bold text-green-900">{detail.totalHectares} ha</div>
+                  </div>
+                )}
+                {detail?.productiveHectares && (
+                  <div className="bg-white/40 rounded-lg px-2 py-1.5">
+                    <div className="text-[10px] text-green-500">Productivas</div>
+                    <div className="text-sm font-bold text-emerald-700">{detail.productiveHectares} ha</div>
+                  </div>
+                )}
+                {detail?.totalTrees && (
+                  <div className="bg-white/40 rounded-lg px-2 py-1.5">
+                    <div className="text-[10px] text-green-500">Árboles</div>
+                    <div className="text-sm font-bold text-green-900">{detail.totalTrees.toLocaleString()}</div>
+                  </div>
+                )}
+                {detail?.productiveTrees && (
+                  <div className="bg-white/40 rounded-lg px-2 py-1.5">
+                    <div className="text-[10px] text-green-500">Productivos</div>
+                    <div className="text-sm font-bold text-emerald-700">{detail.productiveTrees.toLocaleString()}</div>
+                  </div>
+                )}
+              </div>
+
+              {!detail?.totalHectares && !detail?.totalTrees && (
+                <p className="mt-3 text-xs text-green-400 italic">Sin datos de detalle configurados</p>
+              )}
+            </GlassCard>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ============ TAB 1: MAPA Y VUELOS ============
 function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: any; isAdmin: boolean }) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<Map | null>(null);
   const tileLayerRef = useRef<TileLayer<XYZ> | null>(null);
   const [selectedTaskUuid, setSelectedTaskUuid] = useState<string | null>(null);
-  const [selectedLayerType, setSelectedLayerType] = useState<"orthophoto" | "dsm" | "dtm">("orthophoto");
+  const [selectedLayerType, setSelectedLayerType] = useState<LayerType>("orthophoto");
   const [expandedTask, setExpandedTask] = useState<number | null>(null);
+  const [mapReady, setMapReady] = useState(false);
 
   // Cargar tareas del proyecto ODM
   const { data: tasks, isLoading: tasksLoading } = trpc.webodm.getProjectTasks.useQuery(
@@ -216,18 +424,11 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     { enabled: !!mapping?.odmProjectId, staleTime: 2 * 60 * 1000 }
   );
 
-  // Obtener URL de tiles para la tarea seleccionada
-  const { data: tileUrlData } = trpc.webodm.getTileUrl.useQuery(
-    { projectId: mapping?.odmProjectId || 0, taskUuid: selectedTaskUuid || "", type: selectedLayerType },
-    { enabled: !!mapping?.odmProjectId && !!selectedTaskUuid, staleTime: 5 * 60 * 1000 }
-  );
-
   // Seleccionar la primera tarea completada automáticamente
   useEffect(() => {
     if (tasks && tasks.length > 0 && !selectedTaskUuid) {
       const completed = tasks.filter((t: any) => t.status === 40);
       if (completed.length > 0) {
-        // Seleccionar la más reciente
         const sorted = [...completed].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
         setSelectedTaskUuid(sorted[0].uuid);
       }
@@ -239,13 +440,13 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     setSelectedTaskUuid(null);
     setSelectedLayerType("orthophoto");
     setExpandedTask(null);
+    setMapReady(false);
   }, [parcel?.id]);
 
   // Inicializar mapa OpenLayers
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return;
 
-    // Centro por defecto (México)
     let center = fromLonLat([-105.0, 23.0]);
     let zoom = 5;
 
@@ -265,9 +466,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
       }
     }
 
-    const baseLayer = new TileLayer({
-      source: new OSM(),
-    });
+    const baseLayer = new TileLayer({ source: new OSM() });
 
     const odmTileLayer = new TileLayer({
       source: new XYZ({ url: "" }),
@@ -276,46 +475,86 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     });
     tileLayerRef.current = odmTileLayer;
 
+    // Polígono de la parcela
+    const features: Feature[] = [];
+    if (parcel?.polygon) {
+      try {
+        const poly = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
+        if (poly.coordinates && poly.coordinates[0]) {
+          const coords = poly.coordinates[0].map((c: number[]) => fromLonLat([c[0], c[1]]));
+          const feature = new Feature({ geometry: new Polygon([coords]) });
+          feature.setStyle(new Style({
+            fill: new Fill({ color: "rgba(16, 185, 129, 0.08)" }),
+            stroke: new Stroke({ color: "#10b981", width: 2, lineDash: [8, 4] }),
+          }));
+          features.push(feature);
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    const vectorLayer = new VectorLayer({
+      source: new VectorSource({ features }),
+    });
+
     const map = new Map({
       target: mapRef.current,
-      layers: [baseLayer, odmTileLayer],
-      view: new View({ center, zoom, maxZoom: 22 }),
+      layers: [baseLayer, odmTileLayer, vectorLayer],
+      view: new View({ center, zoom, maxZoom: 24 }),
     });
 
     mapInstanceRef.current = map;
+    setMapReady(true);
 
     return () => {
       map.setTarget(undefined);
       mapInstanceRef.current = null;
       tileLayerRef.current = null;
+      setMapReady(false);
     };
   }, [parcel?.id]);
 
-  // Actualizar capa de tiles cuando cambia la URL
+  // Actualizar capa de tiles cuando cambia la tarea o el tipo de capa
   useEffect(() => {
-    if (!tileLayerRef.current) return;
+    if (!tileLayerRef.current || !mapReady) return;
 
-    if (tileUrlData?.url) {
+    if (selectedTaskUuid && mapping?.odmProjectId) {
+      // Usar el proxy del servidor en lugar de URL directa a WebODM
+      const proxyUrl = `/api/odm-tiles/${mapping.odmProjectId}/${selectedTaskUuid}/${selectedLayerType}/{z}/{x}/{-y}.png`;
+
       tileLayerRef.current.setSource(
         new XYZ({
-          url: tileUrlData.url,
-          maxZoom: 22,
-          crossOrigin: "anonymous",
+          url: proxyUrl,
+          maxZoom: 24,
+          tileSize: 256,
         })
       );
       tileLayerRef.current.setVisible(true);
+
+      // Obtener bounds para hacer zoom al área correcta
+      fetch(`/api/odm-bounds/${mapping.odmProjectId}/${selectedTaskUuid}`)
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data?.bounds && mapInstanceRef.current) {
+            const [minLon, minLat, maxLon, maxLat] = data.bounds;
+            const extent = transformExtent([minLon, minLat, maxLon, maxLat], "EPSG:4326", "EPSG:3857");
+            mapInstanceRef.current.getView().fit(extent, {
+              padding: [30, 30, 30, 30],
+              maxZoom: 20,
+              duration: 800,
+            });
+          }
+        })
+        .catch(err => console.warn("Error fetching bounds:", err));
     } else {
       tileLayerRef.current.setVisible(false);
     }
-  }, [tileUrlData?.url]);
+  }, [selectedTaskUuid, selectedLayerType, mapReady, mapping?.odmProjectId]);
 
-  // Tareas ordenadas por fecha (más reciente primero)
+  // Tareas ordenadas
   const sortedTasks = useMemo(() => {
     if (!tasks) return [];
     return [...tasks].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [tasks]);
-
-  const completedTasks = sortedTasks.filter((t: any) => t.status === 40);
 
   if (!mapping) {
     return (
@@ -323,7 +562,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
         <Plane className="h-12 w-12 mx-auto text-green-300 mb-4" />
         <h3 className="text-lg font-semibold text-green-800 mb-2">Sin conexión a WebODM</h3>
         <p className="text-green-600 text-sm max-w-md mx-auto">
-          Esta parcela no tiene un proyecto de WebODM vinculado. 
+          Esta parcela no tiene un proyecto de WebODM vinculado.
           {isAdmin ? " Ve a Configuración → WebODM para vincular un proyecto." : " Contacta al administrador."}
         </p>
       </GlassCard>
@@ -335,30 +574,33 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
       {/* Mapa */}
       <GlassCard className="overflow-hidden" hover={false}>
         <div className="p-3 md:p-4 border-b border-green-200/30">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-            <h3 className="text-base md:text-lg font-semibold text-green-800 flex items-center gap-2">
-              <Layers className="h-5 w-5" />
-              Ortomosaico
-              {selectedTaskUuid && (
-                <span className="text-xs font-normal text-green-500 bg-green-50 px-2 py-0.5 rounded-full">
-                  {sortedTasks.find((t: any) => t.uuid === selectedTaskUuid)?.name || "Tarea"}
-                </span>
-              )}
-            </h3>
-            {/* Selector de capa */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base md:text-lg font-semibold text-green-800 flex items-center gap-2">
+                <Layers className="h-5 w-5" />
+                Ortomosaico
+                {selectedTaskUuid && (
+                  <span className="text-xs font-normal text-green-500 bg-green-50 px-2 py-0.5 rounded-full">
+                    {sortedTasks.find((t: any) => t.uuid === selectedTaskUuid)?.name || "Tarea"}
+                  </span>
+                )}
+              </h3>
+            </div>
+            {/* Selector de capas */}
             {selectedTaskUuid && (
-              <div className="flex gap-1 bg-green-50 rounded-xl p-0.5">
-                {(["orthophoto", "dsm", "dtm"] as const).map((type) => (
+              <div className="flex flex-wrap gap-1.5">
+                {LAYER_TYPES.map(({ key, label, shortLabel }) => (
                   <button
-                    key={type}
-                    onClick={() => setSelectedLayerType(type)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
-                      selectedLayerType === type
+                    key={key}
+                    onClick={() => setSelectedLayerType(key)}
+                    className={`px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all ${
+                      selectedLayerType === key
                         ? "bg-green-600 text-white shadow-sm"
-                        : "text-green-700 hover:bg-green-100"
+                        : "bg-white/60 text-green-700 hover:bg-green-100 border border-green-200/40"
                     }`}
                   >
-                    {type === "orthophoto" ? "Ortofoto" : type === "dsm" ? "DSM" : "DTM"}
+                    <span className="hidden sm:inline">{label}</span>
+                    <span className="sm:hidden">{shortLabel}</span>
                   </button>
                 ))}
               </div>
@@ -367,9 +609,29 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
         </div>
         <div
           ref={mapRef}
-          className="w-full h-[300px] sm:h-[400px] md:h-[500px] lg:h-[550px]"
+          className="w-full h-[300px] sm:h-[400px] md:h-[500px] lg:h-[600px]"
           style={{ background: "#f0f9f0" }}
         />
+        {/* Leyenda de capa activa */}
+        {selectedTaskUuid && selectedLayerType !== "orthophoto" && (
+          <div className="p-2 md:p-3 border-t border-green-200/30 bg-white/30">
+            <div className="flex items-center gap-2 text-xs text-green-600">
+              <Activity className="h-3.5 w-3.5" />
+              {selectedLayerType === "ndvi" && (
+                <span><strong>NDVI</strong> — Índice de Vegetación de Diferencia Normalizada. Rojo = vegetación estresada, Verde = vegetación sana.</span>
+              )}
+              {selectedLayerType === "vari" && (
+                <span><strong>VARI</strong> — Índice de Vegetación Visible (solo RGB). Útil para cámaras sin banda infrarroja.</span>
+              )}
+              {selectedLayerType === "dsm" && (
+                <span><strong>DSM</strong> — Modelo Digital de Superficie. Incluye árboles, edificios y terreno.</span>
+              )}
+              {selectedLayerType === "dtm" && (
+                <span><strong>DTM</strong> — Modelo Digital de Terreno. Solo la superficie del suelo.</span>
+              )}
+            </div>
+          </div>
+        )}
       </GlassCard>
 
       {/* Timeline de Vuelos */}
@@ -399,7 +661,6 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
 
               return (
                 <div key={task.id} className="relative">
-                  {/* Línea de timeline */}
                   {idx < sortedTasks.length - 1 && (
                     <div className="absolute left-[19px] top-[40px] bottom-[-12px] w-0.5 bg-green-200/60 hidden sm:block" />
                   )}
@@ -415,14 +676,12 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
                       setExpandedTask(isExpanded ? null : task.id);
                     }}
                   >
-                    {/* Dot */}
                     <div className={`hidden sm:flex flex-shrink-0 w-[38px] h-[38px] rounded-full items-center justify-center ${
                       isSelected ? "bg-green-600 text-white" : isCompleted ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"
                     }`}>
                       <Plane className="h-4 w-4" />
                     </div>
 
-                    {/* Info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
                         <span className="font-medium text-green-900 text-sm truncate">{task.name || `Vuelo #${task.id}`}</span>
@@ -447,7 +706,6 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
                         )}
                       </div>
 
-                      {/* Expanded details */}
                       {isExpanded && (
                         <div className="mt-2 pt-2 border-t border-green-100 text-xs text-green-600 space-y-1">
                           <div><strong>UUID:</strong> <span className="font-mono text-[10px]">{task.uuid}</span></div>
@@ -461,7 +719,6 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
                       )}
                     </div>
 
-                    {/* Expand/Select buttons */}
                     <div className="flex flex-col items-center gap-1 flex-shrink-0">
                       {isCompleted && (
                         <button
@@ -553,7 +810,6 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
 
   return (
     <div className="space-y-4">
-      {/* Header con botón editar */}
       <div className="flex items-center justify-between">
         <h3 className="text-base md:text-lg font-semibold text-green-800 flex items-center gap-2">
           <TreePine className="h-5 w-5" />
@@ -592,7 +848,6 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
         )}
       </div>
 
-      {/* Grid de campos */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
         {fields.map(({ key, label, icon: Icon, suffix, type }) => (
           <GlassCard key={key} className="p-3 md:p-4" hover={false}>
@@ -623,7 +878,6 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
         ))}
       </div>
 
-      {/* Notas */}
       <GlassCard className="p-3 md:p-4" hover={false}>
         <div className="flex items-center gap-2 mb-2">
           <span className="text-sm text-green-700 font-medium">Notas</span>
@@ -642,7 +896,6 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
         )}
       </GlassCard>
 
-      {/* Resumen visual */}
       {(form.totalTrees || form.productiveTrees || form.newTrees) && (
         <GlassCard className="p-3 md:p-5" hover={false}>
           <h4 className="text-sm font-semibold text-green-800 mb-3">Composición del Arbolado</h4>
@@ -700,7 +953,6 @@ function HarvestTab({ parcel }: { parcel: any }) {
     { enabled: !!parcelCode && !!user, staleTime: 2 * 60 * 1000 }
   );
 
-  // Cargar detalles para calcular rendimiento por hectárea
   const { data: parcelDetail } = trpc.parcelAnalysis.getDetails.useQuery(
     { parcelId: parcel.id },
     { enabled: !!user, staleTime: 5 * 60 * 1000 }
@@ -708,7 +960,6 @@ function HarvestTab({ parcel }: { parcel: any }) {
 
   const productiveHa = parcelDetail?.productiveHectares ? parseFloat(parcelDetail.productiveHectares) : null;
 
-  // Datos ordenados para la tabla
   const sortedDaily = useMemo(() => {
     if (!dailyHarvest) return [];
     return [...dailyHarvest].sort((a: any, b: any) => {
@@ -721,7 +972,6 @@ function HarvestTab({ parcel }: { parcel: any }) {
     });
   }, [dailyHarvest, sortField, sortOrder]);
 
-  // Datos para la gráfica (cronológico)
   const chartData = useMemo(() => {
     if (!dailyHarvest) return [];
     return [...dailyHarvest]
@@ -757,7 +1007,6 @@ function HarvestTab({ parcel }: { parcel: any }) {
 
   return (
     <div className="space-y-4">
-      {/* Stats generales */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: "Total Cosechado", value: `${harvestStats.totalWeight} kg`, icon: Package, color: "from-green-400 to-emerald-500" },
@@ -777,7 +1026,6 @@ function HarvestTab({ parcel }: { parcel: any }) {
         ))}
       </div>
 
-      {/* Rendimiento por hectárea */}
       {productiveHa && productiveHa > 0 && (
         <GlassCard className="p-3 md:p-4" hover={false}>
           <h4 className="text-sm font-semibold text-green-800 mb-2 flex items-center gap-2">
@@ -805,7 +1053,6 @@ function HarvestTab({ parcel }: { parcel: any }) {
         </GlassCard>
       )}
 
-      {/* Gráfica de cosecha diaria */}
       {chartData.length > 0 && (
         <GlassCard className="p-3 md:p-5" hover={false}>
           <h4 className="text-sm font-semibold text-green-800 mb-3 flex items-center gap-2">
@@ -832,7 +1079,6 @@ function HarvestTab({ parcel }: { parcel: any }) {
         </GlassCard>
       )}
 
-      {/* Tabla de cosecha diaria */}
       {sortedDaily.length > 0 && (
         <GlassCard className="p-3 md:p-5" hover={false}>
           <h4 className="text-sm font-semibold text-green-800 mb-3 flex items-center gap-2">
@@ -840,7 +1086,6 @@ function HarvestTab({ parcel }: { parcel: any }) {
             Detalle por Día
           </h4>
 
-          {/* Vista desktop */}
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -881,7 +1126,6 @@ function HarvestTab({ parcel }: { parcel: any }) {
             </table>
           </div>
 
-          {/* Vista móvil - tarjetas */}
           <div className="md:hidden space-y-2">
             {sortedDaily.map((row: any) => (
               <div key={row.date} className="bg-white/40 rounded-xl p-3 border border-green-100/30">
