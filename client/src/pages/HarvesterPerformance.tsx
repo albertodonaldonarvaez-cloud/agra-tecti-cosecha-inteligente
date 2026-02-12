@@ -181,26 +181,26 @@ function HarvesterPerformanceContent() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
-      <div className="container max-w-7xl">
+      <div className="container max-w-7xl px-3 md:px-6">
         {/* Header */}
-        <div className="mb-8 flex items-center gap-4">
+        <div className="mb-6 md:mb-8 flex items-center gap-3 md:gap-4">
           <img src={APP_LOGO} alt="Agratec" className="h-12 w-12 md:h-16 md:w-16" />
           <div>
             <h1 className="text-2xl font-bold text-green-900 md:text-4xl">Rendimiento de Cortadoras</h1>
-            <p className="text-sm text-green-700 md:text-base">Análisis detallado del desempeño del personal</p>
+            <p className="text-xs md:text-base text-green-700">Análisis detallado del desempeño del personal</p>
           </div>
         </div>
 
         {/* Filtros */}
-        <GlassCard className="mb-6 p-6">
-          <div className="flex items-center gap-4">
-            <Calendar className="h-5 w-5 text-green-600" />
+        <GlassCard className="mb-4 md:mb-6 p-4 md:p-6">
+          <div className="flex items-center gap-3 md:gap-4">
+            <Calendar className="h-5 w-5 text-green-600 hidden sm:block" />
             <div className="flex-1">
               <Label htmlFor="dateFilter" className="mb-2 block text-sm font-medium text-green-900">
                 Filtrar por Fecha
               </Label>
               <Select value={selectedDate} onValueChange={setSelectedDate}>
-                <SelectTrigger id="dateFilter" className="w-64 border-green-200">
+                <SelectTrigger id="dateFilter" className="w-full md:w-64 border-green-200">
                   <SelectValue placeholder="Seleccionar fecha" />
                 </SelectTrigger>
                 <SelectContent>
@@ -224,9 +224,9 @@ function HarvesterPerformanceContent() {
         </GlassCard>
 
         {/* Gráfica Principal */}
-        <div className="mb-6 rounded-2xl bg-white p-8 shadow-lg">
-          <div className="mb-6 text-center">
-            <h2 className="mb-2 text-3xl font-bold text-green-900">
+        <div className="mb-4 md:mb-6 rounded-2xl bg-white p-4 md:p-8 shadow-lg">
+          <div className="mb-4 md:mb-6 text-center">
+            <h2 className="mb-2 text-xl md:text-3xl font-bold text-green-900">
               🏆 Ranking de Rendimiento - Temporada 2024/2025
             </h2>
             <p className="text-lg text-green-700">
@@ -282,9 +282,9 @@ function HarvesterPerformanceContent() {
         </div>
 
         {/* Gráfica con Rango de Fechas */}
-        <GlassCard className="mb-6 p-6">
-          <h2 className="mb-4 text-2xl font-semibold text-green-900">
-            Análisis Personalizado por Rango de Fechas
+        <GlassCard className="mb-4 md:mb-6 p-4 md:p-6">
+          <h2 className="mb-3 md:mb-4 text-lg md:text-2xl font-semibold text-green-900">
+            Análisis por Rango de Fechas
           </h2>
           <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
@@ -343,35 +343,35 @@ function HarvesterPerformanceContent() {
         </GlassCard>
 
         {/* Tarjetas de Cortadoras */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:gap-6 lg:grid-cols-2">
           {harvesterStats.map(stats => (
-            <GlassCard key={stats.harvesterId} className="p-6">
-              <div className="mb-4 flex items-center justify-between">
+            <GlassCard key={stats.harvesterId} className="p-4 md:p-6">
+              <div className="mb-3 md:mb-4 flex items-center justify-between">
                 <div>
-                  <h3 className="text-2xl font-bold text-green-900">
+                  <h3 className="text-lg md:text-2xl font-bold text-green-900">
                     {stats.harvesterName || `Cortadora #${stats.harvesterId}`}
                   </h3>
                   <p className="text-sm text-green-600">#{stats.harvesterId}</p>
                 </div>
-                <BarChart3 className="h-10 w-10 text-green-600" />
+                <BarChart3 className="h-8 w-8 md:h-10 md:w-10 text-green-600 hidden sm:block" />
               </div>
 
               {/* Métricas */}
-              <div className="mb-4 grid grid-cols-2 gap-4">
-                <div className="rounded-lg bg-green-50 p-4">
+              <div className="mb-3 md:mb-4 grid grid-cols-2 gap-2 md:gap-4">
+                <div className="rounded-lg bg-green-50 p-3 md:p-4">
                   <div className="flex items-center gap-2 text-green-600">
                     <Package className="h-4 w-4" />
                     <span className="text-xs font-medium">Total Cajas</span>
                   </div>
-                  <p className="mt-1 text-2xl font-bold text-green-900">{stats.totalBoxes}</p>
+                  <p className="mt-1 text-lg md:text-2xl font-bold text-green-900">{stats.totalBoxes}</p>
                 </div>
 
-                <div className="rounded-lg bg-green-50 p-4">
+                <div className="rounded-lg bg-green-50 p-3 md:p-4">
                   <div className="flex items-center gap-2 text-green-600">
                     <Weight className="h-4 w-4" />
                     <span className="text-xs font-medium">Total Kilos</span>
                   </div>
-                  <p className="mt-1 text-2xl font-bold text-green-900">
+                  <p className="mt-1 text-lg md:text-2xl font-bold text-green-900">
                     {stats.totalWeight ? (stats.totalWeight / 1000).toFixed(2) : '0.00'}
                   </p>
                 </div>

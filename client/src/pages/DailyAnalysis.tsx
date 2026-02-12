@@ -109,13 +109,13 @@ function DailyAnalysisContent() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
-      <div className="container">
+      <div className="container px-3 md:px-6">
         {/* Header */}
-        <div className="mb-8 flex items-center gap-4">
-          <img src={APP_LOGO} alt="Agratec" className="h-16 w-16" />
+        <div className="mb-6 md:mb-8 flex items-center gap-3 md:gap-4">
+          <img src={APP_LOGO} alt="Agratec" className="h-12 w-12 md:h-16 md:w-16" />
           <div>
-            <h1 className="text-4xl font-bold text-green-900">Análisis Diario</h1>
-            <p className="text-green-700">Datos exactos de cada día de cosecha</p>
+            <h1 className="text-2xl md:text-4xl font-bold text-green-900">Análisis Diario</h1>
+            <p className="text-xs md:text-base text-green-700">Datos exactos de cada día de cosecha</p>
           </div>
         </div>
 
@@ -127,43 +127,43 @@ function DailyAnalysisContent() {
               const wastePercent = ((day.waste / day.totalBoxes) * 100).toFixed(1);
               
               return (
-                <GlassCard key={day.date} className="p-6">
+                <GlassCard key={day.date} className="p-4 md:p-6">
                   {/* Encabezado del día */}
-                  <div className="mb-6 flex items-center justify-between border-b border-green-200 pb-4">
-                    <div className="flex items-center gap-3">
-                      <Calendar className="h-8 w-8 text-green-600" />
-                      <div>
-                        <h2 className="text-2xl font-bold text-green-900">
+                  <div className="mb-4 md:mb-6 flex items-center justify-between border-b border-green-200 pb-3 md:pb-4">
+                    <div className="flex items-center gap-2 md:gap-3 min-w-0">
+                      <Calendar className="h-6 w-6 md:h-8 md:w-8 text-green-600 flex-shrink-0" />
+                      <div className="min-w-0">
+                        <h2 className="text-base md:text-2xl font-bold text-green-900 truncate">
                           {new Date(day.dateObj).toLocaleDateString('es-MX', { 
-                            weekday: 'long', 
+                            weekday: 'short', 
                             year: 'numeric', 
-                            month: 'long', 
+                            month: 'short', 
                             day: 'numeric' 
                           })}
                         </h2>
-                        <p className="text-sm text-green-600">
-                          {day.parcels.size} parcelas · {day.cutters.size} cortadoras activas
+                        <p className="text-xs md:text-sm text-green-600">
+                          {day.parcels.size} parcelas · {day.cutters.size} cortadoras
                         </p>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-3xl font-bold text-green-900">{day.totalBoxes}</p>
-                      <p className="text-sm text-green-600">Cajas totales</p>
+                    <div className="text-right flex-shrink-0 ml-2">
+                      <p className="text-2xl md:text-3xl font-bold text-green-900">{day.totalBoxes}</p>
+                      <p className="text-xs md:text-sm text-green-600">Cajas</p>
                     </div>
                   </div>
 
                   {/* Estadísticas principales */}
-                  <div className="mb-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                  <div className="mb-4 md:mb-6 grid gap-2 md:gap-4 grid-cols-2 lg:grid-cols-4">
                     <div className="rounded-lg bg-gradient-to-br from-green-50 to-emerald-50 p-4">
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-xs text-green-600">Peso Total</p>
-                          <p className="text-2xl font-bold text-green-900">
+                          <p className="text-lg md:text-2xl font-bold text-green-900">
                             {(day.totalWeight / 1000).toFixed(2)}
                           </p>
                           <p className="text-xs text-green-500">kilogramos</p>
                         </div>
-                        <Package className="h-10 w-10 text-green-400" />
+                        <Package className="h-8 w-8 md:h-10 md:w-10 text-green-400 hidden sm:block" />
                       </div>
                     </div>
 
@@ -171,12 +171,12 @@ function DailyAnalysisContent() {
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-xs text-green-600">Primera Calidad</p>
-                          <p className="text-2xl font-bold text-green-900">
+                          <p className="text-lg md:text-2xl font-bold text-green-900">
                             {(day.firstQualityWeight / 1000).toFixed(2)}
                           </p>
                           <p className="text-xs text-green-500">kg ({firstQualityPercent}%)</p>
                         </div>
-                        <TrendingUp className="h-10 w-10 text-green-400" />
+                        <TrendingUp className="h-8 w-8 md:h-10 md:w-10 text-green-400 hidden sm:block" />
                       </div>
                     </div>
 
@@ -184,12 +184,12 @@ function DailyAnalysisContent() {
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-xs text-yellow-600">Segunda Calidad</p>
-                          <p className="text-2xl font-bold text-yellow-900">
+                          <p className="text-lg md:text-2xl font-bold text-yellow-900">
                             {(day.secondQualityWeight / 1000).toFixed(2)}
                           </p>
                           <p className="text-xs text-yellow-500">kg ({secondQualityPercent}%)</p>
                         </div>
-                        <BarChart3 className="h-10 w-10 text-yellow-400" />
+                        <BarChart3 className="h-8 w-8 md:h-10 md:w-10 text-yellow-400 hidden sm:block" />
                       </div>
                     </div>
 
@@ -197,18 +197,18 @@ function DailyAnalysisContent() {
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-xs text-red-600">Desperdicio</p>
-                          <p className="text-2xl font-bold text-red-900">
+                          <p className="text-lg md:text-2xl font-bold text-red-900">
                             {(day.wasteWeight / 1000).toFixed(2)}
                           </p>
                           <p className="text-xs text-red-500">kg ({wastePercent}%)</p>
                         </div>
-                        <Package className="h-10 w-10 text-red-400" />
+                        <Package className="h-8 w-8 md:h-10 md:w-10 text-red-400 hidden sm:block" />
                       </div>
                     </div>
                   </div>
 
                   {/* Desglose por cantidad de cajas */}
-                  <div className="grid gap-4 md:grid-cols-3">
+                  <div className="grid gap-2 md:gap-4 grid-cols-3">
                     <div className="rounded-lg border border-green-200 bg-white/50 p-4">
                       <p className="mb-2 text-sm font-semibold text-green-700">Primera Calidad</p>
                       <p className="text-xl font-bold text-green-900">{day.firstQuality} cajas</p>
@@ -247,9 +247,9 @@ function DailyAnalysisContent() {
             })}
           </div>
         ) : (
-          <GlassCard className="p-12 text-center">
-            <Calendar className="mx-auto mb-4 h-16 w-16 text-green-300" />
-            <p className="text-xl text-green-600">No hay datos de cosecha disponibles</p>
+          <GlassCard className="p-8 md:p-12 text-center">
+            <Calendar className="mx-auto mb-4 h-12 w-12 md:h-16 md:w-16 text-green-300" />
+            <p className="text-base md:text-xl text-green-600">No hay datos de cosecha disponibles</p>
           </GlassCard>
         )}
       </div>

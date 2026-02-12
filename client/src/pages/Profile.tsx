@@ -131,23 +131,23 @@ export default function Profile() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
-      <div className="container max-w-3xl">
-        <div className="mb-8">
-          <h1 className="mb-2 text-4xl font-bold text-green-900">Mi Perfil</h1>
-          <p className="text-green-700">Personaliza tu cuenta y cambia tu contraseña</p>
+      <div className="container max-w-3xl px-3 md:px-6">
+        <div className="mb-6 md:mb-8">
+          <h1 className="mb-2 text-2xl md:text-4xl font-bold text-green-900">Mi Perfil</h1>
+          <p className="text-xs md:text-base text-green-700">Personaliza tu cuenta y cambia tu contraseña</p>
         </div>
 
         {/* Avatar y datos principales */}
-        <GlassCard className="mb-6 p-6">
-          <div className="flex items-start gap-6">
+        <GlassCard className="mb-4 md:mb-6 p-4 md:p-6">
+          <div className="flex items-start gap-4 md:gap-6">
             <div
-              className="flex h-24 w-24 items-center justify-center rounded-2xl text-5xl flex-shrink-0 shadow-lg"
+              className="flex h-16 w-16 md:h-24 md:w-24 items-center justify-center rounded-xl md:rounded-2xl text-3xl md:text-5xl flex-shrink-0 shadow-lg"
               style={{ backgroundColor: avatarColor + "25", border: `3px solid ${avatarColor}` }}
             >
               {avatarEmoji}
             </div>
-            <div className="flex-1">
-              <h2 className="text-2xl font-bold text-green-900">{profile?.name || "Usuario"}</h2>
+            <div className="flex-1 min-w-0">
+              <h2 className="text-xl md:text-2xl font-bold text-green-900 truncate">{profile?.name || "Usuario"}</h2>
               <p className="text-green-600 flex items-center gap-1 mt-1">
                 <Mail className="h-4 w-4" />
                 {profile?.email}

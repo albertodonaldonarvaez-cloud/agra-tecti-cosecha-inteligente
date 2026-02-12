@@ -174,8 +174,8 @@ export default function Users() {
   if (user.role !== "admin") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-green-50 via-white to-emerald-50">
-        <GlassCard className="p-8 text-center">
-          <h2 className="mb-2 text-2xl font-bold text-green-900">Acceso Denegado</h2>
+        <GlassCard className="p-6 md:p-8 text-center">
+          <h2 className="mb-2 text-xl md:text-2xl font-bold text-green-900">Acceso Denegado</h2>
           <p className="text-green-600">Solo los administradores pueden acceder a esta página</p>
         </GlassCard>
       </div>
@@ -219,25 +219,26 @@ export default function Users() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
-      <div className="container max-w-5xl">
-        <div className="mb-8 flex items-center justify-between">
+      <div className="container max-w-5xl px-3 md:px-6">
+        <div className="mb-6 md:mb-8 flex items-center justify-between">
           <div>
-            <h1 className="mb-2 text-4xl font-bold text-green-900">Gestión de Usuarios</h1>
-            <p className="text-green-700">Administra usuarios, roles, permisos y actividad</p>
+            <h1 className="mb-1 md:mb-2 text-2xl md:text-4xl font-bold text-green-900">Gestión de Usuarios</h1>
+            <p className="text-xs md:text-base text-green-700">Administra usuarios, roles y permisos</p>
           </div>
-          <Button onClick={() => setShowAddDialog(true)} className="flex items-center gap-2">
-            <UserPlus className="h-5 w-5" />
-            Agregar Usuario
+          <Button onClick={() => setShowAddDialog(true)} className="flex items-center gap-1.5 md:gap-2 text-xs md:text-sm" size="sm">
+            <UserPlus className="h-4 w-4" />
+            <span className="hidden sm:inline">Agregar Usuario</span>
+            <span className="sm:hidden">Agregar</span>
           </Button>
         </div>
 
         {/* Tabs */}
-        <div className="mb-6 flex gap-2">
-          <Button variant={activeTab === "users" ? "default" : "outline"} onClick={() => setActiveTab("users")} className="flex items-center gap-2">
-            <UsersIcon className="h-4 w-4" />
+        <div className="mb-4 md:mb-6 flex gap-2">
+          <Button variant={activeTab === "users" ? "default" : "outline"} onClick={() => setActiveTab("users")} className="flex items-center gap-1.5 md:gap-2 text-xs md:text-sm" size="sm">
+            <UsersIcon className="h-3.5 w-3.5 md:h-4 md:w-4" />
             Usuarios ({usersList?.length || 0})
           </Button>
-          <Button variant={activeTab === "activity" ? "default" : "outline"} onClick={() => setActiveTab("activity")} className="flex items-center gap-2">
+          <Button variant={activeTab === "activity" ? "default" : "outline"} onClick={() => setActiveTab("activity")} className="flex items-center gap-1.5 md:gap-2 text-xs md:text-sm" size="sm">
             <Activity className="h-4 w-4" />
             Actividad Global
           </Button>

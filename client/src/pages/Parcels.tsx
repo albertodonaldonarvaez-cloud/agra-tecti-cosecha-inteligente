@@ -180,34 +180,34 @@ function ParcelsContent() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
-      <div className="container">
+      <div className="container px-3 md:px-6">
         {/* Header */}
-        <div className="mb-8 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <img src={APP_LOGO} alt="Agratec" className="h-16 w-16" />
+        <div className="mb-6 md:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center gap-3 md:gap-4">
+            <img src={APP_LOGO} alt="Agratec" className="h-12 w-12 md:h-16 md:w-16" />
             <div>
-              <h1 className="text-4xl font-bold text-green-900">Gestión de Parcelas</h1>
-              <p className="text-green-700">
+              <h1 className="text-2xl md:text-4xl font-bold text-green-900">Gestión de Parcelas</h1>
+              <p className="text-xs md:text-base text-green-700">
                 {parcels ? `${parcels.length} parcelas registradas` : "Cargando..."}
               </p>
             </div>
           </div>
           <div className="flex gap-2">
-            <Button onClick={() => setShowMap(!showMap)} variant="outline" className="border-green-600 text-green-700 hover:bg-green-50">
-              <MapIcon className="mr-2 h-4 w-4" />
+            <Button onClick={() => setShowMap(!showMap)} variant="outline" className="border-green-600 text-green-700 hover:bg-green-50 text-xs md:text-sm" size="sm">
+              <MapIcon className="mr-1 md:mr-2 h-3.5 w-3.5 md:h-4 md:w-4" />
               {showMap ? "Ocultar Mapa" : "Ver Mapa"}
             </Button>
-            <Button onClick={openCreateDialog} className="bg-green-600 hover:bg-green-700">
-              <Plus className="mr-2 h-4 w-4" />
+            <Button onClick={openCreateDialog} className="bg-green-600 hover:bg-green-700 text-xs md:text-sm" size="sm">
+              <Plus className="mr-1 md:mr-2 h-3.5 w-3.5 md:h-4 md:w-4" />
               Nueva Parcela
             </Button>
           </div>
         </div>
 
         {/* Sección de carga KML/KMZ */}
-        <GlassCard className="mb-6 p-6">
-          <div className="flex items-center gap-4">
-            <MapPin className="h-8 w-8 text-green-600" />
+        <GlassCard className="mb-4 md:mb-6 p-4 md:p-6">
+          <div className="flex items-center gap-3 md:gap-4">
+            <MapPin className="h-6 w-6 md:h-8 md:w-8 text-green-600" />
             <div className="flex-1">
               <h3 className="text-lg font-semibold text-green-900">Cargar desde KML/KMZ</h3>
               <p className="text-sm text-green-700">

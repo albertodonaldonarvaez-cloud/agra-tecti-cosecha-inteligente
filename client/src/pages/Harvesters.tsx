@@ -60,8 +60,8 @@ function HarvestersContent() {
   if (user.role !== "admin") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-green-50 via-white to-emerald-50">
-        <GlassCard className="p-8 text-center">
-          <h2 className="mb-2 text-2xl font-bold text-green-900">Acceso Denegado</h2>
+        <GlassCard className="p-6 md:p-8 text-center">
+          <h2 className="mb-2 text-xl md:text-2xl font-bold text-green-900">Acceso Denegado</h2>
           <p className="text-green-600">Solo los administradores pueden acceder a esta página</p>
         </GlassCard>
       </div>
@@ -84,16 +84,16 @@ function HarvestersContent() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
-      <div className="container max-w-4xl">
-        <div className="mb-8">
-          <h1 className="mb-2 text-4xl font-bold text-green-900">Configuración de Cortadoras</h1>
-          <p className="text-green-700">Personaliza los nombres de las cortadoras y categorías especiales</p>
+      <div className="container max-w-4xl px-3 md:px-6">
+        <div className="mb-6 md:mb-8">
+          <h1 className="mb-2 text-2xl md:text-4xl font-bold text-green-900">Configuración de Cortadoras</h1>
+          <p className="text-xs md:text-base text-green-700">Personaliza los nombres de las cortadoras y categorías especiales</p>
         </div>
 
         {harvesters && harvesters.length > 0 ? (
           <div className="space-y-4">
             {harvesters.map((harvester) => (
-              <GlassCard key={harvester.id} className="p-6">
+              <GlassCard key={harvester.id} className="p-4 md:p-6">
                 <div className="flex items-center gap-4">
                   <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-100">
                     <Scissors className="h-6 w-6 text-green-600" />

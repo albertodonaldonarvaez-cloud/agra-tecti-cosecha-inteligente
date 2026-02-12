@@ -299,18 +299,18 @@ export default function Settings() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
-      <div className="container max-w-4xl">
-        <div className="mb-8">
-          <h1 className="mb-2 text-4xl font-bold text-green-900">Configuración</h1>
-          <p className="text-green-700">Gestiona la conexión con KoboToolbox y sincroniza datos</p>
+      <div className="container max-w-4xl px-3 md:px-6">
+        <div className="mb-6 md:mb-8">
+          <h1 className="mb-2 text-2xl md:text-4xl font-bold text-green-900">Configuración</h1>
+          <p className="text-xs md:text-base text-green-700">Gestiona la conexión con KoboToolbox y sincroniza datos</p>
         </div>
 
         <div className="space-y-6">
           {/* Configuración de API */}
-          <GlassCard className="p-6">
+          <GlassCard className="p-4 md:p-6">
             <div className="mb-4 flex items-center gap-2">
-              <SettingsIcon className="h-6 w-6 text-green-600" />
-              <h2 className="text-2xl font-semibold text-green-900">API de KoboToolbox</h2>
+              <SettingsIcon className="h-5 w-5 md:h-6 md:w-6 text-green-600" />
+              <h2 className="text-lg md:text-2xl font-semibold text-green-900">API de KoboToolbox</h2>
             </div>
 
             <div className="space-y-4">
@@ -356,10 +356,10 @@ export default function Settings() {
           </GlassCard>
 
           {/* Carga de Excel */}
-          <GlassCard className="p-6">
+          <GlassCard className="p-4 md:p-6">
             <div className="mb-4 flex items-center gap-2">
-              <FileSpreadsheet className="h-6 w-6 text-green-600" />
-              <h2 className="text-2xl font-semibold text-green-900">Carga desde Excel</h2>
+              <FileSpreadsheet className="h-5 w-5 md:h-6 md:w-6 text-green-600" />
+              <h2 className="text-lg md:text-2xl font-semibold text-green-900">Carga desde Excel</h2>
             </div>
 
             <p className="mb-4 text-sm text-green-600">
@@ -401,10 +401,10 @@ export default function Settings() {
           </GlassCard>
 
           {/* Carga de Datos Históricos */}
-          <GlassCard className="p-6 border-2 border-amber-200 bg-amber-50/30">
+          <GlassCard className="p-4 md:p-6 border-2 border-amber-200 bg-amber-50/30">
             <div className="mb-4 flex items-center gap-2">
               <FileSpreadsheet className="h-6 w-6 text-amber-600" />
-              <h2 className="text-2xl font-semibold text-amber-900">Datos Históricos</h2>
+              <h2 className="text-lg md:text-2xl font-semibold text-amber-900">Datos Históricos</h2>
             </div>
 
             <p className="mb-4 text-sm text-amber-700">
@@ -450,10 +450,10 @@ export default function Settings() {
           </GlassCard>
 
           {/* Sincronización */}
-          <GlassCard className="p-6">
+          <GlassCard className="p-4 md:p-6">
             <div className="mb-4 flex items-center gap-2">
               <RefreshCw className="h-6 w-6 text-green-600" />
-              <h2 className="text-2xl font-semibold text-green-900">Sincronización</h2>
+              <h2 className="text-lg md:text-2xl font-semibold text-green-900">Sincronización</h2>
             </div>
 
             <p className="mb-4 text-sm text-green-600">
@@ -493,10 +493,10 @@ export default function Settings() {
           <TelegramSection />
 
           {/* Carga Manual */}
-          <GlassCard className="p-6">
+          <GlassCard className="p-4 md:p-6">
             <div className="mb-4 flex items-center gap-2">
               <Upload className="h-6 w-6 text-green-600" />
-              <h2 className="text-2xl font-semibold text-green-900">Carga Manual de JSON</h2>
+              <h2 className="text-lg md:text-2xl font-semibold text-green-900">Carga Manual de JSON</h2>
             </div>
 
             <div className="space-y-4">
@@ -523,10 +523,10 @@ export default function Settings() {
           </GlassCard>
 
           {/* Configuración de Ubicación */}
-          <GlassCard className="p-6">
+          <GlassCard className="p-4 md:p-6">
             <div className="mb-4 flex items-center gap-2">
               <MapPin className="h-6 w-6 text-green-600" />
-              <h2 className="text-2xl font-semibold text-green-900">Ubicación para Datos Meteorológicos</h2>
+              <h2 className="text-lg md:text-2xl font-semibold text-green-900">Ubicación para Datos Meteorológicos</h2>
             </div>
 
             <p className="mb-4 text-sm text-green-600">
@@ -612,10 +612,10 @@ export default function Settings() {
           </GlassCard>
 
           {/* Limpiar Base de Datos */}
-          <GlassCard className="p-6 border-2 border-red-200">
+          <GlassCard className="p-4 md:p-6 border-2 border-red-200">
             <div className="mb-4 flex items-center gap-2">
               <AlertTriangle className="h-6 w-6 text-red-600" />
-              <h2 className="text-2xl font-semibold text-red-900">Zona de Peligro</h2>
+              <h2 className="text-lg md:text-2xl font-semibold text-red-900">Zona de Peligro</h2>
             </div>
 
             <p className="mb-4 text-sm text-red-600">
@@ -704,11 +704,11 @@ function AutoSyncSection() {
   };
 
   return (
-    <GlassCard className="p-6 border-2 border-blue-200 bg-blue-50/30">
+    <GlassCard className="p-4 md:p-6 border-2 border-blue-200 bg-blue-50/30">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Timer className="h-6 w-6 text-blue-600" />
-          <h2 className="text-2xl font-semibold text-blue-900">Sincronización Automática</h2>
+          <h2 className="text-lg md:text-2xl font-semibold text-blue-900">Sincronización Automática</h2>
         </div>
         {syncStatus?.isActive && (
           <span className="flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
@@ -903,11 +903,11 @@ function TelegramSection() {
   const isConfigured = !!(telegramConfig?.botToken && telegramConfig?.chatId);
 
   return (
-    <GlassCard className="p-6 border-2 border-purple-200 bg-purple-50/30">
+    <GlassCard className="p-4 md:p-6 border-2 border-purple-200 bg-purple-50/30">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <MessageCircle className="h-6 w-6 text-purple-600" />
-          <h2 className="text-2xl font-semibold text-purple-900">Notificaciones Telegram</h2>
+          <h2 className="text-lg md:text-2xl font-semibold text-purple-900">Notificaciones Telegram</h2>
         </div>
         {isConfigured && (
           <span className="flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">

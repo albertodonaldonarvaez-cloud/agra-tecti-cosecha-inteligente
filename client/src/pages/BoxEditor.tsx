@@ -622,13 +622,13 @@ export default function BoxEditor() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
-      <div className="container">
+      <div className="container px-3 md:px-6">
         {/* Header */}
-        <div className="mb-8 flex items-center gap-4">
-          <img src={APP_LOGO} alt="Agratec" className="h-16 w-16" />
+        <div className="mb-6 md:mb-8 flex items-center gap-3 md:gap-4">
+          <img src={APP_LOGO} alt="Agratec" className="h-12 w-12 md:h-16 md:w-16" />
           <div>
-            <h1 className="text-4xl font-bold text-green-900">Editor de Cajas</h1>
-            <p className="text-green-700">
+            <h1 className="text-2xl md:text-4xl font-bold text-green-900">Editor de Cajas</h1>
+            <p className="text-xs md:text-base text-green-700">
               {activeTab === 'active' ? `${total.toLocaleString()} cajas activas` : `${archivedTotal.toLocaleString()} cajas archivadas`}
               {(isFetching || isFetchingArchived) && (
                 <span className="ml-2 text-sm text-green-500">Actualizando...</span>
@@ -638,21 +638,23 @@ export default function BoxEditor() {
         </div>
 
         {/* Tabs: Activas / Archivadas */}
-        <div className="mb-6 flex items-center gap-2">
+        <div className="mb-4 md:mb-6 flex flex-wrap items-center gap-2">
           <Button
             variant={activeTab === 'active' ? 'default' : 'outline'}
             onClick={() => { setActiveTab('active'); setSelectedArchivedIds(new Set()); }}
-            className={activeTab === 'active' ? 'bg-green-600 hover:bg-green-700' : 'border-green-300 text-green-700 hover:bg-green-50'}
+            className={`text-xs md:text-sm ${activeTab === 'active' ? 'bg-green-600 hover:bg-green-700' : 'border-green-300 text-green-700 hover:bg-green-50'}`}
+            size="sm"
           >
-            <Filter className="h-4 w-4 mr-2" />
-            Cajas Activas ({total.toLocaleString()})
+            <Filter className="h-3.5 w-3.5 md:h-4 md:w-4 mr-1 md:mr-2" />
+            Activas ({total.toLocaleString()})
           </Button>
           <Button
             variant={activeTab === 'archived' ? 'default' : 'outline'}
             onClick={() => { setActiveTab('archived'); setSelectedIds(new Set()); }}
-            className={activeTab === 'archived' ? 'bg-orange-600 hover:bg-orange-700' : 'border-orange-300 text-orange-700 hover:bg-orange-50'}
+            className={`text-xs md:text-sm ${activeTab === 'archived' ? 'bg-orange-600 hover:bg-orange-700' : 'border-orange-300 text-orange-700 hover:bg-orange-50'}`}
+            size="sm"
           >
-            <Archive className="h-4 w-4 mr-2" />
+            <Archive className="h-3.5 w-3.5 md:h-4 md:w-4 mr-1 md:mr-2" />
             Archivadas ({archivedTotal.toLocaleString()})
           </Button>
           <div className="flex-1" />
@@ -660,10 +662,12 @@ export default function BoxEditor() {
             onClick={() => autoResolveDuplicates.mutate()}
             disabled={autoResolveDuplicates.isPending}
             variant="outline"
-            className="border-purple-300 text-purple-700 hover:bg-purple-50"
+            className="border-purple-300 text-purple-700 hover:bg-purple-50 text-xs md:text-sm"
+            size="sm"
           >
-            <Wand2 className="h-4 w-4 mr-2" />
-            {autoResolveDuplicates.isPending ? "Resolviendo..." : "Auto-resolver Duplicados"}
+            <Wand2 className="h-3.5 w-3.5 md:h-4 md:w-4 mr-1 md:mr-2" />
+            <span className="hidden sm:inline">{autoResolveDuplicates.isPending ? "Resolviendo..." : "Auto-resolver Duplicados"}</span>
+            <span className="sm:hidden">{autoResolveDuplicates.isPending ? "..." : "Auto-resolver"}</span>
           </Button>
         </div>
 
@@ -671,52 +675,52 @@ export default function BoxEditor() {
         {activeTab === 'active' && (
           <>
             {/* Resumen de errores */}
-            <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-              <GlassCard className="p-4 cursor-pointer hover:shadow-lg transition-shadow" onClick={() => setFilterError('all')}>
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-green-100 rounded-lg">
-                    <Filter className="h-6 w-6 text-green-600" />
+            <div className="mb-4 md:mb-6 grid grid-cols-3 gap-2 md:gap-4">
+              <GlassCard className="p-3 md:p-4 cursor-pointer hover:shadow-lg transition-shadow" onClick={() => setFilterError('all')}>
+                <div className="flex items-center gap-2 md:gap-3">
+                  <div className="p-1.5 md:p-2 bg-green-100 rounded-lg hidden sm:block">
+                    <Filter className="h-5 w-5 md:h-6 md:w-6 text-green-600" />
                   </div>
                   <div>
-                    <p className="text-sm text-green-600">Total Cajas</p>
-                    <p className="text-2xl font-bold text-green-900">{total.toLocaleString()}</p>
+                    <p className="text-xs md:text-sm text-green-600">Total Cajas</p>
+                    <p className="text-lg md:text-2xl font-bold text-green-900">{total.toLocaleString()}</p>
                   </div>
                 </div>
               </GlassCard>
 
               <GlassCard 
-                className={`p-4 cursor-pointer hover:shadow-lg transition-shadow ${filterError === 'duplicates' ? 'ring-2 ring-red-500' : ''}`}
+                className={`p-3 md:p-4 cursor-pointer hover:shadow-lg transition-shadow ${filterError === 'duplicates' ? 'ring-2 ring-red-500' : ''}`}
                 onClick={() => setFilterError('duplicates')}
               >
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-red-100 rounded-lg">
-                    <AlertTriangle className="h-6 w-6 text-red-600" />
+                <div className="flex items-center gap-2 md:gap-3">
+                  <div className="p-1.5 md:p-2 bg-red-100 rounded-lg hidden sm:block">
+                    <AlertTriangle className="h-5 w-5 md:h-6 md:w-6 text-red-600" />
                   </div>
                   <div>
-                    <p className="text-sm text-red-600">Códigos Duplicados</p>
-                    <p className="text-2xl font-bold text-red-900">{duplicateCodes.length}</p>
+                    <p className="text-xs md:text-sm text-red-600">Duplicados</p>
+                    <p className="text-lg md:text-2xl font-bold text-red-900">{duplicateCodes.length}</p>
                   </div>
                 </div>
               </GlassCard>
 
               <GlassCard 
-                className={`p-4 cursor-pointer hover:shadow-lg transition-shadow ${filterError === 'no_polygon' ? 'ring-2 ring-orange-500' : ''}`}
+                className={`p-3 md:p-4 cursor-pointer hover:shadow-lg transition-shadow ${filterError === 'no_polygon' ? 'ring-2 ring-orange-500' : ''}`}
                 onClick={() => setFilterError('no_polygon')}
               >
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-orange-100 rounded-lg">
-                    <MapPin className="h-6 w-6 text-orange-600" />
+                <div className="flex items-center gap-2 md:gap-3">
+                  <div className="p-1.5 md:p-2 bg-orange-100 rounded-lg hidden sm:block">
+                    <MapPin className="h-5 w-5 md:h-6 md:w-6 text-orange-600" />
                   </div>
                   <div>
-                    <p className="text-sm text-orange-600">Sin Polígono</p>
-                    <p className="text-2xl font-bold text-orange-900">{parcelsWithoutPolygon.length} parcelas</p>
+                    <p className="text-xs md:text-sm text-orange-600">Sin Polígono</p>
+                    <p className="text-lg md:text-2xl font-bold text-orange-900">{parcelsWithoutPolygon.length} parcelas</p>
                   </div>
                 </div>
               </GlassCard>
             </div>
 
             {/* Buscador y Filtros */}
-            <GlassCard className="mb-6 p-6">
+            <GlassCard className="mb-4 md:mb-6 p-3 md:p-6">
               {/* Buscador */}
               <div className="mb-6">
                 <label className="mb-2 block text-sm font-medium text-green-900">Buscar por código de caja</label>
@@ -1176,7 +1180,7 @@ export default function BoxEditor() {
             </GlassCard>
 
             {/* Buscador de archivadas */}
-            <GlassCard className="mb-6 p-6">
+            <GlassCard className="mb-4 md:mb-6 p-3 md:p-6">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-orange-500" />
                 <Input

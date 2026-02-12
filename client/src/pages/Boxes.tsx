@@ -168,13 +168,13 @@ function BoxesContent() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
-      <div className="container">
+      <div className="container px-3 md:px-6">
         {/* Header */}
-        <div className="mb-8 flex items-center gap-4">
-          <img src={APP_LOGO} alt="Agratec" className="h-16 w-16" />
+        <div className="mb-6 md:mb-8 flex items-center gap-3 md:gap-4">
+          <img src={APP_LOGO} alt="Agratec" className="h-12 w-12 md:h-16 md:w-16" />
           <div>
-            <h1 className="text-4xl font-bold text-green-900">Cajas Registradas</h1>
-            <p className="text-green-700">
+            <h1 className="text-2xl md:text-4xl font-bold text-green-900">Cajas Registradas</h1>
+            <p className="text-xs md:text-base text-green-700">
               {total.toLocaleString()} cajas
               {isFetching && !isLoading && (
                 <span className="ml-2 text-sm text-green-500">Actualizando...</span>
@@ -184,9 +184,9 @@ function BoxesContent() {
         </div>
 
         {/* Buscador y Filtros */}
-        <GlassCard className="mb-6 p-6">
+        <GlassCard className="mb-4 md:mb-6 p-3 md:p-6">
           {/* Buscador */}
-          <div className="mb-6">
+          <div className="mb-4 md:mb-6">
             <label className="mb-2 block text-sm font-medium text-green-900">Buscar por código de caja</label>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-green-500" />

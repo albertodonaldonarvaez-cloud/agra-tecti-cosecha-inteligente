@@ -6,8 +6,8 @@ import { getProxiedImageUrl } from "@/lib/imageProxy";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Package, TrendingUp, CheckCircle, Cloud, Calendar as CalendarIcon, RefreshCw } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Package, TrendingUp, CheckCircle, Cloud, Calendar as CalendarIcon, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
 export default function Home() {
@@ -23,14 +23,16 @@ function HomeContent() {
   const [selectedBox, setSelectedBox] = useState<any>(null);
   const [showImageModal, setShowImageModal] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState('all');
+  const [tableSortField, setTableSortField] = useState<string>("dateKey");
+  const [tableSortOrder, setTableSortOrder] = useState<"asc" | "desc">("desc");
   
   // ====== OPTIMIZACIÓN: Usar endpoints agregados en lugar de descargar todas las cajas ======
   
   // 1. Estadísticas agregadas (SUM, COUNT en el servidor)
   const { data: stats, isLoading: statsLoading } = trpc.boxes.dashboardStats.useQuery(undefined, {
     enabled: !!user,
-    staleTime: 2 * 60 * 1000, // 2 min
-    refetchInterval: 3 * 60 * 1000, // 3 min
+    staleTime: 2 * 60 * 1000,
+    refetchInterval: 3 * 60 * 1000,
   });
 
   // 2. Datos diarios agregados para la gráfica (GROUP BY fecha en el servidor)
@@ -118,11 +120,36 @@ function HomeContent() {
     });
   }, [dailyData, weatherData]);
 
-  // Crear set de días con cosecha para filtrar la tabla
-  const harvestDays = useMemo(() => {
-    if (!dailyData) return new Set<string>();
-    return new Set(dailyData.map(d => d.date));
-  }, [dailyData]);
+  // Datos de tabla ordenados
+  const sortedTableData = useMemo(() => {
+    if (!chartData || chartData.length === 0) return [];
+    return [...chartData].sort((a, b) => {
+      const fa = a[tableSortField as keyof typeof a];
+      const fb = b[tableSortField as keyof typeof b];
+      let cmp = 0;
+      if (typeof fa === "string" && typeof fb === "string") cmp = fa.localeCompare(fb);
+      else if (typeof fa === "number" && typeof fb === "number") cmp = fa - fb;
+      else if (fa === null && fb !== null) cmp = -1;
+      else if (fa !== null && fb === null) cmp = 1;
+      return tableSortOrder === "asc" ? cmp : -cmp;
+    });
+  }, [chartData, tableSortField, tableSortOrder]);
+
+  const handleTableSort = useCallback((field: string) => {
+    setTableSortField(prev => {
+      if (prev === field) {
+        setTableSortOrder(o => o === "asc" ? "desc" : "asc");
+        return prev;
+      }
+      setTableSortOrder("desc");
+      return field;
+    });
+  }, []);
+
+  const SortIcon = useCallback(({ field }: { field: string }) => {
+    if (tableSortField !== field) return null;
+    return tableSortOrder === "asc" ? <ChevronUp className="w-3 h-3 inline ml-0.5" /> : <ChevronDown className="w-3 h-3 inline ml-0.5" />;
+  }, [tableSortField, tableSortOrder]);
 
   const handleImageClick = (box: any) => {
     setSelectedBox(box);
@@ -144,125 +171,113 @@ function HomeContent() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
-      <div className="container">
+      <div className="container px-3 md:px-6">
         {/* Header */}
-        <div className="mb-8 flex items-center gap-4">
-          <img src={APP_LOGO} alt="Agratec" className="h-16 w-16" />
+        <div className="mb-6 md:mb-8 flex items-center gap-3 md:gap-4">
+          <img src={APP_LOGO} alt="Agratec" className="h-12 w-12 md:h-16 md:w-16" />
           <div>
-            <h1 className="text-4xl font-bold text-green-900">Dashboard de Cosecha</h1>
-            <p className="text-green-700">Bienvenido, {user.name}</p>
+            <h1 className="text-2xl md:text-4xl font-bold text-green-900">Dashboard de Cosecha</h1>
+            <p className="text-sm md:text-base text-green-700">Bienvenido, {user.name}</p>
           </div>
         </div>
 
         {isLoadingData ? (
           <div className="space-y-6 animate-pulse">
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-4 md:gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
               {[1, 2, 3].map(i => (
                 <div key={i} className="bg-white/50 backdrop-blur-sm rounded-lg p-6 h-24"></div>
               ))}
             </div>
             <div className="bg-white/50 backdrop-blur-sm rounded-lg p-6 h-96"></div>
-            <div className="bg-white/50 backdrop-blur-sm rounded-lg p-6 h-64"></div>
           </div>
         ) : stats ? (
-          <div className="space-y-6">
+          <div className="space-y-4 md:space-y-6">
             {/* Estadísticas principales */}
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-              <GlassCard className="p-6">
+            <div className="grid gap-3 md:gap-6 grid-cols-1 sm:grid-cols-3">
+              <GlassCard className="p-4 md:p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-green-600">Total de Cajas</p>
-                    <p className="text-3xl font-bold text-green-900">{stats.total}</p>
+                    <p className="text-xs md:text-sm text-green-600">Total de Cajas</p>
+                    <p className="text-2xl md:text-3xl font-bold text-green-900">{stats.total}</p>
                   </div>
-                  <Package className="h-12 w-12 text-green-400" />
+                  <Package className="h-8 w-8 md:h-12 md:w-12 text-green-400" />
                 </div>
               </GlassCard>
 
-              <GlassCard className="p-6">
+              <GlassCard className="p-4 md:p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-green-600">Peso Total</p>
-                    <p className="text-3xl font-bold text-green-900">{stats.totalWeight ? stats.totalWeight.toFixed(2) : '0.00'}</p>
+                    <p className="text-xs md:text-sm text-green-600">Peso Total</p>
+                    <p className="text-2xl md:text-3xl font-bold text-green-900">{stats.totalWeight ? stats.totalWeight.toFixed(2) : '0.00'}</p>
                     <p className="text-xs text-green-500">kilogramos</p>
                   </div>
-                  <TrendingUp className="h-12 w-12 text-green-400" />
+                  <TrendingUp className="h-8 w-8 md:h-12 md:w-12 text-green-400" />
                 </div>
               </GlassCard>
 
-              <GlassCard className="p-6">
+              <GlassCard className="p-4 md:p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-green-600">Primera Calidad</p>
-                    <p className="text-3xl font-bold text-green-900">{stats.firstQualityWeight ? stats.firstQualityWeight.toFixed(2) : '0.00'}</p>
+                    <p className="text-xs md:text-sm text-green-600">Primera Calidad</p>
+                    <p className="text-2xl md:text-3xl font-bold text-green-900">{stats.firstQualityWeight ? stats.firstQualityWeight.toFixed(2) : '0.00'}</p>
                     <p className="text-xs text-green-500">kilogramos ({stats.firstQualityPercent}%)</p>
                   </div>
-                  <CheckCircle className="h-12 w-12 text-green-400" />
+                  <CheckCircle className="h-8 w-8 md:h-12 md:w-12 text-green-400" />
                 </div>
               </GlassCard>
             </div>
 
             {/* Distribución de calidad */}
-            <GlassCard className="p-6">
-              <h2 className="mb-4 text-2xl font-semibold text-green-900">Distribución de Calidad</h2>
-              <div className="space-y-4">
+            <GlassCard className="p-4 md:p-6">
+              <h2 className="mb-3 md:mb-4 text-lg md:text-2xl font-semibold text-green-900">Distribución de Calidad</h2>
+              <div className="space-y-3 md:space-y-4">
                 <div>
-                  <div className="mb-2 flex justify-between text-sm">
+                  <div className="mb-1 md:mb-2 flex justify-between text-xs md:text-sm">
                     <span className="text-green-700">Primera Calidad</span>
                     <span className="font-semibold text-green-900">{stats.firstQualityPercent}%</span>
                   </div>
-                  <div className="h-4 overflow-hidden rounded-full bg-green-100">
-                    <div 
-                      className="h-full bg-green-500 transition-all duration-500"
-                      style={{ width: `${stats.firstQualityPercent}%` }}
-                    />
+                  <div className="h-3 md:h-4 overflow-hidden rounded-full bg-green-100">
+                    <div className="h-full bg-green-500 transition-all duration-500" style={{ width: `${stats.firstQualityPercent}%` }} />
                   </div>
                 </div>
-
                 <div>
-                  <div className="mb-2 flex justify-between text-sm">
+                  <div className="mb-1 md:mb-2 flex justify-between text-xs md:text-sm">
                     <span className="text-green-700">Segunda Calidad</span>
                     <span className="font-semibold text-green-900">{stats.secondQualityPercent}%</span>
                   </div>
-                  <div className="h-4 overflow-hidden rounded-full bg-yellow-100">
-                    <div 
-                      className="h-full bg-yellow-500 transition-all duration-500"
-                      style={{ width: `${stats.secondQualityPercent}%` }}
-                    />
+                  <div className="h-3 md:h-4 overflow-hidden rounded-full bg-yellow-100">
+                    <div className="h-full bg-yellow-500 transition-all duration-500" style={{ width: `${stats.secondQualityPercent}%` }} />
                   </div>
                 </div>
-
                 <div>
-                  <div className="mb-2 flex justify-between text-sm">
+                  <div className="mb-1 md:mb-2 flex justify-between text-xs md:text-sm">
                     <span className="text-green-700">Desperdicio</span>
                     <span className="font-semibold text-green-900">{stats.wastePercent}%</span>
                   </div>
-                  <div className="h-4 overflow-hidden rounded-full bg-red-100">
-                    <div 
-                      className="h-full bg-red-500 transition-all duration-500"
-                      style={{ width: `${stats.wastePercent}%` }}
-                    />
+                  <div className="h-3 md:h-4 overflow-hidden rounded-full bg-red-100">
+                    <div className="h-full bg-red-500 transition-all duration-500" style={{ width: `${stats.wastePercent}%` }} />
                   </div>
                 </div>
               </div>
             </GlassCard>
 
             {/* Gráfica de evolución temporal */}
-            <GlassCard className="p-6">
-              <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <h3 className="text-lg font-semibold text-green-900">
+            <GlassCard className="p-4 md:p-6">
+              <div className="mb-3 md:mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <h3 className="text-base md:text-lg font-semibold text-green-900">
                   Evolución de Calidad (Kilogramos)
                   {chartData.length > 0 && (
-                    <span className="ml-2 text-sm font-normal text-green-600">
-                      {chartData.length} días de cosecha
+                    <span className="ml-2 text-xs md:text-sm font-normal text-green-600">
+                      {chartData.length} días
                     </span>
                   )}
                 </h3>
                 <div className="flex items-center gap-2">
-                  <CalendarIcon className="h-5 w-5 text-green-600" />
+                  <CalendarIcon className="h-4 w-4 md:h-5 md:w-5 text-green-600" />
                   <select
                     value={selectedMonth}
                     onChange={(e) => setSelectedMonth(e.target.value)}
-                    className="rounded-lg border border-green-200 bg-white px-4 py-2 text-sm text-green-900 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
+                    className="rounded-lg border border-green-200 bg-white px-3 py-1.5 text-sm text-green-900 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
                   >
                     <option value="all">Toda la temporada</option>
                     {(availableMonths || []).map(m => {
@@ -275,44 +290,46 @@ function HomeContent() {
                 </div>
               </div>
               {chartLoading ? (
-                <div className="flex items-center justify-center h-[300px]">
+                <div className="flex items-center justify-center h-[250px] md:h-[300px]">
                   <RefreshCw className="h-8 w-8 text-green-500 animate-spin" />
                   <span className="ml-3 text-green-600">Cargando datos...</span>
                 </div>
               ) : chartData.length > 0 ? (
-                <div className="w-full overflow-x-auto">
-                  <div style={{ minWidth: chartData.length > 7 ? `${chartData.length * 60}px` : '100%', height: '300px' }}>
+                <div className="w-full overflow-x-auto -mx-2 px-2">
+                  <div style={{ minWidth: chartData.length > 7 ? `${Math.max(chartData.length * 50, 400)}px` : '100%', height: '280px' }}>
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart 
                         key={`chart-${selectedMonth}`}
                         data={chartData}
+                        margin={{ top: 5, right: 10, left: -10, bottom: 5 }}
                       >
                         <CartesianGrid strokeDasharray="3 3" stroke="#d1fae5" />
-                        <XAxis dataKey="date" stroke="#059669" />
-                        <YAxis label={{ value: 'Kilogramos', angle: -90, position: 'insideLeft' }} stroke="#059669" />
+                        <XAxis dataKey="date" stroke="#059669" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                        <YAxis label={{ value: 'kg', angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} stroke="#059669" tick={{ fontSize: 10 }} width={40} />
                         <Tooltip 
                           contentStyle={{ 
                             backgroundColor: 'rgba(255, 255, 255, 0.95)', 
                             border: '1px solid #10b981',
-                            borderRadius: '8px'
+                            borderRadius: '8px',
+                            fontSize: '12px',
                           }} 
                         />
-                        <Legend />
+                        <Legend wrapperStyle={{ fontSize: '11px' }} />
                         <Line 
                           type="monotone" 
                           dataKey="primera" 
                           stroke="#10b981" 
                           strokeWidth={2}
-                          name="Primera Calidad"
-                          dot={{ fill: '#10b981', r: 3 }}
+                          name="1ra Calidad"
+                          dot={{ fill: '#10b981', r: 2 }}
                         />
                         <Line 
                           type="monotone" 
                           dataKey="segunda" 
                           stroke="#f59e0b" 
                           strokeWidth={2}
-                          name="Segunda Calidad"
-                          dot={{ fill: '#f59e0b', r: 3 }}
+                          name="2da Calidad"
+                          dot={{ fill: '#f59e0b', r: 2 }}
                         />
                         <Line 
                           type="monotone" 
@@ -320,7 +337,7 @@ function HomeContent() {
                           stroke="#ef4444" 
                           strokeWidth={2}
                           name="Desperdicio"
-                          dot={{ fill: '#ef4444', r: 3 }}
+                          dot={{ fill: '#ef4444', r: 2 }}
                         />
                       </LineChart>
                     </ResponsiveContainer>
@@ -335,7 +352,7 @@ function HomeContent() {
             </GlassCard>
           </div>
         ) : (
-          <GlassCard className="p-12 text-center">
+          <GlassCard className="p-8 md:p-12 text-center">
             <Package className="mx-auto mb-4 h-16 w-16 text-green-300" />
             <h3 className="mb-2 text-xl font-semibold text-green-900">No hay datos disponibles</h3>
             <p className="text-green-600">Sincroniza datos desde KoboToolbox para ver estadísticas</p>
@@ -343,24 +360,26 @@ function HomeContent() {
         )}
       </div>
 
-      {/* Tabla de Temperatura y Cosecha */}
-      {locationConfig && (
-        <div className="container mt-8">
-          <GlassCard className="p-6">
-            <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-3">
-                <Cloud className="h-8 w-8 text-green-600" />
+      {/* Tabla de Temperatura y Cosecha - AHORA BASADA EN chartData (cosecha), NO en weatherData */}
+      {chartData.length > 0 && (
+        <div className="container px-3 md:px-6 mt-6 md:mt-8">
+          <GlassCard className="p-4 md:p-6">
+            <div className="mb-4 md:mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2 md:gap-3">
+                <Cloud className="h-6 w-6 md:h-8 md:w-8 text-green-600 flex-shrink-0" />
                 <div>
-                  <h2 className="text-2xl font-semibold text-green-900">Temperatura y Cosecha - Datos Históricos</h2>
-                  <p className="text-sm text-green-600">{locationConfig.locationName} - Solo días con cosecha</p>
+                  <h2 className="text-lg md:text-2xl font-semibold text-green-900">Temperatura y Cosecha</h2>
+                  <p className="text-xs md:text-sm text-green-600">
+                    {locationConfig ? `${locationConfig.locationName} - ` : ''}Solo días con cosecha
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <CalendarIcon className="h-5 w-5 text-green-600" />
+                <CalendarIcon className="h-4 w-4 md:h-5 md:w-5 text-green-600" />
                 <select
                   value={selectedMonth}
                   onChange={(e) => setSelectedMonth(e.target.value)}
-                  className="rounded-lg border border-green-200 bg-white px-4 py-2 text-green-900 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
+                  className="rounded-lg border border-green-200 bg-white px-3 py-1.5 text-sm text-green-900 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
                 >
                   <option value="all">Toda la temporada</option>
                   {(availableMonths || []).map(m => {
@@ -372,77 +391,112 @@ function HomeContent() {
                 </select>
               </div>
             </div>
-            <p className="mb-4 text-sm text-green-700">
-              Se recomienda usar estaciones meteorológicas locales para mejorar la precisión de los datos de temperatura
-            </p>
-            <div className="overflow-x-auto">
-              <table className="w-full">
+
+            {!locationConfig && (
+              <p className="mb-3 text-xs md:text-sm text-orange-600 bg-orange-50 px-3 py-2 rounded-lg">
+                Configure la ubicación en Ajustes para ver datos de temperatura
+              </p>
+            )}
+
+            {weatherLoading && (
+              <div className="flex items-center gap-2 mb-3 text-sm text-green-600">
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Cargando datos meteorológicos...
+              </div>
+            )}
+
+            {/* Vista desktop - tabla */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-green-200">
-                    <th className="pb-2 text-left text-sm font-semibold text-green-900">Fecha</th>
-                    <th className="pb-2 text-right text-sm font-semibold text-green-900">Cajas</th>
-                    <th className="pb-2 text-right text-sm font-semibold text-green-900">Peso Total (kg)</th>
-                    <th className="pb-2 text-right text-sm font-semibold text-green-900">1ra Calidad (kg)</th>
-                    <th className="pb-2 text-right text-sm font-semibold text-green-900">Temp. Máx (°C)</th>
-                    <th className="pb-2 text-right text-sm font-semibold text-green-900">Temp. Mín (°C)</th>
-                    <th className="pb-2 text-right text-sm font-semibold text-green-900">Temp. Prom (°C)</th>
+                    <th className="pb-2 text-left font-semibold text-green-900 cursor-pointer hover:bg-green-50 px-2 py-1 select-none" onClick={() => handleTableSort("dateKey")}>
+                      Fecha <SortIcon field="dateKey" />
+                    </th>
+                    <th className="pb-2 text-right font-semibold text-green-900 cursor-pointer hover:bg-green-50 px-2 py-1 select-none" onClick={() => handleTableSort("totalBoxes")}>
+                      Cajas <SortIcon field="totalBoxes" />
+                    </th>
+                    <th className="pb-2 text-right font-semibold text-green-900 cursor-pointer hover:bg-green-50 px-2 py-1 select-none" onClick={() => handleTableSort("totalWeight")}>
+                      Peso Total (kg) <SortIcon field="totalWeight" />
+                    </th>
+                    <th className="pb-2 text-right font-semibold text-green-900 cursor-pointer hover:bg-green-50 px-2 py-1 select-none" onClick={() => handleTableSort("firstQualityWeight")}>
+                      1ra Calidad (kg) <SortIcon field="firstQualityWeight" />
+                    </th>
+                    <th className="pb-2 text-right font-semibold text-green-900 cursor-pointer hover:bg-green-50 px-2 py-1 select-none" onClick={() => handleTableSort("tempMax")}>
+                      Temp. Máx <SortIcon field="tempMax" />
+                    </th>
+                    <th className="pb-2 text-right font-semibold text-green-900 cursor-pointer hover:bg-green-50 px-2 py-1 select-none" onClick={() => handleTableSort("tempMin")}>
+                      Temp. Mín <SortIcon field="tempMin" />
+                    </th>
+                    <th className="pb-2 text-right font-semibold text-green-900 cursor-pointer hover:bg-green-50 px-2 py-1 select-none" onClick={() => handleTableSort("tempProm")}>
+                      Temp. Prom <SortIcon field="tempProm" />
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {weatherLoading || chartLoading ? (
-                    <tr>
-                      <td colSpan={7} className="py-8 text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          <RefreshCw className="h-5 w-5 text-green-500 animate-spin" />
-                          <span className="text-green-600">Cargando datos...</span>
-                        </div>
+                  {sortedTableData.map((row) => (
+                    <tr key={row.dateKey} className="border-b border-green-100 hover:bg-green-50/50">
+                      <td className="py-2.5 px-2 text-green-900">
+                        {new Date(row.dateKey + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' })}
                       </td>
+                      <td className="py-2.5 px-2 text-right text-green-600">{row.totalBoxes}</td>
+                      <td className="py-2.5 px-2 text-right font-semibold text-green-900">{row.totalWeight.toFixed(2)}</td>
+                      <td className="py-2.5 px-2 text-right text-green-900">{row.firstQualityWeight.toFixed(2)}</td>
+                      <td className="py-2.5 px-2 text-right text-red-600">{row.tempMax !== null ? `${row.tempMax}°` : <span className="text-gray-400">-</span>}</td>
+                      <td className="py-2.5 px-2 text-right text-blue-600">{row.tempMin !== null ? `${row.tempMin}°` : <span className="text-gray-400">-</span>}</td>
+                      <td className="py-2.5 px-2 text-right text-orange-600">{row.tempProm !== null ? `${row.tempProm}°` : <span className="text-gray-400">-</span>}</td>
                     </tr>
-                  ) : weatherData && chartData.length > 0 ? (
-                    weatherData
-                      .filter((weather: any) => harvestDays.has(weather.date))
-                      .map((weather: any) => {
-                        // Buscar datos de cosecha del día desde chartData (ya agregados)
-                        const dayData = chartData.find(d => d.dateKey === weather.date);
-                        const totalWeight = dayData ? dayData.totalWeight : 0;
-                        const firstQualityWeight = dayData ? dayData.firstQualityWeight : 0;
-                        const totalBoxes = dayData ? dayData.totalBoxes : 0;
-                        
-                        return (
-                          <tr key={weather.date} className="border-b border-green-100 hover:bg-green-50/50">
-                            <td className="py-3 text-green-900">
-                              {new Date(weather.date + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' })}
-                            </td>
-                            <td className="py-3 text-right text-xs text-green-600">
-                              {totalBoxes}
-                            </td>
-                            <td className="py-3 text-right font-semibold text-green-900">
-                              {totalWeight.toFixed(2)}
-                            </td>
-                            <td className="py-3 text-right text-green-900">
-                              {firstQualityWeight.toFixed(2)}
-                            </td>
-                            <td className="py-3 text-right text-red-600">
-                              {weather.temperatureMax.toFixed(1)}
-                            </td>
-                            <td className="py-3 text-right text-blue-600">
-                              {weather.temperatureMin.toFixed(1)}
-                            </td>
-                            <td className="py-3 text-right text-orange-600">
-                              {weather.temperatureMean.toFixed(1)}
-                            </td>
-                          </tr>
-                        );
-                      })
-                  ) : (
-                    <tr>
-                      <td colSpan={7} className="py-8 text-center text-green-600">
-                        No hay datos disponibles
-                      </td>
-                    </tr>
-                  )}
+                  ))}
                 </tbody>
               </table>
+            </div>
+
+            {/* Vista móvil - tarjetas */}
+            <div className="md:hidden space-y-2 max-h-[60vh] overflow-y-auto">
+              {sortedTableData.map((row) => (
+                <div key={row.dateKey} className="bg-white/60 rounded-lg p-3 border border-green-100">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="font-medium text-sm text-green-900">
+                      {new Date(row.dateKey + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' })}
+                    </span>
+                    <span className="text-green-600 font-bold text-sm">{row.totalBoxes} cajas</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-xs text-center mb-2">
+                    <div className="bg-green-50 rounded p-1.5">
+                      <p className="text-gray-500">Peso Total</p>
+                      <p className="font-semibold text-green-900">{row.totalWeight.toFixed(1)} kg</p>
+                    </div>
+                    <div className="bg-green-50 rounded p-1.5">
+                      <p className="text-gray-500">1ra Calidad</p>
+                      <p className="font-semibold text-green-900">{row.firstQualityWeight.toFixed(1)} kg</p>
+                    </div>
+                    <div className="bg-green-50 rounded p-1.5">
+                      <p className="text-gray-500">2da + Desp.</p>
+                      <p className="font-semibold text-green-900">{(row.totalWeight - row.firstQualityWeight).toFixed(1)} kg</p>
+                    </div>
+                  </div>
+                  {(row.tempMax !== null || row.tempMin !== null) && (
+                    <div className="grid grid-cols-3 gap-2 text-xs text-center">
+                      <div>
+                        <p className="text-gray-400">Máx</p>
+                        <p className="text-red-600 font-medium">{row.tempMax !== null ? `${row.tempMax}°` : '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-400">Mín</p>
+                        <p className="text-blue-600 font-medium">{row.tempMin !== null ? `${row.tempMin}°` : '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-400">Prom</p>
+                        <p className="text-orange-600 font-medium">{row.tempProm !== null ? `${row.tempProm}°` : '-'}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="text-xs text-gray-500 mt-3 text-right">
+              {sortedTableData.length} días con cosecha
             </div>
           </GlassCard>
         </div>
@@ -463,46 +517,39 @@ function HomeContent() {
               </div>
               
               {/* Información - Lado derecho */}
-              <div className="flex-1 bg-white p-6 overflow-y-auto">
-                <DialogHeader className="mb-6">
-                  <DialogTitle className="text-2xl font-bold text-green-900">
+              <div className="flex-1 bg-white p-4 md:p-6 overflow-y-auto">
+                <DialogHeader className="mb-4 md:mb-6">
+                  <DialogTitle className="text-xl md:text-2xl font-bold text-green-900">
                     {selectedBox.boxCode}
                   </DialogTitle>
                 </DialogHeader>
                 
-                <div className="space-y-6">
+                <div className="space-y-4 md:space-y-6">
                   <div className="border-b border-green-100 pb-4">
                     <p className="text-sm text-green-600 mb-1">Peso</p>
-                    <p className="text-3xl font-bold text-green-900">{selectedBox.weight ? (selectedBox.weight / 1000).toFixed(2) : '0.00'} <span className="text-lg">kg</span></p>
+                    <p className="text-2xl md:text-3xl font-bold text-green-900">{selectedBox.weight ? (selectedBox.weight / 1000).toFixed(2) : '0.00'} <span className="text-lg">kg</span></p>
                   </div>
                   
-                  <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
                     <div>
                       <p className="text-sm text-green-600 mb-1">Parcela</p>
-                      <p className="text-lg font-semibold text-green-900">{selectedBox.parcelCode}</p>
-                      <p className="text-sm text-gray-600">{selectedBox.parcelName}</p>
+                      <p className="text-base md:text-lg font-semibold text-green-900">{selectedBox.parcelCode}</p>
+                      <p className="text-xs md:text-sm text-gray-600">{selectedBox.parcelName}</p>
                     </div>
-                    
                     <div>
                       <p className="text-sm text-green-600 mb-1">Calidad</p>
-                      <p className="text-lg font-semibold text-green-900">{getQualityLabel(selectedBox.harvesterId)}</p>
+                      <p className="text-base md:text-lg font-semibold text-green-900">{getQualityLabel(selectedBox.harvesterId)}</p>
                     </div>
-                    
                     <div>
                       <p className="text-sm text-green-600 mb-1">Cortadora</p>
-                      <p className="text-lg font-semibold text-green-900">#{selectedBox.harvesterId}</p>
+                      <p className="text-base md:text-lg font-semibold text-green-900">#{selectedBox.harvesterId}</p>
                     </div>
-                    
                     <div>
-                      <p className="text-sm text-green-600 mb-1">Fecha de Registro</p>
-                      <p className="text-lg font-semibold text-green-900">
-                        {new Date(selectedBox.submissionTime).toLocaleDateString('es-MX', { 
-                          year: 'numeric', 
-                          month: 'long', 
-                          day: 'numeric' 
-                        })}
+                      <p className="text-sm text-green-600 mb-1">Fecha</p>
+                      <p className="text-sm md:text-base font-semibold text-green-900">
+                        {new Date(selectedBox.submissionTime).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}
                       </p>
-                      <p className="text-sm text-gray-600">
+                      <p className="text-xs text-gray-600">
                         {new Date(selectedBox.submissionTime).toLocaleTimeString('es-MX')}
                       </p>
                     </div>
