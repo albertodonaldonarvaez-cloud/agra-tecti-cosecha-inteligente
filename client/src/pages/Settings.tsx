@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save, Clock, Timer, CheckCircle, XCircle, Zap, Send, MessageCircle, Eye, EyeOff } from "lucide-react";
+import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save, Clock, Timer, CheckCircle, XCircle, Zap, Send, MessageCircle, Eye, EyeOff, Plane, Link2, Unlink } from "lucide-react";
 import LocationMapPicker from "@/components/LocationMapPicker";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -491,6 +491,9 @@ export default function Settings() {
 
           {/* Notificaciones Telegram */}
           <TelegramSection />
+
+          {/* WebODM */}
+          <WebODMSection />
 
           {/* Carga Manual */}
           <GlassCard className="p-4 md:p-6">
@@ -1010,6 +1013,268 @@ function TelegramSection() {
           </div>
         </div>
       </div>
+    </GlassCard>
+  );
+}
+
+
+// ============ SECCIÓN WebODM ============
+function WebODMSection() {
+  const [serverUrl, setServerUrl] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [mappingParcelId, setMappingParcelId] = useState<number | null>(null);
+  const [mappingProjectId, setMappingProjectId] = useState<string>("");
+
+  const utils = trpc.useUtils();
+
+  // Cargar configuración existente
+  const { data: config, isLoading: configLoading } = trpc.webodm.getConfig.useQuery();
+
+  // Cargar parcelas y proyectos ODM
+  const { data: parcels } = trpc.parcels.list.useQuery();
+  const { data: odmProjects, refetch: refetchProjects } = trpc.webodm.getProjects.useQuery(undefined, {
+    enabled: !!config?.serverUrl,
+    staleTime: 5 * 60 * 1000,
+  });
+  const { data: odmMappings } = trpc.webodm.getMappings.useQuery();
+
+  // Mutations
+  const saveConfigMutation = trpc.webodm.saveConfig.useMutation({
+    onSuccess: () => {
+      toast.success("Configuración de WebODM guardada");
+      utils.webodm.getConfig.invalidate();
+      refetchProjects();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const testMutation = trpc.webodm.testConnection.useMutation({
+    onSuccess: (result) => {
+      setTestResult(result);
+      if (result.success) {
+        toast.success(result.message);
+        refetchProjects();
+      } else {
+        toast.error(result.message);
+      }
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const saveMappingMutation = trpc.webodm.saveMapping.useMutation({
+    onSuccess: () => {
+      toast.success("Parcela vinculada exitosamente");
+      utils.webodm.getMappings.invalidate();
+      setMappingParcelId(null);
+      setMappingProjectId("");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const deleteMappingMutation = trpc.webodm.deleteMapping.useMutation({
+    onSuccess: () => {
+      toast.success("Vínculo eliminado");
+      utils.webodm.getMappings.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  // Cargar datos existentes
+  useEffect(() => {
+    if (config) {
+      setServerUrl(config.serverUrl || "");
+      setUsername(config.username || "");
+    }
+  }, [config]);
+
+  const handleSaveConfig = () => {
+    if (!serverUrl || !username || !password) {
+      toast.error("Completa todos los campos");
+      return;
+    }
+    saveConfigMutation.mutate({ serverUrl, username, password });
+  };
+
+  return (
+    <GlassCard className="p-4 md:p-6 border-2 border-teal-200 bg-teal-50/30" hover={false}>
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Plane className="h-6 w-6 text-teal-600" />
+          <h2 className="text-lg md:text-2xl font-semibold text-teal-900">WebODM</h2>
+        </div>
+        {config?.hasToken && (
+          <span className="flex items-center gap-1 text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full">
+            <CheckCircle className="h-3 w-3" /> Conectado
+          </span>
+        )}
+      </div>
+
+      <p className="text-sm text-teal-700 mb-4">
+        Conecta tu instancia de WebODM para visualizar ortomosaicos, modelos de superficie y análisis de vegetación directamente en el sistema.
+      </p>
+
+      {/* Configuración de conexión */}
+      <div className="space-y-3 mb-6">
+        <div>
+          <Label className="text-teal-800 text-sm font-medium">URL del Servidor</Label>
+          <Input
+            value={serverUrl}
+            onChange={(e) => setServerUrl(e.target.value)}
+            placeholder="https://odm.tudominio.com"
+            className="mt-1 bg-white/60 border-teal-200"
+          />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <Label className="text-teal-800 text-sm font-medium">Usuario</Label>
+            <Input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="admin"
+              className="mt-1 bg-white/60 border-teal-200"
+            />
+          </div>
+          <div>
+            <Label className="text-teal-800 text-sm font-medium">Contraseña</Label>
+            <div className="relative mt-1">
+              <Input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={config?.hasPassword ? "••••••••" : "Contraseña"}
+                className="bg-white/60 border-teal-200 pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-teal-500 hover:text-teal-700"
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            onClick={handleSaveConfig}
+            disabled={saveConfigMutation.isPending}
+            className="bg-teal-600 hover:bg-teal-700 text-white"
+          >
+            <Save className="h-4 w-4 mr-1" />
+            {saveConfigMutation.isPending ? "Guardando..." : "Guardar Configuración"}
+          </Button>
+          <Button
+            onClick={() => testMutation.mutate()}
+            disabled={testMutation.isPending || !config?.serverUrl}
+            variant="outline"
+            className="border-teal-300 text-teal-700 hover:bg-teal-50"
+          >
+            <RefreshCw className={`h-4 w-4 mr-1 ${testMutation.isPending ? "animate-spin" : ""}`} />
+            {testMutation.isPending ? "Probando..." : "Probar Conexión"}
+          </Button>
+        </div>
+
+        {testResult && (
+          <div className={`rounded-lg p-3 text-sm flex items-center gap-2 ${
+            testResult.success ? "bg-green-50 text-green-700 border border-green-200" : "bg-red-50 text-red-700 border border-red-200"
+          }`}>
+            {testResult.success ? <CheckCircle className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+            {testResult.message}
+          </div>
+        )}
+      </div>
+
+      {/* Vinculación Parcela <-> Proyecto ODM */}
+      {config?.serverUrl && (
+        <div className="border-t border-teal-200/50 pt-4">
+          <h3 className="text-base font-semibold text-teal-800 mb-3 flex items-center gap-2">
+            <Link2 className="h-5 w-5" />
+            Vincular Parcelas con Proyectos ODM
+          </h3>
+
+          {/* Mappings existentes */}
+          {odmMappings && odmMappings.length > 0 && (
+            <div className="space-y-2 mb-4">
+              {odmMappings.map((m: any) => {
+                const parcel = parcels?.find((p: any) => p.id === m.parcelId);
+                const project = odmProjects?.find((p: any) => p.id === m.odmProjectId);
+                return (
+                  <div key={m.id} className="flex items-center justify-between bg-white/50 rounded-xl p-3 border border-teal-100">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <MapPin className="h-4 w-4 text-teal-500 flex-shrink-0" />
+                      <div className="min-w-0">
+                        <span className="font-medium text-teal-900 text-sm">{parcel?.name || parcel?.code || `Parcela #${m.parcelId}`}</span>
+                        <span className="text-teal-400 mx-2">→</span>
+                        <span className="text-teal-700 text-sm">{project?.name || m.odmProjectName || `Proyecto #${m.odmProjectId}`}</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => deleteMappingMutation.mutate({ parcelId: m.parcelId })}
+                      className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all flex-shrink-0"
+                      title="Desvincular"
+                    >
+                      <Unlink className="h-4 w-4" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Formulario para nuevo vínculo */}
+          <div className="flex flex-col sm:flex-row gap-2">
+            <select
+              value={mappingParcelId || ""}
+              onChange={(e) => setMappingParcelId(e.target.value ? parseInt(e.target.value) : null)}
+              className="flex-1 px-3 py-2 bg-white/60 border border-teal-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+            >
+              <option value="">Seleccionar parcela...</option>
+              {parcels?.filter((p: any) => !odmMappings?.some((m: any) => m.parcelId === p.id)).map((p: any) => (
+                <option key={p.id} value={p.id}>{p.name || p.code}</option>
+              ))}
+            </select>
+            <select
+              value={mappingProjectId}
+              onChange={(e) => setMappingProjectId(e.target.value)}
+              className="flex-1 px-3 py-2 bg-white/60 border border-teal-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+            >
+              <option value="">Seleccionar proyecto ODM...</option>
+              {odmProjects?.map((p: any) => (
+                <option key={p.id} value={p.id}>{p.name} ({p.id})</option>
+              ))}
+            </select>
+            <Button
+              onClick={() => {
+                if (!mappingParcelId || !mappingProjectId) {
+                  toast.error("Selecciona parcela y proyecto");
+                  return;
+                }
+                const project = odmProjects?.find((p: any) => p.id === parseInt(mappingProjectId));
+                saveMappingMutation.mutate({
+                  parcelId: mappingParcelId,
+                  odmProjectId: parseInt(mappingProjectId),
+                  odmProjectName: project?.name,
+                });
+              }}
+              disabled={!mappingParcelId || !mappingProjectId || saveMappingMutation.isPending}
+              className="bg-teal-600 hover:bg-teal-700 text-white whitespace-nowrap"
+            >
+              <Link2 className="h-4 w-4 mr-1" />
+              Vincular
+            </Button>
+          </div>
+
+          {(!odmProjects || odmProjects.length === 0) && config?.serverUrl && (
+            <p className="text-xs text-teal-500 mt-2">
+              No se encontraron proyectos. Verifica la conexión con WebODM o crea un proyecto primero.
+            </p>
+          )}
+        </div>
+      )}
     </GlassCard>
   );
 }

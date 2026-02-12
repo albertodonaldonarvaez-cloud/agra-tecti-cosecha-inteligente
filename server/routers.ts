@@ -5,6 +5,7 @@ import { COOKIE_NAME } from "./_core/authContext";
 import { loginUser, registerUser, hashPassword, comparePassword } from "./auth";
 import * as db from "./db";
 import * as dbExt from "./db_extended";
+import * as webodm from "./webodmService";
 import { getDb } from "./db";
 import { boxes, harvesters, parcels } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
@@ -1230,6 +1231,116 @@ export const appRouter = router({
       .mutation(async () => {
         // Placeholder para notificaciones
         return { success: true };
+      }),
+  }),
+
+  // ============ WebODM ============
+  webodm: router({
+    getConfig: adminProcedure.query(async () => {
+      const config = await webodm.getWebodmConfig();
+      if (!config) return null;
+      return { id: config.id, serverUrl: config.serverUrl, username: config.username, hasPassword: !!config.password, hasToken: !!config.token };
+    }),
+
+    saveConfig: adminProcedure
+      .input(z.object({ serverUrl: z.string().url(), username: z.string().min(1), password: z.string().min(1) }))
+      .mutation(async ({ input }) => {
+        await webodm.saveWebodmConfig(input);
+        return { success: true };
+      }),
+
+    testConnection: adminProcedure.mutation(async () => {
+      return webodm.testWebodmConnection();
+    }),
+
+    getProjects: protectedProcedure.query(async () => {
+      return webodm.getOdmProjects();
+    }),
+
+    getProjectTasks: protectedProcedure
+      .input(z.object({ projectId: z.number() }))
+      .query(async ({ input }) => {
+        return webodm.getOdmProjectTasks(input.projectId);
+      }),
+
+    getTaskTileUrls: protectedProcedure
+      .input(z.object({ projectId: z.number(), taskUuid: z.string(), availableAssets: z.array(z.string()) }))
+      .query(async ({ input }) => {
+        return webodm.getOdmTaskTileUrls(input.projectId, input.taskUuid, input.availableAssets);
+      }),
+
+    getTileUrl: protectedProcedure
+      .input(z.object({ projectId: z.number(), taskUuid: z.string(), type: z.enum(["orthophoto", "dsm", "dtm"]).default("orthophoto") }))
+      .query(async ({ input }) => {
+        const url = await webodm.getOdmTileUrl(input.projectId, input.taskUuid, input.type);
+        return { url };
+      }),
+
+    // Mapeo parcela <-> proyecto ODM
+    getMappings: protectedProcedure.query(async () => {
+      return webodm.getParcelOdmMappings();
+    }),
+
+    getMapping: protectedProcedure
+      .input(z.object({ parcelId: z.number() }))
+      .query(async ({ input }) => {
+        return webodm.getParcelOdmMapping(input.parcelId);
+      }),
+
+    saveMapping: adminProcedure
+      .input(z.object({ parcelId: z.number(), odmProjectId: z.number(), odmProjectName: z.string().optional() }))
+      .mutation(async ({ input }) => {
+        await webodm.saveParcelOdmMapping(input.parcelId, input.odmProjectId, input.odmProjectName);
+        return { success: true };
+      }),
+
+    deleteMapping: adminProcedure
+      .input(z.object({ parcelId: z.number() }))
+      .mutation(async ({ input }) => {
+        await webodm.deleteParcelOdmMapping(input.parcelId);
+        return { success: true };
+      }),
+  }),
+
+  // ============ Detalles de Parcela & Análisis ============
+  parcelAnalysis: router({
+    getDetails: protectedProcedure
+      .input(z.object({ parcelId: z.number() }))
+      .query(async ({ input }) => {
+        return webodm.getParcelDetails(input.parcelId);
+      }),
+
+    getAllDetails: protectedProcedure.query(async () => {
+      return webodm.getAllParcelDetails();
+    }),
+
+    saveDetails: adminProcedure
+      .input(z.object({
+        parcelId: z.number(),
+        totalHectares: z.string().nullable().optional(),
+        productiveHectares: z.string().nullable().optional(),
+        treeDensityPerHectare: z.string().nullable().optional(),
+        totalTrees: z.number().nullable().optional(),
+        productiveTrees: z.number().nullable().optional(),
+        newTrees: z.number().nullable().optional(),
+        notes: z.string().nullable().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const { parcelId, ...data } = input;
+        await webodm.saveParcelDetails(parcelId, data);
+        return { success: true };
+      }),
+
+    getHarvestStats: protectedProcedure
+      .input(z.object({ parcelCode: z.string() }))
+      .query(async ({ input }) => {
+        return webodm.getParcelHarvestStats(input.parcelCode);
+      }),
+
+    getDailyHarvest: protectedProcedure
+      .input(z.object({ parcelCode: z.string() }))
+      .query(async ({ input }) => {
+        return webodm.getParcelDailyHarvest(input.parcelCode);
       }),
   }),
 });

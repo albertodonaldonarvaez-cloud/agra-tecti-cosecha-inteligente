@@ -22,6 +22,7 @@ import {
   Target, 
   Edit, 
   CloudSun,
+  Leaf,
   type LucideIcon
 } from "lucide-react";
 
@@ -126,6 +127,18 @@ export const PAGES_CONFIG: PageConfig[] = [
     showInNav: true,
   },
   {
+    permissionKey: "canViewParcelAnalysis",
+    path: "/parcel-analysis",
+    icon: Leaf,
+    label: "Parcela",
+    fullName: "Análisis de Parcela",
+    description: "Vuelos, ortomosaicos y rendimiento por parcela",
+    adminOnly: false,
+    defaultValue: true,
+    order: 7,
+    showInNav: true,
+  },
+  {
     permissionKey: "canViewHarvesters",
     path: "/harvesters",
     icon: Scissors,
@@ -134,7 +147,7 @@ export const PAGES_CONFIG: PageConfig[] = [
     description: "Administrar cortadoras y sus nombres",
     adminOnly: true,
     defaultValue: false,
-    order: 7,
+    order: 8,
     showInNav: true,
   },
   {
@@ -146,7 +159,7 @@ export const PAGES_CONFIG: PageConfig[] = [
     description: "Administrar parcelas y polígonos",
     adminOnly: true,
     defaultValue: false,
-    order: 8,
+    order: 9,
     showInNav: true,
   },
   {
@@ -158,7 +171,7 @@ export const PAGES_CONFIG: PageConfig[] = [
     description: "Editar y corregir datos de cajas",
     adminOnly: true,
     defaultValue: false,
-    order: 9,
+    order: 10,
     showInNav: true,
   },
   {
@@ -170,7 +183,7 @@ export const PAGES_CONFIG: PageConfig[] = [
     description: "Ver y resolver errores de sincronización",
     adminOnly: true,
     defaultValue: false,
-    order: 10,
+    order: 11,
     showInNav: false, // No mostrar en nav por ahora
   },
 ];

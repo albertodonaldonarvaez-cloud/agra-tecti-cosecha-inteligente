@@ -19,6 +19,7 @@ export const users = mysqlTable("users", {
   canViewDailyAnalysis: boolean("canViewDailyAnalysis").default(true).notNull(),
   canViewClimate: boolean("canViewClimate").default(true).notNull(),
   canViewPerformance: boolean("canViewPerformance").default(true).notNull(),
+  canViewParcelAnalysis: boolean("canViewParcelAnalysis").default(true).notNull(),
   canViewParcels: boolean("canViewParcels").default(false).notNull(),
   canViewHarvesters: boolean("canViewHarvesters").default(false).notNull(),
   canViewEditor: boolean("canViewEditor").default(false).notNull(),
@@ -177,3 +178,49 @@ export const locationConfig = mysqlTable("locationConfig", {
 
 export type LocationConfig = typeof locationConfig.$inferSelect;
 export type InsertLocationConfig = typeof locationConfig.$inferInsert;
+
+// Tabla de configuración de WebODM
+export const webodmConfig = mysqlTable("webodmConfig", {
+  id: int("id").autoincrement().primaryKey(),
+  serverUrl: varchar("serverUrl", { length: 512 }).notNull(), // Ej: "https://odm.midominio.com"
+  username: varchar("username", { length: 255 }).notNull(),
+  password: varchar("password", { length: 512 }).notNull(), // Encriptada o en texto
+  token: text("token"), // JWT token cacheado
+  tokenExpiresAt: timestamp("tokenExpiresAt"), // Expiración del token
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type WebodmConfig = typeof webodmConfig.$inferSelect;
+export type InsertWebodmConfig = typeof webodmConfig.$inferInsert;
+
+// Relación parcela <-> proyecto WebODM
+export const parcelOdmMapping = mysqlTable("parcelOdmMapping", {
+  id: int("id").autoincrement().primaryKey(),
+  parcelId: int("parcelId").notNull(), // FK a parcels.id
+  odmProjectId: int("odmProjectId").notNull(), // ID del proyecto en WebODM
+  odmProjectName: varchar("odmProjectName", { length: 255 }), // Nombre cacheado del proyecto
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ParcelOdmMapping = typeof parcelOdmMapping.$inferSelect;
+export type InsertParcelOdmMapping = typeof parcelOdmMapping.$inferInsert;
+
+// Detalles de parcela (densidad, hectáreas, árboles)
+export const parcelDetails = mysqlTable("parcelDetails", {
+  id: int("id").autoincrement().primaryKey(),
+  parcelId: int("parcelId").notNull().unique(), // FK a parcels.id (1:1)
+  totalHectares: varchar("totalHectares", { length: 32 }), // Hectáreas completas
+  productiveHectares: varchar("productiveHectares", { length: 32 }), // Hectáreas productivas
+  treeDensityPerHectare: varchar("treeDensityPerHectare", { length: 32 }), // Densidad de árboles por hectárea
+  totalTrees: int("totalTrees"), // Total de árboles
+  productiveTrees: int("productiveTrees"), // Árboles productivos
+  newTrees: int("newTrees"), // Árboles nuevos
+  notes: text("notes"), // Notas del admin
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});  
+
+export type ParcelDetails = typeof parcelDetails.$inferSelect;
+export type InsertParcelDetails = typeof parcelDetails.$inferInsert;

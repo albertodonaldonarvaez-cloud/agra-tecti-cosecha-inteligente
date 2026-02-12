@@ -8,7 +8,7 @@ interface ProtectedPageProps {
   children: React.ReactNode;
   permission?: keyof Pick<
     any,
-    "canViewDashboard" | "canViewBoxes" | "canViewAnalytics" | "canViewDailyAnalysis" | "canViewParcels" | "canViewHarvesters" | "canViewErrors"
+    "canViewDashboard" | "canViewBoxes" | "canViewAnalytics" | "canViewDailyAnalysis" | "canViewParcels" | "canViewHarvesters" | "canViewErrors" | "canViewParcelAnalysis"
   >;
 }
 

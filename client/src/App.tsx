@@ -25,6 +25,7 @@ const Parcels = lazy(() => import("./pages/Parcels"));
 const BoxEditor = lazy(() => import("./pages/BoxEditor"));
 const ClimateAnalysis = lazy(() => import("./pages/ClimateAnalysis"));
 const Profile = lazy(() => import("./pages/Profile"));
+const ParcelAnalysis = lazy(() => import("./pages/ParcelAnalysis"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 // Componente de carga para Suspense
@@ -67,6 +68,7 @@ function Router() {
           <Route path="/parcels" component={Parcels} />
           <Route path="/editor" component={BoxEditor} />
           <Route path="/climate" component={ClimateAnalysis} />
+          <Route path="/parcel-analysis" component={ParcelAnalysis} />
           <Route path="/profile" component={Profile} />
           <Route path="/users" component={Users} />
           <Route path="/settings" component={Settings} />
