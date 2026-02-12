@@ -4,10 +4,14 @@
  * Actúa como intermediario entre el navegador del cliente y el servidor WebODM.
  * Descarga los tiles con autenticación JWT y los cachea en disco.
  * 
- * WebODM usa TMS (Y invertida). OpenLayers XYZ source envía Y normal (XYZ).
- * Este proxy recibe Y en formato XYZ y la convierte a TMS antes de pedir a WebODM.
+ * IMPORTANTE: WebODM usa esquema XYZ (confirmado via tilejson: "scheme":"xyz").
+ * OpenLayers XYZ source también envía Y en formato XYZ.
+ * Por lo tanto NO se necesita conversión de coordenadas.
  * 
- * Soporta capas: orthophoto, dsm, dtm, ndvi, vari
+ * Fórmulas de vegetación: WebODM espera NOMBRES de algoritmo (VARI, NDVI, EXG, GLI, ENDVI)
+ * con bands=auto para auto-detección de bandas.
+ * 
+ * Soporta capas: orthophoto, dsm, dtm, ndvi, vari, exg, gli, endvi
  */
 
 import { Request, Response } from "express";
@@ -89,26 +93,27 @@ async function getToken(): Promise<{ token: string; serverUrl: string } | null> 
 
 /**
  * Mapeo de tipos de capa a parámetros de URL de WebODM
+ * 
+ * IMPORTANTE: Las fórmulas usan NOMBRES de algoritmo predefinidos en WebODM,
+ * NO expresiones matemáticas. Probado directamente contra la API:
+ * - formula=VARI + bands=auto → HTTP 200 ✓
+ * - formula=(G-R)/(G+R-B) + bands=RGB → HTTP 400 "Cannot find algorithm"
+ * - formula=NDVI + bands=auto → HTTP 200 ✓ (incluso en imágenes RGB)
+ * - formula=EXG + bands=auto → HTTP 200 ✓
+ * - formula=GLI + bands=auto → HTTP 200 ✓
+ * - formula=ENDVI + bands=auto → HTTP 200 ✓
  */
 const LAYER_CONFIG: Record<string, { path: string; params?: string }> = {
   orthophoto: { path: "orthophoto" },
   dsm: { path: "dsm" },
   dtm: { path: "dtm" },
-  // NDVI requiere banda NIR (Near Infrared). Para cámaras RGB usa bandas RGN si están disponibles.
-  // Si la cámara es solo RGB, NDVI no producirá resultados útiles pero no debería dar error.
-  ndvi: { path: "orthophoto", params: "formula=NDVI&bands=RGN&color_map=rdylgn&rescale=-1,1" },
-  // VARI (Visible Atmospherically Resistant Index) - solo usa bandas RGB
-  // La fórmula usa + que debe estar URL-encoded como %2B en el querystring final
-  vari: { path: "orthophoto", params: "formula=(G-R)/(G%2BR-B)&bands=RGB&color_map=rdylgn&rescale=-0.5,0.5" },
+  // Índices de vegetación - usan nombres de algoritmo con bands=auto
+  ndvi: { path: "orthophoto", params: "formula=NDVI&bands=auto&color_map=rdylgn&rescale=-1,1" },
+  vari: { path: "orthophoto", params: "formula=VARI&bands=auto&color_map=rdylgn&rescale=-1,1" },
+  exg: { path: "orthophoto", params: "formula=EXG&bands=auto&color_map=rdylgn&rescale=-1,1" },
+  gli: { path: "orthophoto", params: "formula=GLI&bands=auto&color_map=rdylgn&rescale=-1,1" },
+  endvi: { path: "orthophoto", params: "formula=ENDVI&bands=auto&color_map=rdylgn&rescale=-1,1" },
 };
-
-/**
- * Convierte coordenada Y de XYZ a TMS
- * TMS Y = (2^zoom - 1) - XYZ Y
- */
-function xyzToTmsY(y: number, z: number): number {
-  return Math.pow(2, z) - 1 - y;
-}
 
 // Tile transparente de 1x1 pixel para tiles fuera de rango
 const TRANSPARENT_PNG = Buffer.from(
@@ -120,8 +125,9 @@ const TRANSPARENT_PNG = Buffer.from(
  * Proxy handler para tiles de WebODM
  * Ruta: /api/odm-tiles/:projectId/:taskUuid/:type/:z/:x/:y
  * 
- * Recibe coordenadas en formato XYZ (como las envía OpenLayers XYZ source)
- * y las convierte a TMS (como las espera WebODM) antes de hacer la petición.
+ * WebODM usa esquema XYZ (confirmado via tilejson "scheme":"xyz").
+ * OpenLayers XYZ source envía coordenadas en formato XYZ.
+ * Se pasan directamente a WebODM SIN conversión.
  */
 // Cache de resolución ID -> UUID
 const uuidCache = new Map<string, string>();
@@ -146,7 +152,7 @@ async function resolveTaskUuid(projectId: string, taskIdOrUuid: string, auth: { 
     });
     if (response.ok) {
       const task = await response.json();
-      const uuid = task.uuid || taskIdOrUuid;
+      const uuid = task.uuid || task.id || taskIdOrUuid;
       console.log(`[ODM Tile Proxy] Resolved task ${taskIdOrUuid} -> UUID: ${uuid}`);
       uuidCache.set(cacheKey, uuid);
       return uuid;
@@ -187,17 +193,14 @@ export async function proxyOdmTile(req: Request, res: Response) {
       return res.status(400).json({ error: "Invalid tile coordinates" });
     }
 
-    // Convertir Y de XYZ a TMS para WebODM
-    const tmsY = xyzToTmsY(yNum, zNum);
-
     // Obtener token primero (necesario para resolver UUID)
     const auth = await getToken();
     if (!auth) {
       console.error("[ODM Tile Proxy] No auth available");
-      return res.status(503).json({ error: "WebODM no configurado o credenciales inv\u00e1lidas" });
+      return res.status(503).json({ error: "WebODM no configurado o credenciales inválidas" });
     }
 
-    // Resolver UUID real de la tarea (si se pas\u00f3 un ID num\u00e9rico)
+    // Resolver UUID real de la tarea (si se pasó un ID numérico)
     const taskUuid = await resolveTaskUuid(projectId, taskIdOrUuid, auth);
 
     // Verificar cache en disco
@@ -217,17 +220,17 @@ export async function proxyOdmTile(req: Request, res: Response) {
       }
     }
 
-    // Construir URL del tile con TMS Y
-    let tileUrl = `${auth.serverUrl}/api/projects/${projectId}/tasks/${taskUuid}/${layerConfig.path}/tiles/${zNum}/${xNum}/${tmsY}.png?jwt=${auth.token}`;
+    // Construir URL del tile - usar XYZ Y directamente (WebODM usa scheme: "xyz")
+    let tileUrl = `${auth.serverUrl}/api/projects/${projectId}/tasks/${taskUuid}/${layerConfig.path}/tiles/${zNum}/${xNum}/${yNum}.png?jwt=${auth.token}`;
     if (layerConfig.params) {
       tileUrl += `&${layerConfig.params}`;
     }
 
-    // Log básico para todos los tiles, log detallado para tiles con fórmula
+    // Log detallado
     if (layerConfig.params) {
-      console.log(`[ODM Tile Proxy] Fetching ${type} from WebODM: z=${zNum} x=${xNum} xyzY=${yNum} tmsY=${tmsY} params=${layerConfig.params}`);
+      console.log(`[ODM Tile Proxy] Fetching ${type}: z=${zNum} x=${xNum} y=${yNum} params=${layerConfig.params}`);
     } else {
-      console.log(`[ODM Tile Proxy] Fetching from WebODM: z=${zNum} x=${xNum} xyzY=${yNum} tmsY=${tmsY}`);
+      console.log(`[ODM Tile Proxy] Fetching ${type}: z=${zNum} x=${xNum} y=${yNum}`);
     }
 
     // Descargar tile de WebODM
@@ -254,12 +257,11 @@ export async function proxyOdmTile(req: Request, res: Response) {
       if (response.status === 400) {
         try {
           const errorBody = await response.text();
-          console.warn(`[ODM Tile Proxy] WebODM 400 for ${type} tile z=${zNum} x=${xNum} tmsY=${tmsY}: ${errorBody.substring(0, 200)}`);
+          console.warn(`[ODM Tile Proxy] WebODM 400 for ${type} tile z=${zNum} x=${xNum} y=${yNum}: ${errorBody.substring(0, 300)}`);
         } catch { 
-          console.warn(`[ODM Tile Proxy] WebODM 400 for ${type} tile z=${zNum} x=${xNum} tmsY=${tmsY}`);
+          console.warn(`[ODM Tile Proxy] WebODM 400 for ${type} tile z=${zNum} x=${xNum} y=${yNum}`);
         }
         // Para tiles con fórmula que fallan, devolver transparente en vez de error
-        // Esto evita que el mapa se rompa si la fórmula no es soportada
         if (layerConfig.params) {
           res.setHeader("Content-Type", "image/png");
           res.setHeader("Cache-Control", "no-cache");
@@ -267,7 +269,7 @@ export async function proxyOdmTile(req: Request, res: Response) {
           return res.send(TRANSPARENT_PNG);
         }
       } else {
-        console.warn(`[ODM Tile Proxy] WebODM returned ${response.status} for tile z=${zNum} x=${xNum} tmsY=${tmsY}`);
+        console.warn(`[ODM Tile Proxy] WebODM returned ${response.status} for tile z=${zNum} x=${xNum} y=${yNum}`);
       }
       return res.status(response.status).json({ error: `WebODM error: ${response.status}` });
     }
@@ -415,19 +417,26 @@ export async function getOdmAvailableLayers(req: Request, res: Response) {
     const assets = task.available_assets || [];
     const bands = task.orthophoto_bands || [];
     console.log(`[ODM Layers] Available assets:`, assets);
-    console.log(`[ODM Layers] Orthophoto bands:`, bands);
+    console.log(`[ODM Layers] Orthophoto bands:`, JSON.stringify(bands));
 
-    // Detectar si hay banda NIR (necesaria para NDVI real)
+    const hasOrthophoto = assets.includes("orthophoto.tif");
+
+    // Detectar si hay banda NIR (necesaria para NDVI real con resultados significativos)
     const hasNIR = bands.some((b: any) => {
       const name = (typeof b === 'string' ? b : b?.description || b?.name || '').toLowerCase();
       return name.includes('nir') || name.includes('infrared') || name.includes('near');
     });
-    const hasOrthophoto = assets.includes("orthophoto.tif");
 
+    // WebODM acepta NDVI incluso en imágenes RGB (con bands=auto), pero los resultados
+    // solo son significativos si hay banda NIR. Lo marcamos como disponible siempre
+    // pero con descripción diferente según las bandas.
     const layers = [
       { id: "orthophoto", name: "Ortofoto", available: hasOrthophoto, description: "Imagen aérea corregida" },
-      { id: "ndvi", name: "NDVI", available: hasOrthophoto && hasNIR, description: hasNIR ? "Salud vegetal (infrarrojo)" : "Requiere cámara multiespectral (NIR)" },
-      { id: "vari", name: "VARI", available: hasOrthophoto, description: "Vegetación visible (solo RGB)" },
+      { id: "vari", name: "VARI", available: hasOrthophoto, description: "Índice de vegetación visible (RGB)" },
+      { id: "ndvi", name: "NDVI", available: hasOrthophoto, description: hasNIR ? "Índice de vegetación (NIR)" : "Índice de vegetación (aproximado RGB)" },
+      { id: "exg", name: "EXG", available: hasOrthophoto, description: "Exceso de verde" },
+      { id: "gli", name: "GLI", available: hasOrthophoto, description: "Índice de hoja verde" },
+      { id: "endvi", name: "ENDVI", available: hasOrthophoto, description: "NDVI mejorado" },
       { id: "dsm", name: "DSM", available: assets.includes("dsm.tif"), description: "Modelo de Superficie" },
       { id: "dtm", name: "DTM", available: assets.includes("dtm.tif"), description: "Modelo de Terreno" },
     ];

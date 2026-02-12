@@ -45,8 +45,11 @@ const STATUS_MAP: Record<number, { label: string; color: string; bg: string }> =
 
 const LAYER_TYPES = [
   { key: "orthophoto", label: "Ortofoto", shortLabel: "Orto", color: "from-green-500 to-emerald-600" },
-  { key: "ndvi", label: "NDVI (Salud)", shortLabel: "NDVI", color: "from-lime-500 to-green-600" },
   { key: "vari", label: "VARI (RGB)", shortLabel: "VARI", color: "from-teal-500 to-cyan-600" },
+  { key: "ndvi", label: "NDVI", shortLabel: "NDVI", color: "from-lime-500 to-green-600" },
+  { key: "exg", label: "Exceso Verde", shortLabel: "EXG", color: "from-emerald-500 to-green-600" },
+  { key: "gli", label: "Hoja Verde", shortLabel: "GLI", color: "from-green-400 to-lime-500" },
+  { key: "endvi", label: "ENDVI", shortLabel: "ENDVI", color: "from-yellow-500 to-amber-600" },
   { key: "dsm", label: "DSM", shortLabel: "DSM", color: "from-blue-500 to-indigo-600" },
   { key: "dtm", label: "DTM", shortLabel: "DTM", color: "from-purple-500 to-violet-600" },
 ] as const;
@@ -706,6 +709,15 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
               )}
               {selectedLayerType === "vari" && (
                 <span><strong>VARI</strong> — Índice de Vegetación Visible (solo RGB). Útil para cámaras sin banda infrarroja.</span>
+              )}
+              {selectedLayerType === "exg" && (
+                <span><strong>EXG</strong> — Exceso de Verde. Resalta áreas con vegetación verde prominente.</span>
+              )}
+              {selectedLayerType === "gli" && (
+                <span><strong>GLI</strong> — Índice de Hoja Verde. Detecta cobertura de hojas verdes en el cultivo.</span>
+              )}
+              {selectedLayerType === "endvi" && (
+                <span><strong>ENDVI</strong> — NDVI Mejorado. Versión optimizada del NDVI para imágenes RGB.</span>
               )}
               {selectedLayerType === "dsm" && (
                 <span><strong>DSM</strong> — Modelo Digital de Superficie. Incluye árboles, edificios y terreno.</span>
