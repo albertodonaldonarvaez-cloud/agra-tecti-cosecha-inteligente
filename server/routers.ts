@@ -1343,6 +1343,19 @@ export const appRouter = router({
         return webodm.getParcelDailyHarvest(input.parcelCode);
       }),
   }),
+
+  // Sincronización semanal de vuelos ODM
+  odmSync: router({
+    status: protectedProcedure.query(async () => {
+      const { getOdmSyncStatus } = await import("./odmAutoSync");
+      return getOdmSyncStatus();
+    }),
+    triggerManual: adminProcedure.mutation(async () => {
+      const { triggerManualOdmSync } = await import("./odmAutoSync");
+      const result = await triggerManualOdmSync();
+      return result || { totalProjects: 0, totalTasks: 0, newTasks: [], completedTasks: [], processingTasks: [], failedTasks: [], parcelSummary: [] };
+    }),
+  }),
 });
 
 export type AppRouter = typeof appRouter;

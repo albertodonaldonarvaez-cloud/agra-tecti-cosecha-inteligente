@@ -122,6 +122,14 @@ async function startServer() {
     }).catch((err) => {
       console.error("Error al iniciar AutoSync:", err);
     });
+
+    // Iniciar sincronización semanal de vuelos WebODM
+    // Se ejecuta cada lunes a las 8:00 AM hora de México
+    import("../odmAutoSync").then(({ startOdmAutoSync }) => {
+      startOdmAutoSync();
+    }).catch((err) => {
+      console.error("Error al iniciar ODM AutoSync:", err);
+    });
   });
 }
 

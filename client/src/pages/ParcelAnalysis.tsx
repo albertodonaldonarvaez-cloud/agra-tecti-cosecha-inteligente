@@ -83,10 +83,24 @@ function ParcelAnalysisContent() {
   const [activeTab, setActiveTab] = useState<"map" | "details" | "harvest">("map");
 
   // Cargar parcelas
-  const { data: parcels, isLoading: parcelsLoading } = trpc.parcels.list.useQuery(undefined, {
+  const { data: allParcels, isLoading: parcelsLoading } = trpc.parcels.list.useQuery(undefined, {
     enabled: !!user,
     staleTime: 5 * 60 * 1000,
   });
+
+  // Filtrar solo parcelas con polígono definido
+  const parcels = useMemo(() => {
+    if (!allParcels) return [];
+    return allParcels.filter((p: any) => {
+      if (!p.polygon) return false;
+      try {
+        const poly = typeof p.polygon === "string" ? JSON.parse(p.polygon) : p.polygon;
+        return poly.coordinates && poly.coordinates[0] && poly.coordinates[0].length >= 3;
+      } catch {
+        return false;
+      }
+    });
+  }, [allParcels]);
 
   // Cargar mapeos ODM
   const { data: odmMappings } = trpc.webodm.getMappings.useQuery(undefined, {
@@ -329,7 +343,7 @@ function OverviewView({ parcels, odmMappings, allDetails, onSelectParcel }: {
             <MapPin className="h-5 w-5" />
             Vista General de Parcelas
             <span className="text-xs font-normal text-green-500 bg-green-50 px-2 py-0.5 rounded-full">
-              {parcels.length} parcelas
+              {parcels.length} parcelas con polígono
             </span>
           </h3>
           <p className="text-xs text-green-500 mt-1">Haz clic en una parcela del mapa o de la lista para ver su detalle</p>
@@ -519,7 +533,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
 
     if (selectedTaskUuid && mapping?.odmProjectId) {
       // Usar el proxy del servidor en lugar de URL directa a WebODM
-      const proxyUrl = `/api/odm-tiles/${mapping.odmProjectId}/${selectedTaskUuid}/${selectedLayerType}/{z}/{x}/{-y}.png`;
+      const proxyUrl = `/api/odm-tiles/${mapping.odmProjectId}/${selectedTaskUuid}/${selectedLayerType}/{z}/{x}/{y}.png`;
 
       tileLayerRef.current.setSource(
         new XYZ({

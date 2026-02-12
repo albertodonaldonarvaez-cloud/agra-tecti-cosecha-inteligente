@@ -2,10 +2,12 @@
  * Proxy de tiles para WebODM
  * 
  * Actúa como intermediario entre el navegador del cliente y el servidor WebODM.
- * Descarga los tiles con autenticación JWT y los cachea en disco para
- * evitar re-descargas y mejorar el rendimiento.
+ * Descarga los tiles con autenticación JWT y los cachea en disco.
  * 
- * Soporta capas: orthophoto, dsm, dtm, ndvi (plant health)
+ * IMPORTANTE: WebODM usa TMS (Y invertida). OpenLayers XYZ source envía Y normal (XYZ).
+ * Este proxy recibe Y en formato XYZ y la convierte a TMS antes de pedir a WebODM.
+ * 
+ * Soporta capas: orthophoto, dsm, dtm, ndvi, vari
  */
 
 import { Request, Response } from "express";
@@ -14,9 +16,8 @@ import * as fs from "fs";
 import * as path from "path";
 
 // Directorio de cache de tiles
-const TILE_CACHE_DIR = process.env.TILE_CACHE_DIR || "/app/tile-cache";
+const TILE_CACHE_DIR = process.env.TILE_CACHE_DIR || "/tmp/odm-tile-cache";
 
-// Asegurar que el directorio de cache existe
 function ensureCacheDir(subDir: string) {
   const dir = path.join(TILE_CACHE_DIR, subDir);
   if (!fs.existsSync(dir)) {
@@ -25,17 +26,19 @@ function ensureCacheDir(subDir: string) {
   return dir;
 }
 
-// Cache de token en memoria para evitar consultas repetidas a la BD
+// Cache de token en memoria
 let tokenCache: { token: string; serverUrl: string; expiresAt: number } | null = null;
 
 async function getToken(): Promise<{ token: string; serverUrl: string } | null> {
-  // Verificar cache en memoria
   if (tokenCache && tokenCache.expiresAt > Date.now() + 60000) {
     return { token: tokenCache.token, serverUrl: tokenCache.serverUrl };
   }
 
   const config = await getWebodmConfig();
-  if (!config) return null;
+  if (!config) {
+    console.error("[ODM Tile Proxy] No WebODM config found");
+    return null;
+  }
 
   // Si hay token válido en BD
   if (config.token && config.tokenExpiresAt) {
@@ -48,13 +51,17 @@ async function getToken(): Promise<{ token: string; serverUrl: string } | null> 
 
   // Solicitar nuevo token
   try {
+    console.log(`[ODM Tile Proxy] Requesting new token from ${config.serverUrl}`);
     const response = await fetch(`${config.serverUrl}/api/token-auth/`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: `username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}`,
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      console.error(`[ODM Tile Proxy] Auth failed: ${response.status}`);
+      return null;
+    }
 
     const data = await response.json();
     const expiresAt = Date.now() + 5.5 * 60 * 60 * 1000;
@@ -71,9 +78,7 @@ async function getToken(): Promise<{ token: string; serverUrl: string } | null> 
           .set({ token: data.token, tokenExpiresAt: new Date(expiresAt) })
           .where(eq(webodmConfigTable.id, config.id));
       }
-    } catch (e) {
-      // No bloquear si falla la actualización de BD
-    }
+    } catch (e) { /* no bloquear */ }
 
     return { token: data.token, serverUrl: config.serverUrl };
   } catch (err) {
@@ -90,40 +95,61 @@ const LAYER_CONFIG: Record<string, { path: string; params?: string }> = {
   dsm: { path: "dsm" },
   dtm: { path: "dtm" },
   ndvi: { path: "orthophoto", params: "formula=NDVI&bands=RGN&color_map=rdylgn&rescale=-1,1" },
-  vari: { path: "orthophoto", params: "formula=(G-R)/(G+R-B)&bands=RGB&color_map=rdylgn&rescale=-0.5,0.5" },
-  evi: { path: "orthophoto", params: "formula=2.5*(N-R)/(N+6*R-7.5*B+1)&bands=RGN&color_map=rdylgn&rescale=-1,1" },
+  vari: { path: "orthophoto", params: "formula=(G-R)/(G%2BR-B)&bands=RGB&color_map=rdylgn&rescale=-0.5,0.5" },
 };
+
+/**
+ * Convierte coordenada Y de XYZ a TMS
+ * TMS Y = (2^zoom - 1) - XYZ Y
+ */
+function xyzToTmsY(y: number, z: number): number {
+  return Math.pow(2, z) - 1 - y;
+}
 
 /**
  * Proxy handler para tiles de WebODM
  * Ruta: /api/odm-tiles/:projectId/:taskUuid/:type/:z/:x/:y.png
+ * 
+ * Recibe coordenadas en formato XYZ (como las envía OpenLayers XYZ source)
+ * y las convierte a TMS (como las espera WebODM) antes de hacer la petición.
  */
 export async function proxyOdmTile(req: Request, res: Response) {
   try {
     const { projectId, taskUuid, type, z, x, y } = req.params;
 
-    // Validar parámetros
     if (!projectId || !taskUuid || !type || !z || !x || !y) {
       return res.status(400).json({ error: "Missing parameters" });
     }
 
     const layerConfig = LAYER_CONFIG[type];
     if (!layerConfig) {
-      return res.status(400).json({ error: `Invalid layer type: ${type}. Valid: ${Object.keys(LAYER_CONFIG).join(", ")}` });
+      return res.status(400).json({ error: `Invalid layer type: ${type}` });
     }
 
+    // Parsear coordenadas
+    const zNum = parseInt(z);
+    const xNum = parseInt(x);
+    const yClean = y.replace(".png", "");
+    const yNum = parseInt(yClean);
+
+    if (isNaN(zNum) || isNaN(xNum) || isNaN(yNum)) {
+      return res.status(400).json({ error: "Invalid tile coordinates" });
+    }
+
+    // Convertir Y de XYZ a TMS para WebODM
+    const tmsY = xyzToTmsY(yNum, zNum);
+
     // Verificar cache en disco
-    const cleanY = y.replace(".png", "");
-    const cacheKey = `${projectId}/${taskUuid}/${type}/${z}/${x}`;
+    const cacheKey = `${projectId}/${taskUuid}/${type}/${zNum}/${xNum}`;
     const cacheDir = ensureCacheDir(cacheKey);
-    const cachePath = path.join(cacheDir, `${cleanY}.png`);
+    const cachePath = path.join(cacheDir, `${yNum}.png`);
 
     if (fs.existsSync(cachePath)) {
       const stat = fs.statSync(cachePath);
       // Cache válido por 7 días
       if (Date.now() - stat.mtimeMs < 7 * 24 * 60 * 60 * 1000) {
         res.setHeader("Content-Type", "image/png");
-        res.setHeader("Cache-Control", "public, max-age=604800"); // 7 días
+        res.setHeader("Cache-Control", "public, max-age=604800");
         res.setHeader("X-Tile-Cache", "HIT");
         return res.sendFile(cachePath);
       }
@@ -135,32 +161,37 @@ export async function proxyOdmTile(req: Request, res: Response) {
       return res.status(503).json({ error: "WebODM no configurado o credenciales inválidas" });
     }
 
-    // Construir URL del tile
-    let tileUrl = `${auth.serverUrl}/api/projects/${projectId}/tasks/${taskUuid}/${layerConfig.path}/tiles/${z}/${x}/${cleanY}.png?jwt=${auth.token}`;
+    // Construir URL del tile con TMS Y
+    // WebODM acepta: /api/projects/{id}/tasks/{uuid}/{type}/tiles/{z}/{x}/{tmsY}.png?jwt=...
+    let tileUrl = `${auth.serverUrl}/api/projects/${projectId}/tasks/${taskUuid}/${layerConfig.path}/tiles/${zNum}/${xNum}/${tmsY}.png?jwt=${auth.token}`;
     if (layerConfig.params) {
       tileUrl += `&${layerConfig.params}`;
     }
 
     // Descargar tile de WebODM
-    const response = await fetch(tileUrl);
+    const response = await fetch(tileUrl, {
+      headers: {
+        "Accept": "image/png,image/*,*/*",
+      },
+    });
 
     if (!response.ok) {
       if (response.status === 404) {
         // Tile no existe (fuera del área) - devolver transparente
         res.setHeader("Content-Type", "image/png");
         res.setHeader("Cache-Control", "public, max-age=86400");
-        // PNG transparente 1x1
         const transparentPng = Buffer.from(
-          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQABNjN9GQAAAABJRElEQkSuQmCC",
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQABNjN9GQAAAABJRU5ErkJggg==",
           "base64"
         );
         return res.send(transparentPng);
       }
       if (response.status === 403) {
-        // Token expirado, limpiar cache
         tokenCache = null;
+        console.warn(`[ODM Tile Proxy] 403 - Token expired, cleared cache`);
       }
-      return res.status(response.status).json({ error: `WebODM tile error: ${response.status}` });
+      console.warn(`[ODM Tile Proxy] WebODM returned ${response.status} for tile z=${zNum} x=${xNum} tmsY=${tmsY}`);
+      return res.status(response.status).json({ error: `WebODM error: ${response.status}` });
     }
 
     const contentType = response.headers.get("content-type") || "image/png";
@@ -170,18 +201,16 @@ export async function proxyOdmTile(req: Request, res: Response) {
     try {
       fs.writeFileSync(cachePath, buffer);
     } catch (e) {
-      // No bloquear si falla el cache
       console.warn("[ODM Tile Proxy] Cache write failed:", e);
     }
 
-    // Devolver tile al cliente
     res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "public, max-age=604800"); // 7 días
+    res.setHeader("Cache-Control", "public, max-age=604800");
     res.setHeader("X-Tile-Cache", "MISS");
     res.send(buffer);
 
   } catch (error: any) {
-    console.error("[ODM Tile Proxy] Error:", error);
+    console.error("[ODM Tile Proxy] Error:", error.message);
     res.status(500).json({ error: "Error al obtener tile" });
   }
 }
@@ -199,7 +228,28 @@ export async function getOdmTaskBounds(req: Request, res: Response) {
       return res.status(503).json({ error: "WebODM no configurado" });
     }
 
-    // Obtener info de la tarea que incluye extent
+    // Primero intentar tilejson que tiene bounds precisos
+    try {
+      const tilejsonRes = await fetch(
+        `${auth.serverUrl}/api/projects/${projectId}/tasks/${taskUuid}/orthophoto/tiles.json?jwt=${auth.token}`
+      );
+      if (tilejsonRes.ok) {
+        const tilejson = await tilejsonRes.json();
+        if (tilejson.bounds && tilejson.bounds.length === 4) {
+          res.setHeader("Cache-Control", "public, max-age=3600");
+          return res.json({
+            bounds: tilejson.bounds, // [minLon, minLat, maxLon, maxLat]
+            center: tilejson.center,
+            minzoom: tilejson.minzoom,
+            maxzoom: tilejson.maxzoom,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("[ODM Bounds] tilejson failed, trying task info");
+    }
+
+    // Fallback: obtener info de la tarea
     const response = await fetch(`${auth.serverUrl}/api/projects/${projectId}/tasks/${taskUuid}/`, {
       headers: { Authorization: `JWT ${auth.token}` },
     });
@@ -209,57 +259,19 @@ export async function getOdmTaskBounds(req: Request, res: Response) {
     }
 
     const task = await response.json();
-
-    // Extraer bounds del orthophoto
     let bounds = null;
-    if (task.orthophoto_extent) {
-      bounds = task.orthophoto_extent;
-    } else if (task.dsm_extent) {
-      bounds = task.dsm_extent;
-    }
 
-    // También intentar obtener tilejson para bounds más precisos
-    try {
-      const tilejsonRes = await fetch(`${auth.serverUrl}/api/projects/${projectId}/tasks/${taskUuid}/orthophoto/tiles.json?jwt=${auth.token}`);
-      if (tilejsonRes.ok) {
-        const tilejson = await tilejsonRes.json();
-        if (tilejson.bounds) {
-          bounds = {
-            type: "Polygon",
-            coordinates: [[
-              [tilejson.bounds[0], tilejson.bounds[1]],
-              [tilejson.bounds[2], tilejson.bounds[1]],
-              [tilejson.bounds[2], tilejson.bounds[3]],
-              [tilejson.bounds[0], tilejson.bounds[3]],
-              [tilejson.bounds[0], tilejson.bounds[1]],
-            ]],
-          };
-          res.setHeader("Cache-Control", "public, max-age=3600");
-          return res.json({
-            bounds: tilejson.bounds, // [minLon, minLat, maxLon, maxLat]
-            center: tilejson.center, // [lon, lat, zoom]
-            minzoom: tilejson.minzoom,
-            maxzoom: tilejson.maxzoom,
-            extent: bounds,
-            name: task.name,
-            availableAssets: task.available_assets || [],
-          });
-        }
-      }
-    } catch (e) {
-      // Fallback a extent de la tarea
+    if (task.orthophoto_extent) {
+      bounds = extractBoundsArray(task.orthophoto_extent);
+    } else if (task.dsm_extent) {
+      bounds = extractBoundsArray(task.dsm_extent);
     }
 
     res.setHeader("Cache-Control", "public, max-age=3600");
-    res.json({
-      bounds: bounds ? extractBoundsArray(bounds) : null,
-      extent: bounds,
-      name: task.name,
-      availableAssets: task.available_assets || [],
-    });
+    res.json({ bounds, name: task.name });
 
   } catch (error: any) {
-    console.error("[ODM Bounds] Error:", error);
+    console.error("[ODM Bounds] Error:", error.message);
     res.status(500).json({ error: "Error al obtener bounds" });
   }
 }
@@ -302,19 +314,19 @@ export async function getOdmAvailableLayers(req: Request, res: Response) {
     const task = await response.json();
     const assets = task.available_assets || [];
 
-    const layers: { id: string; name: string; available: boolean; description: string }[] = [
-      { id: "orthophoto", name: "Ortofoto", available: assets.includes("orthophoto.tif"), description: "Imagen aérea corregida geométricamente" },
-      { id: "dsm", name: "DSM", available: assets.includes("dsm.tif"), description: "Modelo Digital de Superficie" },
-      { id: "dtm", name: "DTM", available: assets.includes("dtm.tif"), description: "Modelo Digital de Terreno" },
-      { id: "ndvi", name: "NDVI", available: assets.includes("orthophoto.tif"), description: "Índice de Vegetación (salud vegetal)" },
-      { id: "vari", name: "VARI", available: assets.includes("orthophoto.tif"), description: "Índice de Vegetación Visible (RGB)" },
+    const layers = [
+      { id: "orthophoto", name: "Ortofoto", available: assets.includes("orthophoto.tif"), description: "Imagen aérea corregida" },
+      { id: "ndvi", name: "NDVI", available: assets.includes("orthophoto.tif"), description: "Salud vegetal (infrarrojo)" },
+      { id: "vari", name: "VARI", available: assets.includes("orthophoto.tif"), description: "Vegetación visible (RGB)" },
+      { id: "dsm", name: "DSM", available: assets.includes("dsm.tif"), description: "Modelo de Superficie" },
+      { id: "dtm", name: "DTM", available: assets.includes("dtm.tif"), description: "Modelo de Terreno" },
     ];
 
     res.setHeader("Cache-Control", "public, max-age=300");
     res.json({ layers, assets });
 
   } catch (error: any) {
-    console.error("[ODM Layers] Error:", error);
+    console.error("[ODM Layers] Error:", error.message);
     res.status(500).json({ error: "Error al obtener capas" });
   }
 }
