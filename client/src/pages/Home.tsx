@@ -151,6 +151,23 @@ function HomeContent() {
     return tableSortOrder === "asc" ? <ChevronUp className="w-3 h-3 inline ml-0.5" /> : <ChevronDown className="w-3 h-3 inline ml-0.5" />;
   }, [tableSortField, tableSortOrder]);
 
+  // Calcular dominio Y dinámico basado en los datos actuales
+  const yDomain = useMemo(() => {
+    if (!chartData || chartData.length === 0) return [0, 100];
+    const maxVal = Math.max(...chartData.map(d => Math.max(d.primera, d.segunda, d.desperdicio)));
+    const roundedMax = Math.ceil(maxVal / 10) * 10 + 10;
+    return [0, roundedMax];
+  }, [chartData]);
+
+  // Generar ticks del eje Y
+  const yTicks = useMemo(() => {
+    const [, max] = yDomain;
+    const step = max <= 50 ? 5 : max <= 100 ? 10 : max <= 200 ? 20 : max <= 500 ? 50 : 100;
+    const ticks = [];
+    for (let i = 0; i <= max; i += step) ticks.push(i);
+    return ticks;
+  }, [yDomain]);
+
   const handleImageClick = (box: any) => {
     setSelectedBox(box);
     setShowImageModal(true);
@@ -290,63 +307,121 @@ function HomeContent() {
                 </div>
               </div>
               {chartLoading ? (
-                <div className="flex items-center justify-center h-[250px] md:h-[300px]">
+                <div className="flex items-center justify-center h-[280px] md:h-[320px]">
                   <RefreshCw className="h-8 w-8 text-green-500 animate-spin" />
                   <span className="ml-3 text-green-600">Cargando datos...</span>
                 </div>
               ) : chartData.length > 0 ? (
-                <div className="w-full overflow-x-auto -mx-2 px-2">
-                  <div style={{ minWidth: chartData.length > 7 ? `${Math.max(chartData.length * 50, 400)}px` : '100%', height: '280px' }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart 
-                        key={`chart-${selectedMonth}`}
-                        data={chartData}
-                        margin={{ top: 5, right: 10, left: -10, bottom: 5 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="#d1fae5" />
-                        <XAxis dataKey="date" stroke="#059669" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
-                        <YAxis label={{ value: 'kg', angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} stroke="#059669" tick={{ fontSize: 10 }} width={40} />
-                        <Tooltip 
-                          contentStyle={{ 
-                            backgroundColor: 'rgba(255, 255, 255, 0.95)', 
-                            border: '1px solid #10b981',
-                            borderRadius: '8px',
-                            fontSize: '12px',
-                          }} 
-                        />
-                        <Legend wrapperStyle={{ fontSize: '11px' }} />
-                        <Line 
-                          type="monotone" 
-                          dataKey="primera" 
-                          stroke="#10b981" 
-                          strokeWidth={2}
-                          name="1ra Calidad"
-                          dot={{ fill: '#10b981', r: 2 }}
-                        />
-                        <Line 
-                          type="monotone" 
-                          dataKey="segunda" 
-                          stroke="#f59e0b" 
-                          strokeWidth={2}
-                          name="2da Calidad"
-                          dot={{ fill: '#f59e0b', r: 2 }}
-                        />
-                        <Line 
-                          type="monotone" 
-                          dataKey="desperdicio" 
-                          stroke="#ef4444" 
-                          strokeWidth={2}
-                          name="Desperdicio"
-                          dot={{ fill: '#ef4444', r: 2 }}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
+                <>
+                  {/* Leyenda arriba de la gráfica */}
+                  <div className="flex flex-wrap justify-center gap-3 md:gap-5 mb-3">
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-block w-3 h-3 rounded-full bg-green-500" />
+                      <span className="text-xs md:text-sm text-green-800">1ra Calidad</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-block w-3 h-3 rounded-full bg-yellow-500" />
+                      <span className="text-xs md:text-sm text-yellow-800">2da Calidad</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-block w-3 h-3 rounded-full bg-red-500" />
+                      <span className="text-xs md:text-sm text-red-800">Desperdicio</span>
+                    </div>
                   </div>
-                </div>
+
+                  {/* Gráfica con eje Y sticky */}
+                  <div className="flex">
+                    {/* Eje Y fijo (sticky) */}
+                    <div className="flex-shrink-0" style={{ width: '48px' }}>
+                      <div style={{ height: '280px' }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={chartData} margin={{ top: 5, right: 0, left: 0, bottom: 25 }}>
+                            <YAxis 
+                              domain={yDomain as [number, number]}
+                              ticks={yTicks}
+                              stroke="#059669" 
+                              tick={{ fontSize: 11, fontWeight: 500 }} 
+                              width={46}
+                              axisLine={false}
+                              tickLine={false}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <div className="text-center text-[10px] md:text-xs text-green-600 font-medium -mt-1">kg</div>
+                    </div>
+
+                    {/* Área scrollable con la gráfica */}
+                    <div className="flex-1 overflow-x-auto">
+                      <div style={{ minWidth: chartData.length > 7 ? `${Math.max(chartData.length * 55, 400)}px` : '100%', height: '280px' }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart 
+                            key={`chart-${selectedMonth}-${yDomain[1]}`}
+                            data={chartData}
+                            margin={{ top: 5, right: 15, left: 0, bottom: 5 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke="#d1fae5" />
+                            <XAxis 
+                              dataKey="date" 
+                              stroke="#059669" 
+                              tick={{ fontSize: 12, fontWeight: 500 }} 
+                              interval={chartData.length > 15 ? Math.floor(chartData.length / 10) : 0}
+                              angle={chartData.length > 10 ? -35 : 0}
+                              textAnchor={chartData.length > 10 ? "end" : "middle"}
+                              height={chartData.length > 10 ? 50 : 30}
+                            />
+                            <YAxis 
+                              domain={yDomain as [number, number]}
+                              ticks={yTicks}
+                              hide={true}
+                            />
+                            <Tooltip 
+                              contentStyle={{ 
+                                backgroundColor: 'rgba(255, 255, 255, 0.95)', 
+                                border: '1px solid #10b981',
+                                borderRadius: '8px',
+                                fontSize: '13px',
+                                padding: '8px 12px',
+                              }}
+                              formatter={(value: number) => [`${value.toFixed(2)} kg`]}
+                            />
+                            <Line 
+                              type="monotone" 
+                              dataKey="primera" 
+                              stroke="#10b981" 
+                              strokeWidth={2.5}
+                              name="1ra Calidad"
+                              dot={{ fill: '#10b981', r: 3 }}
+                              activeDot={{ r: 5, strokeWidth: 2 }}
+                            />
+                            <Line 
+                              type="monotone" 
+                              dataKey="segunda" 
+                              stroke="#f59e0b" 
+                              strokeWidth={2.5}
+                              name="2da Calidad"
+                              dot={{ fill: '#f59e0b', r: 3 }}
+                              activeDot={{ r: 5, strokeWidth: 2 }}
+                            />
+                            <Line 
+                              type="monotone" 
+                              dataKey="desperdicio" 
+                              stroke="#ef4444" 
+                              strokeWidth={2.5}
+                              name="Desperdicio"
+                              dot={{ fill: '#ef4444', r: 3 }}
+                              activeDot={{ r: 5, strokeWidth: 2 }}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </div>
+                </>
               ) : (
                 <div className="flex items-center justify-center h-[200px] text-green-600">
                   <Package className="h-8 w-8 mr-2 opacity-50" />
-                  No hay datos de cosecha para mostrar
+                  No hay datos de cosecha para este mes
                 </div>
               )}
             </GlassCard>

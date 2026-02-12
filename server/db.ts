@@ -680,7 +680,9 @@ export async function getDailyChartData(month?: string) {
   if (month && month !== 'all') {
     const [year, m] = month.split('-').map(Number);
     const startDate = `${year}-${String(m).padStart(2, '0')}-01`;
-    const endDate = `${year}-${String(m).padStart(2, '0')}-31`;
+    // Calcular el último día real del mes (28, 29, 30 o 31)
+    const lastDay = new Date(year, m, 0).getDate();
+    const endDate = `${year}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
     dateFilter = sql` AND DATE(submissionTime) >= ${startDate} AND DATE(submissionTime) <= ${endDate}`;
   }
   
