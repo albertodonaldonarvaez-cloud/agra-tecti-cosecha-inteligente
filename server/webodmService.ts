@@ -146,6 +146,14 @@ export async function getOdmProjects(): Promise<any[]> {
 export async function getOdmProjectTasks(projectId: number): Promise<any[]> {
   try {
     const tasks = await webodmFetch(`/api/projects/${projectId}/tasks/`);
+    if (Array.isArray(tasks) && tasks.length > 0) {
+      // Log first task fields for debugging - mostrar TODOS los campos disponibles
+      const t = tasks[0];
+      const allKeys = Object.keys(t);
+      console.log(`[WebODM] Project ${projectId}: ${tasks.length} tasks.`);
+      console.log(`[WebODM] First task keys: ${allKeys.join(', ')}`);
+      console.log(`[WebODM] First task: id=${t.id}, uuid=${t.uuid}, name=${t.name}, status=${t.status}`);
+    }
     return Array.isArray(tasks) ? tasks : [];
   } catch (err) {
     console.error(`[WebODM] Error fetching tasks for project ${projectId}:`, err);

@@ -119,15 +119,50 @@ const TRANSPARENT_PNG = Buffer.from(
  * Recibe coordenadas en formato XYZ (como las envía OpenLayers XYZ source)
  * y las convierte a TMS (como las espera WebODM) antes de hacer la petición.
  */
+// Cache de resolución ID -> UUID
+const uuidCache = new Map<string, string>();
+
+async function resolveTaskUuid(projectId: string, taskIdOrUuid: string, auth: { token: string; serverUrl: string }): Promise<string> {
+  // Si ya parece un UUID (contiene guiones y es largo), usarlo directamente
+  if (taskIdOrUuid.includes('-') && taskIdOrUuid.length > 8) {
+    return taskIdOrUuid;
+  }
+  
+  // Verificar cache
+  const cacheKey = `${projectId}:${taskIdOrUuid}`;
+  if (uuidCache.has(cacheKey)) {
+    return uuidCache.get(cacheKey)!;
+  }
+  
+  // Consultar la tarea para obtener el UUID
+  try {
+    const response = await fetch(`${auth.serverUrl}/api/projects/${projectId}/tasks/${taskIdOrUuid}/`, {
+      headers: { Authorization: `JWT ${auth.token}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (response.ok) {
+      const task = await response.json();
+      const uuid = task.uuid || taskIdOrUuid;
+      console.log(`[ODM Tile Proxy] Resolved task ${taskIdOrUuid} -> UUID: ${uuid}`);
+      uuidCache.set(cacheKey, uuid);
+      return uuid;
+    }
+  } catch (e: any) {
+    console.warn(`[ODM Tile Proxy] Failed to resolve UUID for task ${taskIdOrUuid}:`, e.message);
+  }
+  
+  return taskIdOrUuid;
+}
+
 export async function proxyOdmTile(req: Request, res: Response) {
   try {
-    const { projectId, taskUuid, type, z, x, y } = req.params;
+    const { projectId, taskUuid: taskIdOrUuid, type, z, x, y } = req.params;
 
-    // Log de cada petición (solo las primeras para no saturar)
-    console.log(`[ODM Tile Proxy] Request: project=${projectId} task=${taskUuid} type=${type} z=${z} x=${x} y=${y}`);
+    // Log de cada petición
+    console.log(`[ODM Tile Proxy] Request: project=${projectId} task=${taskIdOrUuid} type=${type} z=${z} x=${x} y=${y}`);
 
-    if (!projectId || !taskUuid || !type || !z || !x || !y) {
-      console.error("[ODM Tile Proxy] Missing parameters:", { projectId, taskUuid, type, z, x, y });
+    if (!projectId || !taskIdOrUuid || !type || !z || !x || !y) {
+      console.error("[ODM Tile Proxy] Missing parameters:", { projectId, taskIdOrUuid, type, z, x, y });
       return res.status(400).json({ error: "Missing parameters" });
     }
 
@@ -151,6 +186,16 @@ export async function proxyOdmTile(req: Request, res: Response) {
     // Convertir Y de XYZ a TMS para WebODM
     const tmsY = xyzToTmsY(yNum, zNum);
 
+    // Obtener token primero (necesario para resolver UUID)
+    const auth = await getToken();
+    if (!auth) {
+      console.error("[ODM Tile Proxy] No auth available");
+      return res.status(503).json({ error: "WebODM no configurado o credenciales inv\u00e1lidas" });
+    }
+
+    // Resolver UUID real de la tarea (si se pas\u00f3 un ID num\u00e9rico)
+    const taskUuid = await resolveTaskUuid(projectId, taskIdOrUuid, auth);
+
     // Verificar cache en disco
     const cacheKey = `${projectId}/${taskUuid}/${type}/${zNum}/${xNum}`;
     const cacheDir = ensureCacheDir(cacheKey);
@@ -166,13 +211,6 @@ export async function proxyOdmTile(req: Request, res: Response) {
         res.setHeader("Access-Control-Allow-Origin", "*");
         return res.sendFile(cachePath);
       }
-    }
-
-    // Obtener token
-    const auth = await getToken();
-    if (!auth) {
-      console.error("[ODM Tile Proxy] No auth available");
-      return res.status(503).json({ error: "WebODM no configurado o credenciales inválidas" });
     }
 
     // Construir URL del tile con TMS Y
@@ -238,13 +276,17 @@ export async function proxyOdmTile(req: Request, res: Response) {
  */
 export async function getOdmTaskBounds(req: Request, res: Response) {
   try {
-    const { projectId, taskUuid } = req.params;
-    console.log(`[ODM Bounds] Request: project=${projectId} task=${taskUuid}`);
+    const { projectId, taskUuid: taskIdOrUuid } = req.params;
+    console.log(`[ODM Bounds] Request: project=${projectId} task=${taskIdOrUuid}`);
 
     const auth = await getToken();
     if (!auth) {
       return res.status(503).json({ error: "WebODM no configurado" });
     }
+
+    // Resolver UUID real
+    const taskUuid = await resolveTaskUuid(projectId, taskIdOrUuid, auth);
+    console.log(`[ODM Bounds] Using UUID: ${taskUuid}`);
 
     // Primero intentar tilejson que tiene bounds precisos
     try {
@@ -324,14 +366,15 @@ function extractBoundsArray(extent: any): number[] | null {
  */
 export async function getOdmAvailableLayers(req: Request, res: Response) {
   try {
-    const { projectId, taskUuid } = req.params;
-    console.log(`[ODM Layers] Request: project=${projectId} task=${taskUuid}`);
+    const { projectId, taskUuid: taskIdOrUuid } = req.params;
+    console.log(`[ODM Layers] Request: project=${projectId} task=${taskIdOrUuid}`);
 
     const auth = await getToken();
     if (!auth) {
       return res.status(503).json({ error: "WebODM no configurado" });
     }
 
+    const taskUuid = await resolveTaskUuid(projectId, taskIdOrUuid, auth);
     const response = await fetch(`${auth.serverUrl}/api/projects/${projectId}/tasks/${taskUuid}/`, {
       headers: { Authorization: `JWT ${auth.token}` },
       signal: AbortSignal.timeout(10000),

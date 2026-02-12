@@ -138,7 +138,7 @@ function ParcelAnalysisContent() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50">
-      <div className="mx-auto max-w-7xl px-3 md:px-6 py-4 md:py-8 space-y-4 md:space-y-6">
+      <div className="mx-auto max-w-7xl px-3 md:px-6 py-4 md:py-8 pb-24 space-y-4 md:space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
           <div className="flex items-center gap-3">
@@ -439,16 +439,24 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     { enabled: !!mapping?.odmProjectId, staleTime: 2 * 60 * 1000 }
   );
 
+  // Obtener el identificador único de una tarea (uuid o id como fallback)
+  const getTaskId = useCallback((task: any): string => {
+    return task.uuid || String(task.id) || "";
+  }, []);
+
   // Auto-seleccionar el último vuelo completado cuando llegan las tareas
   useEffect(() => {
     if (!tasks || tasks.length === 0) return;
+    // Solo auto-seleccionar si no hay nada seleccionado
+    if (selectedTaskUuid) return;
     const completed = tasks.filter((t: any) => t.status === 40);
     if (completed.length > 0) {
       const sorted = [...completed].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      console.log("[ParcelAnalysis] Auto-selecting latest task:", sorted[0].uuid, sorted[0].name);
-      setSelectedTaskUuid(sorted[0].uuid);
+      const taskId = getTaskId(sorted[0]);
+      console.log("[ParcelAnalysis] Auto-selecting latest task:", taskId, sorted[0].name, "uuid:", sorted[0].uuid, "id:", sorted[0].id);
+      if (taskId) setSelectedTaskUuid(taskId);
     }
-  }, [tasks]); // Solo depende de tasks, se ejecuta cuando llegan las tareas
+  }, [tasks]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Función para cargar tiles en el mapa
   const loadTilesOnMap = useCallback((taskUuid: string, layerType: string) => {
@@ -637,7 +645,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
                 Ortomosaico
                 {selectedTaskUuid && (
                   <span className="text-xs font-normal text-green-500 bg-green-50 px-2 py-0.5 rounded-full">
-                    {sortedTasks.find((t: any) => t.uuid === selectedTaskUuid)?.name || "Tarea"}
+                    {sortedTasks.find((t: any) => (t.uuid || String(t.id)) === selectedTaskUuid)?.name || "Tarea"}
                   </span>
                 )}
               </h3>
@@ -732,7 +740,8 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
           <div className="space-y-3">
             {sortedTasks.map((task: any, idx: number) => {
               const status = STATUS_MAP[task.status] || { label: "Desconocido", color: "text-gray-600", bg: "bg-gray-100" };
-              const isSelected = task.uuid === selectedTaskUuid;
+              const taskIdentifier = task.uuid || String(task.id);
+              const isSelected = !!(selectedTaskUuid && taskIdentifier && taskIdentifier === selectedTaskUuid);
               const isExpanded = expandedTask === task.id;
               const isCompleted = task.status === 40;
 
@@ -749,7 +758,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
                         : "bg-white/30 border-transparent hover:bg-white/50 hover:border-green-200/50"
                     }`}
                     onClick={() => {
-                      if (isCompleted) handleSelectTask(task.uuid);
+                      if (isCompleted) handleSelectTask(taskIdentifier);
                       setExpandedTask(isExpanded ? null : task.id);
                     }}
                   >
@@ -799,7 +808,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
                     <div className="flex flex-col items-center gap-1 flex-shrink-0">
                       {isCompleted && (
                         <button
-                          onClick={(e) => { e.stopPropagation(); handleSelectTask(task.uuid); }}
+                          onClick={(e) => { e.stopPropagation(); handleSelectTask(taskIdentifier); }}
                           className={`p-1.5 rounded-lg transition-all ${
                             isSelected ? "bg-green-600 text-white" : "bg-green-50 text-green-600 hover:bg-green-100"
                           }`}
