@@ -147,14 +147,17 @@ export async function getOdmProjectTasks(projectId: number): Promise<any[]> {
   try {
     const tasks = await webodmFetch(`/api/projects/${projectId}/tasks/`);
     if (Array.isArray(tasks) && tasks.length > 0) {
-      // Log first task fields for debugging - mostrar TODOS los campos disponibles
       const t = tasks[0];
-      const allKeys = Object.keys(t);
       console.log(`[WebODM] Project ${projectId}: ${tasks.length} tasks.`);
-      console.log(`[WebODM] First task keys: ${allKeys.join(', ')}`);
-      console.log(`[WebODM] First task: id=${t.id}, uuid=${t.uuid}, name=${t.name}, status=${t.status}`);
+      console.log(`[WebODM] First task: id=${t.id}, uuid=${t.uuid || '(empty)'}, name=${t.name}, status=${t.status}`);
     }
-    return Array.isArray(tasks) ? tasks : [];
+    // IMPORTANTE: En esta instancia de WebODM, task.id YA es el UUID (el campo uuid siempre está vacío).
+    // Normalizamos para que el frontend siempre tenga un uuid válido.
+    const normalized = Array.isArray(tasks) ? tasks.map((t: any) => ({
+      ...t,
+      uuid: t.uuid || t.id,  // Si uuid está vacío, usar id (que ya es UUID en esta instancia)
+    })) : [];
+    return normalized;
   } catch (err) {
     console.error(`[WebODM] Error fetching tasks for project ${projectId}:`, err);
     return [];

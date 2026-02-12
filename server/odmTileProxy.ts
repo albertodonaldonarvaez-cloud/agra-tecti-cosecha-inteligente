@@ -94,7 +94,11 @@ const LAYER_CONFIG: Record<string, { path: string; params?: string }> = {
   orthophoto: { path: "orthophoto" },
   dsm: { path: "dsm" },
   dtm: { path: "dtm" },
+  // NDVI requiere banda NIR (Near Infrared). Para cámaras RGB usa bandas RGN si están disponibles.
+  // Si la cámara es solo RGB, NDVI no producirá resultados útiles pero no debería dar error.
   ndvi: { path: "orthophoto", params: "formula=NDVI&bands=RGN&color_map=rdylgn&rescale=-1,1" },
+  // VARI (Visible Atmospherically Resistant Index) - solo usa bandas RGB
+  // La fórmula usa + que debe estar URL-encoded como %2B en el querystring final
   vari: { path: "orthophoto", params: "formula=(G-R)/(G%2BR-B)&bands=RGB&color_map=rdylgn&rescale=-0.5,0.5" },
 };
 
@@ -219,7 +223,12 @@ export async function proxyOdmTile(req: Request, res: Response) {
       tileUrl += `&${layerConfig.params}`;
     }
 
-    console.log(`[ODM Tile Proxy] Fetching from WebODM: z=${zNum} x=${xNum} xyzY=${yNum} tmsY=${tmsY}`);
+    // Log básico para todos los tiles, log detallado para tiles con fórmula
+    if (layerConfig.params) {
+      console.log(`[ODM Tile Proxy] Fetching ${type} from WebODM: z=${zNum} x=${xNum} xyzY=${yNum} tmsY=${tmsY} params=${layerConfig.params}`);
+    } else {
+      console.log(`[ODM Tile Proxy] Fetching from WebODM: z=${zNum} x=${xNum} xyzY=${yNum} tmsY=${tmsY}`);
+    }
 
     // Descargar tile de WebODM
     const response = await fetch(tileUrl, {
@@ -241,7 +250,25 @@ export async function proxyOdmTile(req: Request, res: Response) {
         tokenCache = null;
         console.warn(`[ODM Tile Proxy] 403 - Token expired, cleared cache`);
       }
-      console.warn(`[ODM Tile Proxy] WebODM returned ${response.status} for tile z=${zNum} x=${xNum} tmsY=${tmsY}`);
+      // Para errores 400, loguear el body de respuesta para diagnosticar problemas con fórmulas
+      if (response.status === 400) {
+        try {
+          const errorBody = await response.text();
+          console.warn(`[ODM Tile Proxy] WebODM 400 for ${type} tile z=${zNum} x=${xNum} tmsY=${tmsY}: ${errorBody.substring(0, 200)}`);
+        } catch { 
+          console.warn(`[ODM Tile Proxy] WebODM 400 for ${type} tile z=${zNum} x=${xNum} tmsY=${tmsY}`);
+        }
+        // Para tiles con fórmula que fallan, devolver transparente en vez de error
+        // Esto evita que el mapa se rompa si la fórmula no es soportada
+        if (layerConfig.params) {
+          res.setHeader("Content-Type", "image/png");
+          res.setHeader("Cache-Control", "no-cache");
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          return res.send(TRANSPARENT_PNG);
+        }
+      } else {
+        console.warn(`[ODM Tile Proxy] WebODM returned ${response.status} for tile z=${zNum} x=${xNum} tmsY=${tmsY}`);
+      }
       return res.status(response.status).json({ error: `WebODM error: ${response.status}` });
     }
 
@@ -386,12 +413,21 @@ export async function getOdmAvailableLayers(req: Request, res: Response) {
 
     const task = await response.json();
     const assets = task.available_assets || [];
+    const bands = task.orthophoto_bands || [];
     console.log(`[ODM Layers] Available assets:`, assets);
+    console.log(`[ODM Layers] Orthophoto bands:`, bands);
+
+    // Detectar si hay banda NIR (necesaria para NDVI real)
+    const hasNIR = bands.some((b: any) => {
+      const name = (typeof b === 'string' ? b : b?.description || b?.name || '').toLowerCase();
+      return name.includes('nir') || name.includes('infrared') || name.includes('near');
+    });
+    const hasOrthophoto = assets.includes("orthophoto.tif");
 
     const layers = [
-      { id: "orthophoto", name: "Ortofoto", available: assets.includes("orthophoto.tif"), description: "Imagen aérea corregida" },
-      { id: "ndvi", name: "NDVI", available: assets.includes("orthophoto.tif"), description: "Salud vegetal (infrarrojo)" },
-      { id: "vari", name: "VARI", available: assets.includes("orthophoto.tif"), description: "Vegetación visible (RGB)" },
+      { id: "orthophoto", name: "Ortofoto", available: hasOrthophoto, description: "Imagen aérea corregida" },
+      { id: "ndvi", name: "NDVI", available: hasOrthophoto && hasNIR, description: hasNIR ? "Salud vegetal (infrarrojo)" : "Requiere cámara multiespectral (NIR)" },
+      { id: "vari", name: "VARI", available: hasOrthophoto, description: "Vegetación visible (solo RGB)" },
       { id: "dsm", name: "DSM", available: assets.includes("dsm.tif"), description: "Modelo de Superficie" },
       { id: "dtm", name: "DTM", available: assets.includes("dtm.tif"), description: "Modelo de Terreno" },
     ];

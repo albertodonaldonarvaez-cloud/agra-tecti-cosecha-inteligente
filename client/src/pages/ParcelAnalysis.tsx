@@ -1,5 +1,4 @@
 import { useAuth } from "@/_core/hooks/useAuth";
-import { useCallback } from "react";
 import { GlassCard } from "@/components/GlassCard";
 import { ProtectedPage } from "@/components/ProtectedPage";
 import { APP_LOGO } from "@/const";
@@ -439,7 +438,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     { enabled: !!mapping?.odmProjectId, staleTime: 2 * 60 * 1000 }
   );
 
-  // Obtener el identificador único de una tarea (uuid o id como fallback)
+  // Obtener el identificador único de una tarea (uuid viene normalizado del backend)
   const getTaskId = useCallback((task: any): string => {
     return task.uuid || String(task.id) || "";
   }, []);
