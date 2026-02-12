@@ -1,4 +1,5 @@
 import { useAuth } from "@/_core/hooks/useAuth";
+import { useCallback } from "react";
 import { GlassCard } from "@/components/GlassCard";
 import { ProtectedPage } from "@/components/ProtectedPage";
 import { APP_LOGO } from "@/const";
@@ -430,7 +431,6 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
   const [selectedTaskUuid, setSelectedTaskUuid] = useState<string | null>(null);
   const [selectedLayerType, setSelectedLayerType] = useState<LayerType>("orthophoto");
   const [expandedTask, setExpandedTask] = useState<number | null>(null);
-  const [mapReady, setMapReady] = useState(false);
   const [tileStatus, setTileStatus] = useState<string>("");
 
   // Cargar tareas del proyecto ODM
@@ -439,19 +439,91 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     { enabled: !!mapping?.odmProjectId, staleTime: 2 * 60 * 1000 }
   );
 
-  // Seleccionar la primera tarea completada automáticamente
+  // Auto-seleccionar el último vuelo completado cuando llegan las tareas
   useEffect(() => {
-    if (tasks && tasks.length > 0 && !selectedTaskUuid) {
-      const completed = tasks.filter((t: any) => t.status === 40);
-      if (completed.length > 0) {
-        const sorted = [...completed].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-        console.log("[ParcelAnalysis] Auto-selecting task:", sorted[0].uuid, sorted[0].name);
-        setSelectedTaskUuid(sorted[0].uuid);
-      }
+    if (!tasks || tasks.length === 0) return;
+    const completed = tasks.filter((t: any) => t.status === 40);
+    if (completed.length > 0) {
+      const sorted = [...completed].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      console.log("[ParcelAnalysis] Auto-selecting latest task:", sorted[0].uuid, sorted[0].name);
+      setSelectedTaskUuid(sorted[0].uuid);
     }
-  }, [tasks, selectedTaskUuid]);
+  }, [tasks]); // Solo depende de tasks, se ejecuta cuando llegan las tareas
 
-  // Inicializar mapa OpenLayers - se destruye y recrea al cambiar parcela
+  // Función para cargar tiles en el mapa
+  const loadTilesOnMap = useCallback((taskUuid: string, layerType: string) => {
+    if (!tileLayerRef.current || !mapInstanceRef.current || !mapping?.odmProjectId) {
+      console.warn("[ParcelAnalysis] loadTilesOnMap: mapa no listo");
+      return;
+    }
+
+    const proxyUrl = `/api/odm-tiles/${mapping.odmProjectId}/${taskUuid}/${layerType}/{z}/{x}/{y}.png`;
+    console.log("[ParcelAnalysis] Loading tiles:", proxyUrl);
+    setTileStatus("Cargando ortomosaico...");
+
+    const tileSource = new XYZ({
+      url: proxyUrl,
+      maxZoom: 24,
+      tileSize: 256,
+      crossOrigin: "anonymous",
+    });
+
+    let loadedCount = 0;
+    let errorCount = 0;
+    tileSource.on("tileloadstart", () => {
+      if (loadedCount === 0) console.log("[ParcelAnalysis] First tile loading...");
+    });
+    tileSource.on("tileloadend", () => {
+      loadedCount++;
+      if (loadedCount === 1) {
+        console.log("[ParcelAnalysis] First tile loaded!");
+        setTileStatus("");
+      }
+    });
+    tileSource.on("tileloaderror", (evt: any) => {
+      errorCount++;
+      if (errorCount <= 3) console.warn(`[ParcelAnalysis] Tile error #${errorCount}:`, evt.tile?.getTileCoord());
+      if (errorCount === 1) setTileStatus("Error cargando tiles - verificar conexión con WebODM");
+    });
+
+    tileLayerRef.current.setSource(tileSource);
+    tileLayerRef.current.setVisible(true);
+    mapInstanceRef.current.updateSize();
+    mapInstanceRef.current.render();
+
+    // Obtener bounds para zoom
+    fetch(`/api/odm-bounds/${mapping.odmProjectId}/${taskUuid}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        console.log("[ParcelAnalysis] Bounds:", data);
+        if (data?.bounds && mapInstanceRef.current) {
+          const [minLon, minLat, maxLon, maxLat] = data.bounds;
+          const extent = transformExtent([minLon, minLat, maxLon, maxLat], "EPSG:4326", "EPSG:3857");
+          mapInstanceRef.current.getView().fit(extent, { padding: [40, 40, 40, 40], maxZoom: 20, duration: 800 });
+        }
+      })
+      .catch(err => console.warn("[ParcelAnalysis] Bounds error:", err));
+  }, [mapping?.odmProjectId]);
+
+  // Función para ocultar tiles
+  const hideTiles = useCallback(() => {
+    if (tileLayerRef.current) {
+      tileLayerRef.current.setVisible(false);
+      setTileStatus("");
+    }
+  }, []);
+
+  // Handler para seleccionar tarea manualmente
+  const handleSelectTask = useCallback((taskUuid: string) => {
+    console.log("[ParcelAnalysis] Manual select task:", taskUuid);
+    setSelectedTaskUuid(taskUuid);
+    // Cargar tiles inmediatamente si el mapa está listo
+    if (mapInstanceRef.current && tileLayerRef.current && mapping?.odmProjectId) {
+      setTimeout(() => loadTilesOnMap(taskUuid, selectedLayerType), 100);
+    }
+  }, [loadTilesOnMap, selectedLayerType, mapping?.odmProjectId]);
+
+  // Inicializar mapa OpenLayers
   useEffect(() => {
     if (!mapRef.current) return;
 
@@ -462,15 +534,9 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
       tileLayerRef.current = null;
     }
 
-    setSelectedTaskUuid(null);
-    setSelectedLayerType("orthophoto");
-    setExpandedTask(null);
-    setTileStatus("");
-
     let center = fromLonLat([-105.0, 23.0]);
     let zoom = 5;
 
-    // Si la parcela tiene polígono, centrar en él
     if (parcel?.polygon) {
       try {
         const poly = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
@@ -481,22 +547,13 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
           center = fromLonLat([avgLon, avgLat]);
           zoom = 16;
         }
-      } catch (e) {
-        console.warn("Error parsing polygon:", e);
-      }
+      } catch (e) { console.warn("Error parsing polygon:", e); }
     }
 
     const baseLayer = new TileLayer({ source: new OSM() });
-
-    // Crear capa de tiles ODM sin source inicial
-    const odmTileLayer = new TileLayer({
-      visible: false,
-      opacity: 0.9,
-      zIndex: 10,
-    });
+    const odmTileLayer = new TileLayer({ visible: false, opacity: 0.9, zIndex: 10 });
     tileLayerRef.current = odmTileLayer;
 
-    // Polígono de la parcela
     const features: Feature[] = [];
     if (parcel?.polygon) {
       try {
@@ -513,10 +570,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
       } catch (e) { /* ignore */ }
     }
 
-    const vectorLayer = new VectorLayer({
-      source: new VectorSource({ features }),
-      zIndex: 20,
-    });
+    const vectorLayer = new VectorLayer({ source: new VectorSource({ features }), zIndex: 20 });
 
     const map = new Map({
       target: mapRef.current,
@@ -525,88 +579,32 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     });
 
     mapInstanceRef.current = map;
-    setMapReady(true);
     console.log("[ParcelAnalysis] Map initialized for parcel:", parcel?.id);
+
+    // Si ya hay una tarea seleccionada, cargar tiles después de que el mapa esté listo
+    if (selectedTaskUuid && mapping?.odmProjectId) {
+      setTimeout(() => {
+        console.log("[ParcelAnalysis] Map ready, loading tiles for pre-selected task:", selectedTaskUuid);
+        loadTilesOnMap(selectedTaskUuid, selectedLayerType);
+      }, 300);
+    }
 
     return () => {
       map.setTarget(undefined);
       mapInstanceRef.current = null;
       tileLayerRef.current = null;
-      setMapReady(false);
     };
-  }, [parcel?.id]);
+  }, [parcel?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Actualizar capa de tiles cuando cambia la tarea o el tipo de capa
+  // Cuando cambia selectedTaskUuid o selectedLayerType, actualizar tiles
   useEffect(() => {
-    if (!tileLayerRef.current || !mapReady || !mapInstanceRef.current) return;
-
+    if (!mapInstanceRef.current || !tileLayerRef.current) return;
     if (selectedTaskUuid && mapping?.odmProjectId) {
-      const proxyUrl = `/api/odm-tiles/${mapping.odmProjectId}/${selectedTaskUuid}/${selectedLayerType}/{z}/{x}/{y}.png`;
-      console.log("[ParcelAnalysis] Setting tile URL:", proxyUrl);
-      setTileStatus("Cargando ortomosaico...");
-
-      // Crear nuevo source XYZ
-      const tileSource = new XYZ({
-        url: proxyUrl,
-        maxZoom: 24,
-        tileSize: 256,
-        crossOrigin: "anonymous",
-      });
-
-      // Monitorear carga de tiles
-      let loadedCount = 0;
-      let errorCount = 0;
-      tileSource.on("tileloadstart", () => {
-        if (loadedCount === 0) console.log("[ParcelAnalysis] First tile loading...");
-      });
-      tileSource.on("tileloadend", () => {
-        loadedCount++;
-        if (loadedCount === 1) {
-          console.log("[ParcelAnalysis] First tile loaded successfully!");
-          setTileStatus("");
-        }
-      });
-      tileSource.on("tileloaderror", (evt: any) => {
-        errorCount++;
-        if (errorCount <= 3) {
-          console.warn(`[ParcelAnalysis] Tile load error #${errorCount}:`, evt.tile?.getTileCoord());
-        }
-        if (errorCount === 1) {
-          setTileStatus("Error cargando tiles - verificar conexión con WebODM");
-        }
-      });
-
-      tileLayerRef.current.setSource(tileSource);
-      tileLayerRef.current.setVisible(true);
-
-      // Forzar refresco del mapa
-      mapInstanceRef.current.updateSize();
-      mapInstanceRef.current.render();
-
-      // Obtener bounds para hacer zoom al área correcta
-      fetch(`/api/odm-bounds/${mapping.odmProjectId}/${selectedTaskUuid}`)
-        .then(r => {
-          console.log("[ParcelAnalysis] Bounds response status:", r.status);
-          return r.ok ? r.json() : null;
-        })
-        .then(data => {
-          console.log("[ParcelAnalysis] Bounds data:", data);
-          if (data?.bounds && mapInstanceRef.current) {
-            const [minLon, minLat, maxLon, maxLat] = data.bounds;
-            const extent = transformExtent([minLon, minLat, maxLon, maxLat], "EPSG:4326", "EPSG:3857");
-            mapInstanceRef.current.getView().fit(extent, {
-              padding: [40, 40, 40, 40],
-              maxZoom: 20,
-              duration: 800,
-            });
-          }
-        })
-        .catch(err => console.warn("[ParcelAnalysis] Error fetching bounds:", err));
+      loadTilesOnMap(selectedTaskUuid, selectedLayerType);
     } else {
-      tileLayerRef.current.setVisible(false);
-      setTileStatus("");
+      hideTiles();
     }
-  }, [selectedTaskUuid, selectedLayerType, mapReady, mapping?.odmProjectId]);
+  }, [selectedTaskUuid, selectedLayerType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tareas ordenadas
   const sortedTasks = useMemo(() => {
@@ -751,7 +749,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
                         : "bg-white/30 border-transparent hover:bg-white/50 hover:border-green-200/50"
                     }`}
                     onClick={() => {
-                      if (isCompleted) setSelectedTaskUuid(task.uuid);
+                      if (isCompleted) handleSelectTask(task.uuid);
                       setExpandedTask(isExpanded ? null : task.id);
                     }}
                   >
@@ -801,7 +799,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
                     <div className="flex flex-col items-center gap-1 flex-shrink-0">
                       {isCompleted && (
                         <button
-                          onClick={(e) => { e.stopPropagation(); setSelectedTaskUuid(task.uuid); }}
+                          onClick={(e) => { e.stopPropagation(); handleSelectTask(task.uuid); }}
                           className={`p-1.5 rounded-lg transition-all ${
                             isSelected ? "bg-green-600 text-white" : "bg-green-50 text-green-600 hover:bg-green-100"
                           }`}
