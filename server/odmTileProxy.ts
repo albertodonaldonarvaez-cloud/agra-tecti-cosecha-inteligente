@@ -4,7 +4,7 @@
  * Actúa como intermediario entre el navegador del cliente y el servidor WebODM.
  * Descarga los tiles con autenticación JWT y los cachea en disco.
  * 
- * IMPORTANTE: WebODM usa TMS (Y invertida). OpenLayers XYZ source envía Y normal (XYZ).
+ * WebODM usa TMS (Y invertida). OpenLayers XYZ source envía Y normal (XYZ).
  * Este proxy recibe Y en formato XYZ y la convierte a TMS antes de pedir a WebODM.
  * 
  * Soporta capas: orthophoto, dsm, dtm, ndvi, vari
@@ -106,9 +106,15 @@ function xyzToTmsY(y: number, z: number): number {
   return Math.pow(2, z) - 1 - y;
 }
 
+// Tile transparente de 1x1 pixel para tiles fuera de rango
+const TRANSPARENT_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQABNjN9GQAAAABJRU5ErkJggg==",
+  "base64"
+);
+
 /**
  * Proxy handler para tiles de WebODM
- * Ruta: /api/odm-tiles/:projectId/:taskUuid/:type/:z/:x/:y.png
+ * Ruta: /api/odm-tiles/:projectId/:taskUuid/:type/:z/:x/:y
  * 
  * Recibe coordenadas en formato XYZ (como las envía OpenLayers XYZ source)
  * y las convierte a TMS (como las espera WebODM) antes de hacer la petición.
@@ -117,22 +123,28 @@ export async function proxyOdmTile(req: Request, res: Response) {
   try {
     const { projectId, taskUuid, type, z, x, y } = req.params;
 
+    // Log de cada petición (solo las primeras para no saturar)
+    console.log(`[ODM Tile Proxy] Request: project=${projectId} task=${taskUuid} type=${type} z=${z} x=${x} y=${y}`);
+
     if (!projectId || !taskUuid || !type || !z || !x || !y) {
+      console.error("[ODM Tile Proxy] Missing parameters:", { projectId, taskUuid, type, z, x, y });
       return res.status(400).json({ error: "Missing parameters" });
     }
 
     const layerConfig = LAYER_CONFIG[type];
     if (!layerConfig) {
+      console.error(`[ODM Tile Proxy] Invalid layer type: ${type}`);
       return res.status(400).json({ error: `Invalid layer type: ${type}` });
     }
 
-    // Parsear coordenadas
+    // Parsear coordenadas - limpiar extensión .png si viene
     const zNum = parseInt(z);
     const xNum = parseInt(x);
-    const yClean = y.replace(".png", "");
+    const yClean = y.replace(/\.png$/i, "");
     const yNum = parseInt(yClean);
 
     if (isNaN(zNum) || isNaN(xNum) || isNaN(yNum)) {
+      console.error("[ODM Tile Proxy] Invalid coordinates:", { z, x, y, yClean });
       return res.status(400).json({ error: "Invalid tile coordinates" });
     }
 
@@ -151,6 +163,7 @@ export async function proxyOdmTile(req: Request, res: Response) {
         res.setHeader("Content-Type", "image/png");
         res.setHeader("Cache-Control", "public, max-age=604800");
         res.setHeader("X-Tile-Cache", "HIT");
+        res.setHeader("Access-Control-Allow-Origin", "*");
         return res.sendFile(cachePath);
       }
     }
@@ -158,21 +171,24 @@ export async function proxyOdmTile(req: Request, res: Response) {
     // Obtener token
     const auth = await getToken();
     if (!auth) {
+      console.error("[ODM Tile Proxy] No auth available");
       return res.status(503).json({ error: "WebODM no configurado o credenciales inválidas" });
     }
 
     // Construir URL del tile con TMS Y
-    // WebODM acepta: /api/projects/{id}/tasks/{uuid}/{type}/tiles/{z}/{x}/{tmsY}.png?jwt=...
     let tileUrl = `${auth.serverUrl}/api/projects/${projectId}/tasks/${taskUuid}/${layerConfig.path}/tiles/${zNum}/${xNum}/${tmsY}.png?jwt=${auth.token}`;
     if (layerConfig.params) {
       tileUrl += `&${layerConfig.params}`;
     }
+
+    console.log(`[ODM Tile Proxy] Fetching from WebODM: z=${zNum} x=${xNum} xyzY=${yNum} tmsY=${tmsY}`);
 
     // Descargar tile de WebODM
     const response = await fetch(tileUrl, {
       headers: {
         "Accept": "image/png,image/*,*/*",
       },
+      signal: AbortSignal.timeout(15000),
     });
 
     if (!response.ok) {
@@ -180,11 +196,8 @@ export async function proxyOdmTile(req: Request, res: Response) {
         // Tile no existe (fuera del área) - devolver transparente
         res.setHeader("Content-Type", "image/png");
         res.setHeader("Cache-Control", "public, max-age=86400");
-        const transparentPng = Buffer.from(
-          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQABNjN9GQAAAABJRU5ErkJggg==",
-          "base64"
-        );
-        return res.send(transparentPng);
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        return res.send(TRANSPARENT_PNG);
       }
       if (response.status === 403) {
         tokenCache = null;
@@ -207,11 +220,15 @@ export async function proxyOdmTile(req: Request, res: Response) {
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", "public, max-age=604800");
     res.setHeader("X-Tile-Cache", "MISS");
+    res.setHeader("Access-Control-Allow-Origin", "*");
     res.send(buffer);
 
   } catch (error: any) {
     console.error("[ODM Tile Proxy] Error:", error.message);
-    res.status(500).json({ error: "Error al obtener tile" });
+    // En caso de error, devolver tile transparente para no romper el mapa
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.send(TRANSPARENT_PNG);
   }
 }
 
@@ -222,6 +239,7 @@ export async function proxyOdmTile(req: Request, res: Response) {
 export async function getOdmTaskBounds(req: Request, res: Response) {
   try {
     const { projectId, taskUuid } = req.params;
+    console.log(`[ODM Bounds] Request: project=${projectId} task=${taskUuid}`);
 
     const auth = await getToken();
     if (!auth) {
@@ -230,13 +248,15 @@ export async function getOdmTaskBounds(req: Request, res: Response) {
 
     // Primero intentar tilejson que tiene bounds precisos
     try {
-      const tilejsonRes = await fetch(
-        `${auth.serverUrl}/api/projects/${projectId}/tasks/${taskUuid}/orthophoto/tiles.json?jwt=${auth.token}`
-      );
+      const tilejsonUrl = `${auth.serverUrl}/api/projects/${projectId}/tasks/${taskUuid}/orthophoto/tiles.json?jwt=${auth.token}`;
+      console.log(`[ODM Bounds] Fetching tilejson...`);
+      const tilejsonRes = await fetch(tilejsonUrl, { signal: AbortSignal.timeout(10000) });
       if (tilejsonRes.ok) {
         const tilejson = await tilejsonRes.json();
+        console.log(`[ODM Bounds] tilejson response:`, JSON.stringify(tilejson).substring(0, 200));
         if (tilejson.bounds && tilejson.bounds.length === 4) {
           res.setHeader("Cache-Control", "public, max-age=3600");
+          res.setHeader("Access-Control-Allow-Origin", "*");
           return res.json({
             bounds: tilejson.bounds, // [minLon, minLat, maxLon, maxLat]
             center: tilejson.center,
@@ -245,16 +265,19 @@ export async function getOdmTaskBounds(req: Request, res: Response) {
           });
         }
       }
-    } catch (e) {
-      console.warn("[ODM Bounds] tilejson failed, trying task info");
+    } catch (e: any) {
+      console.warn("[ODM Bounds] tilejson failed:", e.message);
     }
 
     // Fallback: obtener info de la tarea
+    console.log(`[ODM Bounds] Trying task info fallback...`);
     const response = await fetch(`${auth.serverUrl}/api/projects/${projectId}/tasks/${taskUuid}/`, {
       headers: { Authorization: `JWT ${auth.token}` },
+      signal: AbortSignal.timeout(10000),
     });
 
     if (!response.ok) {
+      console.error(`[ODM Bounds] Task info failed: ${response.status}`);
       return res.status(response.status).json({ error: "Error al obtener bounds" });
     }
 
@@ -263,11 +286,16 @@ export async function getOdmTaskBounds(req: Request, res: Response) {
 
     if (task.orthophoto_extent) {
       bounds = extractBoundsArray(task.orthophoto_extent);
+      console.log(`[ODM Bounds] Extracted from orthophoto_extent:`, bounds);
     } else if (task.dsm_extent) {
       bounds = extractBoundsArray(task.dsm_extent);
+      console.log(`[ODM Bounds] Extracted from dsm_extent:`, bounds);
+    } else {
+      console.warn(`[ODM Bounds] No extent found in task data`);
     }
 
     res.setHeader("Cache-Control", "public, max-age=3600");
+    res.setHeader("Access-Control-Allow-Origin", "*");
     res.json({ bounds, name: task.name });
 
   } catch (error: any) {
@@ -297,6 +325,7 @@ function extractBoundsArray(extent: any): number[] | null {
 export async function getOdmAvailableLayers(req: Request, res: Response) {
   try {
     const { projectId, taskUuid } = req.params;
+    console.log(`[ODM Layers] Request: project=${projectId} task=${taskUuid}`);
 
     const auth = await getToken();
     if (!auth) {
@@ -305,6 +334,7 @@ export async function getOdmAvailableLayers(req: Request, res: Response) {
 
     const response = await fetch(`${auth.serverUrl}/api/projects/${projectId}/tasks/${taskUuid}/`, {
       headers: { Authorization: `JWT ${auth.token}` },
+      signal: AbortSignal.timeout(10000),
     });
 
     if (!response.ok) {
@@ -313,6 +343,7 @@ export async function getOdmAvailableLayers(req: Request, res: Response) {
 
     const task = await response.json();
     const assets = task.available_assets || [];
+    console.log(`[ODM Layers] Available assets:`, assets);
 
     const layers = [
       { id: "orthophoto", name: "Ortofoto", available: assets.includes("orthophoto.tif"), description: "Imagen aérea corregida" },
@@ -323,6 +354,7 @@ export async function getOdmAvailableLayers(req: Request, res: Response) {
     ];
 
     res.setHeader("Cache-Control", "public, max-age=300");
+    res.setHeader("Access-Control-Allow-Origin", "*");
     res.json({ layers, assets });
 
   } catch (error: any) {
