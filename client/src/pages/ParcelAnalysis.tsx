@@ -85,8 +85,8 @@ function ParcelAnalysisContent() {
   const [selectedParcelId, setSelectedParcelId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<"map" | "details" | "harvest">("map");
 
-  // Cargar parcelas
-  const { data: allParcels, isLoading: parcelsLoading } = trpc.parcels.list.useQuery(undefined, {
+  // Cargar parcelas (solo activas)
+  const { data: allParcels, isLoading: parcelsLoading } = trpc.parcels.listActive.useQuery(undefined, {
     enabled: !!user,
     staleTime: 5 * 60 * 1000,
   });
@@ -179,18 +179,30 @@ function ParcelAnalysisContent() {
         {/* Vista de Detalle (parcela seleccionada) */}
         {selectedParcelId && selectedParcel && (
           <>
-            {/* Nombre de parcela */}
+            {/* Nombre de parcela con selector desplegable */}
             <GlassCard className="p-3 md:p-4" hover={false}>
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-green-400 to-emerald-600 shadow">
                   <MapPin className="h-5 w-5 text-white" />
                 </div>
-                <div>
-                  <h2 className="text-lg md:text-xl font-bold text-green-900">{selectedParcel.name || selectedParcel.code}</h2>
+                <div className="flex-1 min-w-0">
+                  <div className="relative">
+                    <select
+                      value={selectedParcelId}
+                      onChange={(e) => handleSelectParcel(Number(e.target.value))}
+                      className="w-full text-lg md:text-xl font-bold text-green-900 bg-transparent border-none focus:outline-none focus:ring-0 cursor-pointer appearance-none pr-8 truncate"
+                      style={{ WebkitAppearance: 'none', MozAppearance: 'none' }}
+                    >
+                      {parcels?.map((p: any) => (
+                        <option key={p.id} value={p.id}>{p.name || p.code}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-0 top-1/2 -translate-y-1/2 h-5 w-5 text-green-400 pointer-events-none" />
+                  </div>
                   <p className="text-xs text-green-500">Código: {selectedParcel.code}</p>
                 </div>
                 {selectedMapping && (
-                  <span className="ml-auto text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full flex items-center gap-1">
+                  <span className="ml-auto text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full flex items-center gap-1 flex-shrink-0">
                     <Plane className="h-3 w-3" /> WebODM vinculado
                   </span>
                 )}
@@ -993,7 +1005,7 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
       </div>
 
       {/* Cultivo y Variedad */}
-      <GlassCard className="p-3 md:p-4" hover={false}>
+      <GlassCard className="p-3 md:p-4" hover={true}>
         <h4 className="text-sm font-semibold text-green-800 mb-3 flex items-center gap-2">
           <Leaf className="h-4 w-4" />
           Cultivo y Variedad
@@ -1044,7 +1056,7 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
       {/* Campos numéricos */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
         {fields.map(({ key, label, icon: Icon, suffix, type }) => (
-          <GlassCard key={key} className="p-3 md:p-4" hover={false}>
+          <GlassCard key={key} className="p-3 md:p-4" hover={true}>
             <div className="flex items-center gap-2 mb-2">
               <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-green-100">
                 <Icon className="h-4 w-4 text-green-600" />
@@ -1073,7 +1085,7 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
 
         {/* Tarjeta de Árboles Faltantes (calculada) */}
         {totalTrees > 0 && (
-          <GlassCard className="p-3 md:p-4" hover={false}>
+          <GlassCard className="p-3 md:p-4" hover={true}>
             <div className="flex items-center gap-2 mb-2">
               <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-red-100">
                 <TreePine className="h-4 w-4 text-red-600" />
@@ -1089,7 +1101,7 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
       </div>
 
       {/* Notas con autor y fecha */}
-      <GlassCard className="p-3 md:p-4" hover={false}>
+      <GlassCard className="p-3 md:p-4" hover={true}>
         <div className="flex items-center justify-between mb-3">
           <h4 className="text-sm font-semibold text-green-800 flex items-center gap-2">
             <Edit3 className="h-4 w-4" />
@@ -1156,7 +1168,7 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
 
       {/* Composición del Arbolado */}
       {(form.totalTrees || form.productiveTrees || form.newTrees) && (
-        <GlassCard className="p-3 md:p-5" hover={false}>
+        <GlassCard className="p-3 md:p-5" hover={true}>
           <h4 className="text-sm font-semibold text-green-800 mb-3">Composición del Arbolado</h4>
           <div className="space-y-2">
             {form.productiveTrees && form.totalTrees && (
@@ -1294,7 +1306,7 @@ function HarvestTab({ parcel }: { parcel: any }) {
           { label: "2da Calidad", value: `${harvestStats.secondQualityWeight} kg`, icon: BarChart3, color: "from-yellow-400 to-orange-500" },
           { label: "Desperdicio", value: `${harvestStats.wasteWeight} kg`, icon: X, color: "from-red-400 to-rose-500" },
         ].map(({ label, value, icon: Icon, color }) => (
-          <GlassCard key={label} className="p-3 md:p-4" hover={false}>
+          <GlassCard key={label} className="p-3 md:p-4" hover={true}>
             <div className="flex items-center gap-2 mb-1">
               <div className={`flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br ${color} shadow-sm`}>
                 <Icon className="h-3.5 w-3.5 text-white" />
@@ -1306,36 +1318,8 @@ function HarvestTab({ parcel }: { parcel: any }) {
         ))}
       </div>
 
-      {/* Rendimiento por Hectárea (sin cajas/ha) + Fecha inicio ciclo */}
-      {productiveHa && productiveHa > 0 && (
-        <GlassCard className="p-3 md:p-4" hover={false}>
-          <h4 className="text-sm font-semibold text-green-800 mb-2 flex items-center gap-2">
-            <Ruler className="h-4 w-4" />
-            Rendimiento por Hectárea
-          </h4>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div>
-              <div className="text-xs text-green-600">Total / ha</div>
-              <div className="text-lg font-bold text-green-900">{(harvestStats.totalWeight / productiveHa).toFixed(1)} kg</div>
-            </div>
-            <div>
-              <div className="text-xs text-green-600">1ra Calidad / ha</div>
-              <div className="text-lg font-bold text-emerald-700">{(harvestStats.firstQualityWeight / productiveHa).toFixed(1)} kg</div>
-            </div>
-            <div>
-              <div className="text-xs text-green-600">Días de cosecha</div>
-              <div className="text-lg font-bold text-green-900">{harvestStats.harvestDays}</div>
-            </div>
-            <div>
-              <div className="text-xs text-green-600">Inicio ciclo cosecha</div>
-              <div className="text-lg font-bold text-green-900">{harvestStats.firstDate ? formatDate(harvestStats.firstDate) : "-"}</div>
-            </div>
-          </div>
-        </GlassCard>
-      )}
-
-      {/* Rendimiento Porcentual */}
-      <GlassCard className="p-3 md:p-4" hover={false}>
+      {/* Rendimiento Porcentual (protagonismo) */}
+      <GlassCard className="p-3 md:p-4" hover={true}>
         <h4 className="text-sm font-semibold text-green-800 mb-2 flex items-center gap-2">
           <Activity className="h-4 w-4" />
           Rendimiento Porcentual
@@ -1365,8 +1349,36 @@ function HarvestTab({ parcel }: { parcel: any }) {
         </div>
       </GlassCard>
 
+      {/* Rendimiento por Hectárea + Fecha inicio ciclo */}
+      {productiveHa && productiveHa > 0 && (
+        <GlassCard className="p-3 md:p-4" hover={true}>
+          <h4 className="text-sm font-semibold text-green-800 mb-2 flex items-center gap-2">
+            <Ruler className="h-4 w-4" />
+            Rendimiento por Hectárea
+          </h4>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <div className="text-xs text-green-600">Total / ha</div>
+              <div className="text-lg font-bold text-green-900">{(harvestStats.totalWeight / productiveHa).toFixed(1)} kg</div>
+            </div>
+            <div>
+              <div className="text-xs text-green-600">1ra Calidad / ha</div>
+              <div className="text-lg font-bold text-emerald-700">{(harvestStats.firstQualityWeight / productiveHa).toFixed(1)} kg</div>
+            </div>
+            <div>
+              <div className="text-xs text-green-600">Días de cosecha</div>
+              <div className="text-lg font-bold text-green-900">{harvestStats.harvestDays}</div>
+            </div>
+            <div>
+              <div className="text-xs text-green-600">Inicio ciclo cosecha</div>
+              <div className="text-lg font-bold text-green-900">{harvestStats.firstDate ? formatDate(harvestStats.firstDate) : "-"}</div>
+            </div>
+          </div>
+        </GlassCard>
+      )}
+
       {chartData.length > 0 && (
-        <GlassCard className="p-3 md:p-5" hover={false}>
+        <GlassCard className="p-3 md:p-5" hover={true}>
           <h4 className="text-sm font-semibold text-green-800 mb-3 flex items-center gap-2">
             <BarChart3 className="h-4 w-4" />
             Cosecha Diaria (kg)
@@ -1392,7 +1404,7 @@ function HarvestTab({ parcel }: { parcel: any }) {
       )}
 
       {sortedDaily.length > 0 && (
-        <GlassCard className="p-3 md:p-5" hover={false}>
+        <GlassCard className="p-3 md:p-5" hover={true}>
           <h4 className="text-sm font-semibold text-green-800 mb-3 flex items-center gap-2">
             <Calendar className="h-4 w-4" />
             Detalle por Día

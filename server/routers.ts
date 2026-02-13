@@ -577,6 +577,25 @@ export const appRouter = router({
         return { success: true };
       }),
 
+    deactivateWithoutPolygon: adminProcedure.mutation(async () => {
+      const allParcels = await dbExt.getAllParcels();
+      let count = 0;
+      for (const p of allParcels) {
+        let hasPolygon = false;
+        if (p.polygon) {
+          try {
+            const poly = typeof p.polygon === 'string' ? JSON.parse(p.polygon) : p.polygon;
+            hasPolygon = poly.coordinates && poly.coordinates[0] && poly.coordinates[0].length >= 3;
+          } catch { hasPolygon = false; }
+        }
+        if (!hasPolygon && p.isActive) {
+          await dbExt.toggleParcelActive(p.code, false);
+          count++;
+        }
+      }
+      return { success: true, deactivated: count };
+    }),
+
     uploadKML: adminProcedure
       .input(z.object({
         fileContent: z.string(),
