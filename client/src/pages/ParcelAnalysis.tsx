@@ -1273,6 +1273,7 @@ function HarvestTab({ parcel }: { parcel: any }) {
   );
 
   const productiveHa = parcelDetail?.productiveHectares ? parseFloat(parcelDetail.productiveHectares) : null;
+  const productiveTreesCount = parcelDetail?.productiveTrees || null;
 
   const sortedDaily = useMemo(() => {
     if (!dailyHarvest) return [];
@@ -1346,6 +1347,62 @@ function HarvestTab({ parcel }: { parcel: any }) {
           </GlassCard>
         ))}
       </div>
+
+      {/* Datos de parcela: Árboles productivos y Hectáreas productivas */}
+      {(productiveTreesCount || productiveHa) && (
+        <div className="grid grid-cols-2 gap-3">
+          {productiveTreesCount && (
+            <GlassCard className="p-3 md:p-4" hover={true}>
+              <div className="flex items-center gap-2 mb-1">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-green-400 to-emerald-600 shadow-sm">
+                  <TreePine className="h-3.5 w-3.5 text-white" />
+                </div>
+                <span className="text-[10px] md:text-xs text-green-600">Árboles Productivos</span>
+              </div>
+              <div className="text-lg md:text-xl font-bold text-green-900">{productiveTreesCount.toLocaleString()}</div>
+            </GlassCard>
+          )}
+          {productiveHa && (
+            <GlassCard className="p-3 md:p-4" hover={true}>
+              <div className="flex items-center gap-2 mb-1">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-lime-400 to-green-500 shadow-sm">
+                  <Ruler className="h-3.5 w-3.5 text-white" />
+                </div>
+                <span className="text-[10px] md:text-xs text-green-600">Hectáreas Productivas</span>
+              </div>
+              <div className="text-lg md:text-xl font-bold text-green-900">{productiveHa} ha</div>
+            </GlassCard>
+          )}
+        </div>
+      )}
+
+      {/* Rendimiento por Árbol */}
+      {productiveTreesCount && productiveTreesCount > 0 && totalWeight > 0 && (
+        <GlassCard className="p-3 md:p-4" hover={true}>
+          <h4 className="text-sm font-semibold text-green-800 mb-2 flex items-center gap-2">
+            <TreePine className="h-4 w-4" />
+            Rendimiento por Árbol
+          </h4>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <div className="text-xs text-green-600">Total / árbol</div>
+              <div className="text-lg font-bold text-green-900">{(totalWeight / productiveTreesCount).toFixed(2)} kg</div>
+            </div>
+            <div>
+              <div className="text-xs text-emerald-600">1ra Calidad / árbol</div>
+              <div className="text-lg font-bold text-emerald-700">{((harvestStats?.firstQualityWeight || 0) / productiveTreesCount).toFixed(2)} kg</div>
+            </div>
+            <div>
+              <div className="text-xs text-yellow-600">2da Calidad / árbol</div>
+              <div className="text-lg font-bold text-yellow-700">{((harvestStats?.secondQualityWeight || 0) / productiveTreesCount).toFixed(2)} kg</div>
+            </div>
+            <div>
+              <div className="text-xs text-red-600">Desperdicio / árbol</div>
+              <div className="text-lg font-bold text-red-600">{((harvestStats?.wasteWeight || 0) / productiveTreesCount).toFixed(2)} kg</div>
+            </div>
+          </div>
+        </GlassCard>
+      )}
 
       {/* Rendimiento Porcentual (protagonismo) */}
       <GlassCard className="p-3 md:p-4" hover={true}>
