@@ -270,6 +270,7 @@ export async function saveParcelDetails(parcelId: number, data: {
   newTrees?: number | null;
   cropId?: number | null;
   varietyId?: number | null;
+  establishedAt?: string | null;
 }) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");

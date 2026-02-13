@@ -879,6 +879,7 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
     newTrees: "",
     cropId: "",
     varietyId: "",
+    establishedAt: "",
   });
   const [newNoteText, setNewNoteText] = useState("");
 
@@ -925,9 +926,10 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
         newTrees: details.newTrees?.toString() || "",
         cropId: details.cropId?.toString() || "",
         varietyId: details.varietyId?.toString() || "",
+        establishedAt: details.establishedAt || "",
       });
     } else {
-      setForm({ totalHectares: "", productiveHectares: "", treeDensityPerHectare: "", totalTrees: "", productiveTrees: "", newTrees: "", cropId: "", varietyId: "" });
+      setForm({ totalHectares: "", productiveHectares: "", treeDensityPerHectare: "", totalTrees: "", productiveTrees: "", newTrees: "", cropId: "", varietyId: "", establishedAt: "" });
     }
   }, [details, parcel?.id]);
 
@@ -942,6 +944,7 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
       newTrees: form.newTrees ? parseInt(form.newTrees) : null,
       cropId: form.cropId ? parseInt(form.cropId) : null,
       varietyId: form.varietyId ? parseInt(form.varietyId) : null,
+      establishedAt: form.establishedAt || null,
     });
   };
 
@@ -1051,6 +1054,32 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
             )}
           </div>
         </div>
+      </GlassCard>
+
+      {/* Fecha de Establecimiento */}
+      <GlassCard className="p-3 md:p-4" hover={true}>
+        <div className="flex items-center gap-2 mb-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-100">
+            <Calendar className="h-4 w-4 text-amber-600" />
+          </div>
+          <span className="text-xs text-amber-600 font-medium">Fecha de Establecimiento</span>
+        </div>
+        {editing ? (
+          <input
+            type="date"
+            value={form.establishedAt}
+            onChange={(e) => setForm({ ...form, establishedAt: e.target.value })}
+            className="w-full px-3 py-2 text-lg font-bold text-green-900 bg-white/60 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-400"
+          />
+        ) : (
+          <div className="text-xl md:text-2xl font-bold text-green-900">
+            {form.establishedAt ? (
+              new Date(form.establishedAt + "T12:00:00").toLocaleDateString("es-MX", { day: "2-digit", month: "long", year: "numeric" })
+            ) : (
+              <span className="text-green-300 text-base">Sin fecha</span>
+            )}
+          </div>
+        )}
       </GlassCard>
 
       {/* Campos numéricos */}

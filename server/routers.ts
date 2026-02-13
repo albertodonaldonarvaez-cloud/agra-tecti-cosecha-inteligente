@@ -1344,6 +1344,7 @@ export const appRouter = router({
         newTrees: z.number().nullable().optional(),
         cropId: z.number().nullable().optional(),
         varietyId: z.number().nullable().optional(),
+        establishedAt: z.string().nullable().optional(),
       }))
       .mutation(async ({ input }) => {
         const { parcelId, ...data } = input;

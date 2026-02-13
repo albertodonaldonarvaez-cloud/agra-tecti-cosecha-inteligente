@@ -220,6 +220,7 @@ export const parcelDetails = mysqlTable("parcelDetails", {
   newTrees: int("newTrees"), // Árboles nuevos
   cropId: int("cropId"), // FK a crops.id
   varietyId: int("varietyId"), // FK a cropVarieties.id
+  establishedAt: varchar("establishedAt", { length: 32 }), // Fecha de establecimiento de la parcela (YYYY-MM-DD)
   notes: text("notes"), // Notas del admin (legacy, ahora se usa parcelNotes)
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
