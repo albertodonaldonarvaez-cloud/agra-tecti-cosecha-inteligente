@@ -454,6 +454,8 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
   const [selectedLayerType, setSelectedLayerType] = useState<LayerType>("orthophoto");
   const [expandedTask, setExpandedTask] = useState<number | null>(null);
   const [tileStatus, setTileStatus] = useState<string>("");
+  const [currentZoom, setCurrentZoom] = useState<number>(5);
+  const [tileMinZoom, setTileMinZoom] = useState<number>(14);
 
   // Cargar tareas del proyecto ODM
   const { data: tasks, isLoading: tasksLoading } = trpc.webodm.getProjectTasks.useQuery(
@@ -491,48 +493,83 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     console.log("[ParcelAnalysis] Loading tiles:", proxyUrl);
     setTileStatus("Cargando ortomosaico...");
 
-    const tileSource = new XYZ({
-      url: proxyUrl,
-      maxZoom: 24,
-      tileSize: 256,
-      crossOrigin: "anonymous",
-    });
-
-    let loadedCount = 0;
-    let errorCount = 0;
-    tileSource.on("tileloadstart", () => {
-      if (loadedCount === 0) console.log("[ParcelAnalysis] First tile loading...");
-    });
-    tileSource.on("tileloadend", () => {
-      loadedCount++;
-      if (loadedCount === 1) {
-        console.log("[ParcelAnalysis] First tile loaded!");
-        setTileStatus("");
-      }
-    });
-    tileSource.on("tileloaderror", (evt: any) => {
-      errorCount++;
-      if (errorCount <= 3) console.warn(`[ParcelAnalysis] Tile error #${errorCount}:`, evt.tile?.getTileCoord());
-      if (errorCount === 1) setTileStatus("Error cargando tiles - verificar conexión con WebODM");
-    });
-
-    tileLayerRef.current.setSource(tileSource);
-    tileLayerRef.current.setVisible(true);
-    mapInstanceRef.current.updateSize();
-    mapInstanceRef.current.render();
-
-    // Obtener bounds para zoom
+    // Primero obtener bounds y minzoom del tilejson para configurar correctamente la capa
     fetch(`/api/odm-bounds/${mapping.odmProjectId}/${taskUuid}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        console.log("[ParcelAnalysis] Bounds:", data);
-        if (data?.bounds && mapInstanceRef.current) {
-          const [minLon, minLat, maxLon, maxLat] = data.bounds;
-          const extent = transformExtent([minLon, minLat, maxLon, maxLat], "EPSG:4326", "EPSG:3857");
-          mapInstanceRef.current.getView().fit(extent, { padding: [40, 40, 40, 40], maxZoom: 20, duration: 800 });
+        console.log("[ParcelAnalysis] Bounds data:", data);
+        
+        // Usar minZoom del tilejson, o 0 para que OpenLayers siempre intente cargar
+        // El proxy devuelve tiles transparentes para zooms fuera de rango
+        const serverMinZoom = data?.minzoom || 14;
+        const serverMaxZoom = data?.maxzoom || 24;
+        setTileMinZoom(serverMinZoom);
+        console.log(`[ParcelAnalysis] Server zoom range: ${serverMinZoom}-${serverMaxZoom}`);
+
+        const tileSource = new XYZ({
+          url: proxyUrl,
+          minZoom: 0,  // Permitir que OpenLayers solicite desde zoom 0
+          maxZoom: serverMaxZoom,
+          tileSize: 256,
+          crossOrigin: "anonymous",
+        });
+
+        let loadedCount = 0;
+        let errorCount = 0;
+        tileSource.on("tileloadstart", () => {
+          if (loadedCount === 0) console.log("[ParcelAnalysis] First tile loading...");
+        });
+        tileSource.on("tileloadend", () => {
+          loadedCount++;
+          if (loadedCount === 1) {
+            console.log("[ParcelAnalysis] First tile loaded!");
+            setTileStatus("");
+          }
+        });
+        tileSource.on("tileloaderror", (evt: any) => {
+          errorCount++;
+          if (errorCount <= 3) console.warn(`[ParcelAnalysis] Tile error #${errorCount}:`, evt.tile?.getTileCoord());
+          if (errorCount === 1) setTileStatus("Error cargando tiles - verificar conexión con WebODM");
+        });
+
+        if (tileLayerRef.current && mapInstanceRef.current) {
+          tileLayerRef.current.setSource(tileSource);
+          tileLayerRef.current.setVisible(true);
+          mapInstanceRef.current.updateSize();
+          mapInstanceRef.current.render();
+
+          // Hacer zoom al extent del ortomosaico para que se vea inmediatamente
+          if (data?.bounds) {
+            const [minLon, minLat, maxLon, maxLat] = data.bounds;
+            const extent = transformExtent([minLon, minLat, maxLon, maxLat], "EPSG:4326", "EPSG:3857");
+            // Usar minZoom del servidor como mínimo para garantizar que se vean tiles
+            const fitMinZoom = Math.max(serverMinZoom, 14);
+            mapInstanceRef.current.getView().fit(extent, {
+              padding: [40, 40, 40, 40],
+              minResolution: mapInstanceRef.current.getView().getResolutionForZoom(fitMinZoom),
+              maxZoom: 20,
+              duration: 800,
+            });
+          }
         }
       })
-      .catch(err => console.warn("[ParcelAnalysis] Bounds error:", err));
+      .catch(err => {
+        console.warn("[ParcelAnalysis] Bounds error, loading tiles without zoom info:", err);
+        // Fallback: cargar tiles sin info de bounds
+        const tileSource = new XYZ({
+          url: proxyUrl,
+          minZoom: 0,
+          maxZoom: 24,
+          tileSize: 256,
+          crossOrigin: "anonymous",
+        });
+        if (tileLayerRef.current && mapInstanceRef.current) {
+          tileLayerRef.current.setSource(tileSource);
+          tileLayerRef.current.setVisible(true);
+          mapInstanceRef.current.updateSize();
+          mapInstanceRef.current.render();
+        }
+      });
   }, [mapping?.odmProjectId]);
 
   // Función para ocultar tiles
@@ -602,10 +639,17 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
 
     const vectorLayer = new VectorLayer({ source: new VectorSource({ features }), zIndex: 20 });
 
+    const mapView = new View({ center, zoom, maxZoom: 24 });
     const map = new Map({
       target: mapRef.current,
       layers: [baseLayer, odmTileLayer, vectorLayer],
-      view: new View({ center, zoom, maxZoom: 24 }),
+      view: mapView,
+    });
+
+    // Rastrear zoom actual para mostrar indicador
+    mapView.on("change:resolution", () => {
+      const z = mapView.getZoom();
+      if (z !== undefined) setCurrentZoom(Math.round(z));
     });
 
     mapInstanceRef.current = map;
@@ -706,6 +750,33 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
                 <div className="h-3 w-3 rounded-full bg-green-500 animate-pulse" />
                 {tileStatus}
               </div>
+            </div>
+          )}
+          {/* Indicador de zoom bajo - ortomosaico no visible */}
+          {selectedTaskUuid && currentZoom < tileMinZoom && !tileStatus && (
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-amber-50/95 backdrop-blur-sm px-4 py-2.5 rounded-xl shadow-lg border border-amber-300/60 z-20 max-w-xs text-center">
+              <div className="flex items-center gap-2 text-sm text-amber-700 font-medium">
+                <Eye className="h-4 w-4 flex-shrink-0" />
+                <span>Acerca el zoom para ver el ortomosaico</span>
+              </div>
+              <button
+                onClick={() => {
+                  if (mapInstanceRef.current && selectedTaskUuid && mapping?.odmProjectId) {
+                    fetch(`/api/odm-bounds/${mapping.odmProjectId}/${selectedTaskUuid}`)
+                      .then(r => r.ok ? r.json() : null)
+                      .then(data => {
+                        if (data?.bounds && mapInstanceRef.current) {
+                          const [minLon, minLat, maxLon, maxLat] = data.bounds;
+                          const ext = transformExtent([minLon, minLat, maxLon, maxLat], "EPSG:4326", "EPSG:3857");
+                          mapInstanceRef.current.getView().fit(ext, { padding: [40,40,40,40], maxZoom: 20, duration: 600 });
+                        }
+                      });
+                  }
+                }}
+                className="mt-1.5 px-3 py-1 bg-amber-500 text-white text-xs font-medium rounded-lg hover:bg-amber-600 transition-colors"
+              >
+                Ir al ortomosaico
+              </button>
             </div>
           )}
           {/* Indicador si no hay tarea seleccionada */}
