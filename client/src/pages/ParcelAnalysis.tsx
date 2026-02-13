@@ -424,6 +424,14 @@ function OverviewView({ parcels, odmMappings, allDetails, onSelectParcel }: {
                     <div className="text-sm font-bold text-emerald-700">{detail.productiveTrees.toLocaleString()}</div>
                   </div>
                 )}
+                {detail?.totalTrees && detail?.totalHectares && parseFloat(detail.totalHectares) > 0 && (
+                  <div className="bg-white/40 rounded-lg px-2 py-1.5">
+                    <div className="text-[10px] text-blue-500">Densidad/ha</div>
+                    <div className="text-sm font-bold text-blue-700">
+                      {Math.round(detail.totalTrees / parseFloat(detail.totalHectares)).toLocaleString()}
+                    </div>
+                  </div>
+                )}
                 {detail?.totalTrees && detail?.productiveTrees && (
                   <div className="bg-white/40 rounded-lg px-2 py-1.5">
                     <div className="text-[10px] text-red-500">Faltantes</div>
@@ -538,16 +546,15 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
           mapInstanceRef.current.updateSize();
           mapInstanceRef.current.render();
 
-          // Hacer zoom al extent del ortomosaico para que se vea inmediatamente
+          // Hacer zoom al extent del ortomosaico para que se ajuste al recuadro del mapa
           if (data?.bounds) {
             const [minLon, minLat, maxLon, maxLat] = data.bounds;
             const extent = transformExtent([minLon, minLat, maxLon, maxLat], "EPSG:4326", "EPSG:3857");
-            // Usar minZoom del servidor como mínimo para garantizar que se vean tiles
-            const fitMinZoom = Math.max(serverMinZoom, 14);
+            // fit() ajusta el zoom para que el extent ocupe todo el viewport del mapa
+            // padding agrega margen visual, maxZoom limita que no haga zoom excesivo
             mapInstanceRef.current.getView().fit(extent, {
-              padding: [40, 40, 40, 40],
-              minResolution: mapInstanceRef.current.getView().getResolutionForZoom(fitMinZoom),
-              maxZoom: 20,
+              padding: [30, 30, 30, 30],
+              maxZoom: 22,
               duration: 800,
             });
           }
@@ -768,7 +775,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
                         if (data?.bounds && mapInstanceRef.current) {
                           const [minLon, minLat, maxLon, maxLat] = data.bounds;
                           const ext = transformExtent([minLon, minLat, maxLon, maxLat], "EPSG:4326", "EPSG:3857");
-                          mapInstanceRef.current.getView().fit(ext, { padding: [40,40,40,40], maxZoom: 20, duration: 600 });
+                          mapInstanceRef.current.getView().fit(ext, { padding: [30,30,30,30], maxZoom: 22, duration: 600 });
                         }
                       });
                   }
@@ -944,7 +951,6 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
   const [form, setForm] = useState({
     totalHectares: "",
     productiveHectares: "",
-    treeDensityPerHectare: "",
     totalTrees: "",
     productiveTrees: "",
     newTrees: "",
@@ -991,7 +997,6 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
       setForm({
         totalHectares: details.totalHectares || "",
         productiveHectares: details.productiveHectares || "",
-        treeDensityPerHectare: details.treeDensityPerHectare || "",
         totalTrees: details.totalTrees?.toString() || "",
         productiveTrees: details.productiveTrees?.toString() || "",
         newTrees: details.newTrees?.toString() || "",
@@ -1000,7 +1005,7 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
         establishedAt: details.establishedAt || "",
       });
     } else {
-      setForm({ totalHectares: "", productiveHectares: "", treeDensityPerHectare: "", totalTrees: "", productiveTrees: "", newTrees: "", cropId: "", varietyId: "", establishedAt: "" });
+      setForm({ totalHectares: "", productiveHectares: "", totalTrees: "", productiveTrees: "", newTrees: "", cropId: "", varietyId: "", establishedAt: "" });
     }
   }, [details, parcel?.id]);
 
@@ -1009,7 +1014,7 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
       parcelId: parcel.id,
       totalHectares: form.totalHectares || null,
       productiveHectares: form.productiveHectares || null,
-      treeDensityPerHectare: form.treeDensityPerHectare || null,
+      treeDensityPerHectare: autoDensity > 0 ? String(autoDensity) : null,
       totalTrees: form.totalTrees ? parseInt(form.totalTrees) : null,
       productiveTrees: form.productiveTrees ? parseInt(form.productiveTrees) : null,
       newTrees: form.newTrees ? parseInt(form.newTrees) : null,
@@ -1029,10 +1034,13 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
   const cropName = crops?.find((c: any) => c.id === parseInt(form.cropId))?.name || "";
   const varietyName = varieties?.find((v: any) => v.id === parseInt(form.varietyId))?.name || "";
 
+  // Calcular densidad por hectárea automáticamente
+  const hectares = form.totalHectares ? parseFloat(form.totalHectares) : 0;
+  const autoDensity = hectares > 0 && totalTrees > 0 ? Math.round(totalTrees / hectares) : 0;
+
   const fields = [
     { key: "totalHectares", label: "Hectáreas Totales", icon: Ruler, suffix: "ha", type: "text" },
     { key: "productiveHectares", label: "Hectáreas Productivas", icon: Ruler, suffix: "ha", type: "text" },
-    { key: "treeDensityPerHectare", label: "Densidad por Hectárea", icon: TreePine, suffix: "árboles/ha", type: "text" },
     { key: "totalTrees", label: "Total de Árboles", icon: TreePine, suffix: "", type: "number" },
     { key: "productiveTrees", label: "Árboles Productivos", icon: Sprout, suffix: "", type: "number" },
     { key: "newTrees", label: "Árboles Nuevos", icon: Sprout, suffix: "", type: "number" },
@@ -1182,6 +1190,23 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
             )}
           </GlassCard>
         ))}
+
+        {/* Tarjeta de Densidad por Hectárea (calculada automáticamente) */}
+        {autoDensity > 0 && (
+          <GlassCard className="p-3 md:p-4" hover={true}>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-100">
+                <TreePine className="h-4 w-4 text-blue-600" />
+              </div>
+              <span className="text-xs text-blue-600 font-medium">Densidad por Hectárea</span>
+            </div>
+            <div className="text-xl md:text-2xl font-bold text-blue-700">
+              {autoDensity.toLocaleString()}
+              <span className="text-sm font-normal text-blue-400 ml-1">árboles/ha</span>
+            </div>
+            <p className="text-[10px] text-blue-400 mt-1">Total árboles ÷ Hectáreas totales</p>
+          </GlassCard>
+        )}
 
         {/* Tarjeta de Árboles Faltantes (calculada) */}
         {totalTrees > 0 && (
