@@ -24,6 +24,7 @@ export const users = mysqlTable("users", {
   canViewHarvesters: boolean("canViewHarvesters").default(false).notNull(),
   canViewEditor: boolean("canViewEditor").default(false).notNull(),
   canViewErrors: boolean("canViewErrors").default(false).notNull(),
+  canViewCrops: boolean("canViewCrops").default(false).notNull(),
   // Campos de personalización de perfil
   avatarColor: varchar("avatarColor", { length: 32 }).default("#16a34a"),
   avatarEmoji: varchar("avatarEmoji", { length: 16 }).default("🌿"),
@@ -217,10 +218,52 @@ export const parcelDetails = mysqlTable("parcelDetails", {
   totalTrees: int("totalTrees"), // Total de árboles
   productiveTrees: int("productiveTrees"), // Árboles productivos
   newTrees: int("newTrees"), // Árboles nuevos
-  notes: text("notes"), // Notas del admin
+  cropId: int("cropId"), // FK a crops.id
+  varietyId: int("varietyId"), // FK a cropVarieties.id
+  notes: text("notes"), // Notas del admin (legacy, ahora se usa parcelNotes)
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });  
 
 export type ParcelDetails = typeof parcelDetails.$inferSelect;
 export type InsertParcelDetails = typeof parcelDetails.$inferInsert;
+
+// Tabla de cultivos
+export const crops = mysqlTable("crops", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull().unique(),
+  description: text("description"),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Crop = typeof crops.$inferSelect;
+export type InsertCrop = typeof crops.$inferInsert;
+
+// Tabla de variedades de cultivo (un cultivo puede tener muchas variedades)
+export const cropVarieties = mysqlTable("cropVarieties", {
+  id: int("id").autoincrement().primaryKey(),
+  cropId: int("cropId").notNull(), // FK a crops.id
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type CropVariety = typeof cropVarieties.$inferSelect;
+export type InsertCropVariety = typeof cropVarieties.$inferInsert;
+
+// Tabla de notas de parcela (con autor y fecha)
+export const parcelNotes = mysqlTable("parcelNotes", {
+  id: int("id").autoincrement().primaryKey(),
+  parcelId: int("parcelId").notNull(), // FK a parcels.id
+  userId: int("userId").notNull(), // FK a users.id (autor)
+  content: text("content").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ParcelNote = typeof parcelNotes.$inferSelect;
+export type InsertParcelNote = typeof parcelNotes.$inferInsert;

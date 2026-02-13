@@ -23,6 +23,7 @@ import {
   Edit, 
   CloudSun,
   Leaf,
+  Sprout,
   type LucideIcon
 } from "lucide-react";
 
@@ -175,6 +176,18 @@ export const PAGES_CONFIG: PageConfig[] = [
     showInNav: true,
   },
   {
+    permissionKey: "canViewCrops",
+    path: "/crops",
+    icon: Sprout,
+    label: "Cultivos",
+    fullName: "Cultivos y Variedades",
+    description: "Gestionar cultivos y sus variedades",
+    adminOnly: true,
+    defaultValue: false,
+    order: 11,
+    showInNav: true,
+  },
+  {
     permissionKey: "canViewErrors",
     path: "/errors",
     icon: AlertCircle,
@@ -183,7 +196,7 @@ export const PAGES_CONFIG: PageConfig[] = [
     description: "Ver y resolver errores de sincronización",
     adminOnly: true,
     defaultValue: false,
-    order: 11,
+    order: 12,
     showInNav: false, // No mostrar en nav por ahora
   },
 ];

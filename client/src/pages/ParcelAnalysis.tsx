@@ -412,6 +412,14 @@ function OverviewView({ parcels, odmMappings, allDetails, onSelectParcel }: {
                     <div className="text-sm font-bold text-emerald-700">{detail.productiveTrees.toLocaleString()}</div>
                   </div>
                 )}
+                {detail?.totalTrees && detail?.productiveTrees && (
+                  <div className="bg-white/40 rounded-lg px-2 py-1.5">
+                    <div className="text-[10px] text-red-500">Faltantes</div>
+                    <div className="text-sm font-bold text-red-600">
+                      {(detail.totalTrees - detail.productiveTrees - (detail.newTrees || 0)).toLocaleString()}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {!detail?.totalHectares && !detail?.totalTrees && (
@@ -848,6 +856,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
 
 // ============ TAB 2: DETALLES DE PARCELA ============
 function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: any; isAdmin: boolean }) {
+  const { user } = useAuth();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
     totalHectares: "",
@@ -856,8 +865,10 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
     totalTrees: "",
     productiveTrees: "",
     newTrees: "",
-    notes: "",
+    cropId: "",
+    varietyId: "",
   });
+  const [newNoteText, setNewNoteText] = useState("");
 
   const utils = trpc.useUtils();
   const saveMutation = trpc.parcelAnalysis.saveDetails.useMutation({
@@ -866,6 +877,30 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
       setEditing(false);
     },
   });
+
+  // Cargar cultivos y variedades
+  const { data: crops } = trpc.crops.list.useQuery(undefined, { staleTime: 5 * 60 * 1000 });
+
+  // Cargar notas de la parcela
+  const { data: notes, refetch: refetchNotes } = trpc.parcelAnalysis.getNotes.useQuery(
+    { parcelId: parcel.id },
+    { enabled: !!parcel.id, staleTime: 1 * 60 * 1000 }
+  );
+
+  const addNoteMutation = trpc.parcelAnalysis.addNote.useMutation({
+    onSuccess: () => {
+      refetchNotes();
+      setNewNoteText("");
+    },
+  });
+
+  const deleteNoteMutation = trpc.parcelAnalysis.deleteNote.useMutation({
+    onSuccess: () => refetchNotes(),
+  });
+
+  // Variedades filtradas por cultivo seleccionado
+  const selectedCrop = crops?.find((c: any) => c.id === parseInt(form.cropId));
+  const varieties = selectedCrop?.varieties || [];
 
   useEffect(() => {
     if (details) {
@@ -876,10 +911,11 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
         totalTrees: details.totalTrees?.toString() || "",
         productiveTrees: details.productiveTrees?.toString() || "",
         newTrees: details.newTrees?.toString() || "",
-        notes: details.notes || "",
+        cropId: details.cropId?.toString() || "",
+        varietyId: details.varietyId?.toString() || "",
       });
     } else {
-      setForm({ totalHectares: "", productiveHectares: "", treeDensityPerHectare: "", totalTrees: "", productiveTrees: "", newTrees: "", notes: "" });
+      setForm({ totalHectares: "", productiveHectares: "", treeDensityPerHectare: "", totalTrees: "", productiveTrees: "", newTrees: "", cropId: "", varietyId: "" });
     }
   }, [details, parcel?.id]);
 
@@ -892,9 +928,20 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
       totalTrees: form.totalTrees ? parseInt(form.totalTrees) : null,
       productiveTrees: form.productiveTrees ? parseInt(form.productiveTrees) : null,
       newTrees: form.newTrees ? parseInt(form.newTrees) : null,
-      notes: form.notes || null,
+      cropId: form.cropId ? parseInt(form.cropId) : null,
+      varietyId: form.varietyId ? parseInt(form.varietyId) : null,
     });
   };
+
+  // Calcular árboles faltantes
+  const totalTrees = form.totalTrees ? parseInt(form.totalTrees) : 0;
+  const productiveTrees = form.productiveTrees ? parseInt(form.productiveTrees) : 0;
+  const newTrees = form.newTrees ? parseInt(form.newTrees) : 0;
+  const missingTrees = totalTrees - productiveTrees - newTrees;
+
+  // Nombres de cultivo y variedad para modo lectura
+  const cropName = crops?.find((c: any) => c.id === parseInt(form.cropId))?.name || "";
+  const varietyName = varieties?.find((v: any) => v.id === parseInt(form.varietyId))?.name || "";
 
   const fields = [
     { key: "totalHectares", label: "Hectáreas Totales", icon: Ruler, suffix: "ha", type: "text" },
@@ -945,6 +992,56 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
         )}
       </div>
 
+      {/* Cultivo y Variedad */}
+      <GlassCard className="p-3 md:p-4" hover={false}>
+        <h4 className="text-sm font-semibold text-green-800 mb-3 flex items-center gap-2">
+          <Leaf className="h-4 w-4" />
+          Cultivo y Variedad
+        </h4>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-green-600 font-medium mb-1 block">Cultivo</label>
+            {editing ? (
+              <select
+                value={form.cropId}
+                onChange={(e) => setForm({ ...form, cropId: e.target.value, varietyId: "" })}
+                className="w-full px-3 py-2 text-sm bg-white/60 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-400"
+              >
+                <option value="">Seleccionar cultivo...</option>
+                {crops?.map((c: any) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            ) : (
+              <div className="text-lg font-bold text-green-900">
+                {cropName || <span className="text-green-300 text-base">Sin asignar</span>}
+              </div>
+            )}
+          </div>
+          <div>
+            <label className="text-xs text-green-600 font-medium mb-1 block">Variedad</label>
+            {editing ? (
+              <select
+                value={form.varietyId}
+                onChange={(e) => setForm({ ...form, varietyId: e.target.value })}
+                disabled={!form.cropId}
+                className="w-full px-3 py-2 text-sm bg-white/60 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-400 disabled:opacity-50"
+              >
+                <option value="">{form.cropId ? "Seleccionar variedad..." : "Primero selecciona un cultivo"}</option>
+                {varieties.map((v: any) => (
+                  <option key={v.id} value={v.id}>{v.name}</option>
+                ))}
+              </select>
+            ) : (
+              <div className="text-lg font-bold text-green-900">
+                {varietyName || <span className="text-green-300 text-base">Sin asignar</span>}
+              </div>
+            )}
+          </div>
+        </div>
+      </GlassCard>
+
+      {/* Campos numéricos */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
         {fields.map(({ key, label, icon: Icon, suffix, type }) => (
           <GlassCard key={key} className="p-3 md:p-4" hover={false}>
@@ -973,26 +1070,91 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
             )}
           </GlassCard>
         ))}
+
+        {/* Tarjeta de Árboles Faltantes (calculada) */}
+        {totalTrees > 0 && (
+          <GlassCard className="p-3 md:p-4" hover={false}>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-red-100">
+                <TreePine className="h-4 w-4 text-red-600" />
+              </div>
+              <span className="text-xs text-red-600 font-medium">Árboles Faltantes</span>
+            </div>
+            <div className="text-xl md:text-2xl font-bold text-red-600">
+              {missingTrees >= 0 ? missingTrees.toLocaleString() : 0}
+            </div>
+            <p className="text-[10px] text-red-400 mt-1">Total - Productivos - Nuevos</p>
+          </GlassCard>
+        )}
       </div>
 
+      {/* Notas con autor y fecha */}
       <GlassCard className="p-3 md:p-4" hover={false}>
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-sm text-green-700 font-medium">Notas</span>
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-sm font-semibold text-green-800 flex items-center gap-2">
+            <Edit3 className="h-4 w-4" />
+            Notas
+          </h4>
+          <span className="text-xs text-green-500">{notes?.length || 0} notas</span>
         </div>
-        {editing ? (
-          <textarea
-            value={form.notes}
-            onChange={(e) => setForm({ ...form, notes: e.target.value })}
-            className="w-full px-3 py-2 text-sm text-green-900 bg-white/60 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-400 min-h-[80px] resize-y"
-            placeholder="Notas sobre la parcela..."
-          />
-        ) : (
-          <p className="text-sm text-green-700">
-            {form.notes || <span className="text-green-300 italic">Sin notas</span>}
-          </p>
-        )}
+
+        {/* Formulario para agregar nota */}
+        <div className="mb-3">
+          <div className="flex gap-2">
+            <textarea
+              value={newNoteText}
+              onChange={(e) => setNewNoteText(e.target.value)}
+              className="flex-1 px-3 py-2 text-sm text-green-900 bg-white/60 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-400 min-h-[60px] resize-y"
+              placeholder="Escribe una nota..."
+            />
+          </div>
+          {newNoteText.trim() && (
+            <button
+              onClick={() => addNoteMutation.mutate({ parcelId: parcel.id, content: newNoteText.trim() })}
+              disabled={addNoteMutation.isPending}
+              className="mt-2 flex items-center gap-1.5 px-4 py-1.5 bg-green-600 text-white rounded-xl text-sm font-medium hover:bg-green-700 transition-all disabled:opacity-50"
+            >
+              <Save className="h-3.5 w-3.5" />
+              {addNoteMutation.isPending ? "Guardando..." : "Agregar Nota"}
+            </button>
+          )}
+        </div>
+
+        {/* Lista de notas */}
+        <div className="space-y-2">
+          {(!notes || notes.length === 0) && (
+            <p className="text-xs text-green-400 italic">Sin notas aún</p>
+          )}
+          {notes?.map((note: any) => (
+            <div key={note.id} className="bg-white/40 rounded-xl p-3 border border-green-100/30">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1">
+                  <p className="text-sm text-green-800 whitespace-pre-wrap">{note.content}</p>
+                  <div className="flex items-center gap-2 mt-2 text-[10px] text-green-500">
+                    <span className="font-medium">{note.authorName || "Usuario"}</span>
+                    <span>&middot;</span>
+                    <span>{formatDateTime(note.createdAt)}</span>
+                  </div>
+                </div>
+                {(isAdmin || note.userId === user?.id) && (
+                  <button
+                    onClick={() => {
+                      if (confirm("¿Eliminar esta nota?")) {
+                        deleteNoteMutation.mutate({ noteId: note.id });
+                      }
+                    }}
+                    className="flex-shrink-0 p-1 rounded-lg text-red-400 hover:bg-red-50 hover:text-red-600"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       </GlassCard>
 
+      {/* Composición del Arbolado */}
       {(form.totalTrees || form.productiveTrees || form.newTrees) && (
         <GlassCard className="p-3 md:p-5" hover={false}>
           <h4 className="text-sm font-semibold text-green-800 mb-3">Composición del Arbolado</h4>
@@ -1021,6 +1183,20 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
                   <div
                     className="h-full bg-gradient-to-r from-lime-400 to-green-400 rounded-full transition-all duration-500"
                     style={{ width: `${Math.min(100, (parseInt(form.newTrees) / parseInt(form.totalTrees)) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            {totalTrees > 0 && missingTrees > 0 && (
+              <div>
+                <div className="flex justify-between text-xs text-red-600 mb-1">
+                  <span>Faltantes</span>
+                  <span>{Math.round((missingTrees / totalTrees) * 100)}%</span>
+                </div>
+                <div className="h-3 bg-red-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-red-400 to-rose-500 rounded-full transition-all duration-500"
+                    style={{ width: `${Math.min(100, (missingTrees / totalTrees) * 100)}%` }}
                   />
                 </div>
               </div>
@@ -1088,6 +1264,12 @@ function HarvestTab({ parcel }: { parcel: any }) {
     }
   };
 
+  // Calcular rendimiento porcentual
+  const totalWeight = harvestStats?.totalWeight || 0;
+  const firstQPct = totalWeight > 0 ? ((harvestStats?.firstQualityWeight || 0) / totalWeight * 100).toFixed(1) : "0";
+  const secondQPct = totalWeight > 0 ? ((harvestStats?.secondQualityWeight || 0) / totalWeight * 100).toFixed(1) : "0";
+  const wastePct = totalWeight > 0 ? ((harvestStats?.wasteWeight || 0) / totalWeight * 100).toFixed(1) : "0";
+
   if (statsLoading) {
     return <div className="text-center py-8 text-green-500 animate-pulse">Cargando datos de cosecha...</div>;
   }
@@ -1104,6 +1286,7 @@ function HarvestTab({ parcel }: { parcel: any }) {
 
   return (
     <div className="space-y-4">
+      {/* Números totales */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: "Total Cosechado", value: `${harvestStats.totalWeight} kg`, icon: Package, color: "from-green-400 to-emerald-500" },
@@ -1123,6 +1306,7 @@ function HarvestTab({ parcel }: { parcel: any }) {
         ))}
       </div>
 
+      {/* Rendimiento por Hectárea (sin cajas/ha) + Fecha inicio ciclo */}
       {productiveHa && productiveHa > 0 && (
         <GlassCard className="p-3 md:p-4" hover={false}>
           <h4 className="text-sm font-semibold text-green-800 mb-2 flex items-center gap-2">
@@ -1139,16 +1323,47 @@ function HarvestTab({ parcel }: { parcel: any }) {
               <div className="text-lg font-bold text-emerald-700">{(harvestStats.firstQualityWeight / productiveHa).toFixed(1)} kg</div>
             </div>
             <div>
-              <div className="text-xs text-green-600">Cajas / ha</div>
-              <div className="text-lg font-bold text-green-900">{(harvestStats.totalBoxes / productiveHa).toFixed(1)}</div>
-            </div>
-            <div>
               <div className="text-xs text-green-600">Días de cosecha</div>
               <div className="text-lg font-bold text-green-900">{harvestStats.harvestDays}</div>
+            </div>
+            <div>
+              <div className="text-xs text-green-600">Inicio ciclo cosecha</div>
+              <div className="text-lg font-bold text-green-900">{harvestStats.firstDate ? formatDate(harvestStats.firstDate) : "-"}</div>
             </div>
           </div>
         </GlassCard>
       )}
+
+      {/* Rendimiento Porcentual */}
+      <GlassCard className="p-3 md:p-4" hover={false}>
+        <h4 className="text-sm font-semibold text-green-800 mb-2 flex items-center gap-2">
+          <Activity className="h-4 w-4" />
+          Rendimiento Porcentual
+        </h4>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="text-center">
+            <div className="text-xs text-emerald-600 mb-1">1ra Calidad</div>
+            <div className="text-2xl md:text-3xl font-bold text-emerald-700">{firstQPct}%</div>
+            <div className="mt-2 h-2 bg-emerald-100 rounded-full overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-emerald-400 to-green-500 rounded-full transition-all duration-500" style={{ width: `${firstQPct}%` }} />
+            </div>
+          </div>
+          <div className="text-center">
+            <div className="text-xs text-yellow-600 mb-1">2da Calidad</div>
+            <div className="text-2xl md:text-3xl font-bold text-yellow-700">{secondQPct}%</div>
+            <div className="mt-2 h-2 bg-yellow-100 rounded-full overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-yellow-400 to-orange-500 rounded-full transition-all duration-500" style={{ width: `${secondQPct}%` }} />
+            </div>
+          </div>
+          <div className="text-center">
+            <div className="text-xs text-red-600 mb-1">Desperdicio</div>
+            <div className="text-2xl md:text-3xl font-bold text-red-600">{wastePct}%</div>
+            <div className="mt-2 h-2 bg-red-100 rounded-full overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-red-400 to-rose-500 rounded-full transition-all duration-500" style={{ width: `${wastePct}%` }} />
+            </div>
+          </div>
+        </div>
+      </GlassCard>
 
       {chartData.length > 0 && (
         <GlassCard className="p-3 md:p-5" hover={false}>

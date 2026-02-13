@@ -4,8 +4,8 @@
  */
 
 import { getDb } from "./db";
-import { webodmConfig, parcelOdmMapping, parcelDetails } from "../drizzle/schema";
-import { eq, and } from "drizzle-orm";
+import { webodmConfig, parcelOdmMapping, parcelDetails, crops, cropVarieties, parcelNotes, users } from "../drizzle/schema";
+import { eq, and, desc } from "drizzle-orm";
 
 // ============ CONFIGURACIÓN WebODM ============
 
@@ -268,7 +268,8 @@ export async function saveParcelDetails(parcelId: number, data: {
   totalTrees?: number | null;
   productiveTrees?: number | null;
   newTrees?: number | null;
-  notes?: string | null;
+  cropId?: number | null;
+  varietyId?: number | null;
 }) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
@@ -349,4 +350,118 @@ export async function getParcelDailyHarvest(parcelCode: string) {
     secondQualityWeight: Number(Number(row.secondQualityWeight).toFixed(2)),
     wasteWeight: Number(Number(row.wasteWeight).toFixed(2)),
   }));
+}
+
+// ============ CULTIVOS Y VARIEDADES ============
+
+export async function getAllCrops() {
+  const db = await getDb();
+  if (!db) return [];
+  const allCrops = await db.select().from(crops);
+  const allVarieties = await db.select().from(cropVarieties);
+  
+  return allCrops.map(c => ({
+    ...c,
+    varieties: allVarieties.filter(v => v.cropId === c.id),
+  }));
+}
+
+export async function createCrop(data: { name: string; description?: string | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const result = await db.insert(crops).values({
+    name: data.name,
+    description: data.description || null,
+  });
+  return { id: (result as any)[0].insertId, ...data };
+}
+
+export async function updateCrop(id: number, data: { name?: string; description?: string | null; isActive?: boolean }) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(crops).set(data).where(eq(crops.id, id));
+  return { success: true };
+}
+
+export async function deleteCrop(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  // Eliminar variedades asociadas primero
+  await db.delete(cropVarieties).where(eq(cropVarieties.cropId, id));
+  await db.delete(crops).where(eq(crops.id, id));
+  return { success: true };
+}
+
+export async function createVariety(data: { cropId: number; name: string; description?: string | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const result = await db.insert(cropVarieties).values({
+    cropId: data.cropId,
+    name: data.name,
+    description: data.description || null,
+  });
+  return { id: (result as any)[0].insertId, ...data };
+}
+
+export async function updateVariety(id: number, data: { name?: string; description?: string | null; isActive?: boolean }) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(cropVarieties).set(data).where(eq(cropVarieties.id, id));
+  return { success: true };
+}
+
+export async function deleteVariety(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.delete(cropVarieties).where(eq(cropVarieties.id, id));
+  return { success: true };
+}
+
+// ============ NOTAS DE PARCELA ============
+
+export async function getParcelNotes(parcelId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  
+  const allNotes = await db
+    .select()
+    .from(parcelNotes)
+    .where(eq(parcelNotes.parcelId, parcelId))
+    .orderBy(desc(parcelNotes.createdAt));
+  
+  // Obtener nombres de autores
+  const userIds = [...new Set(allNotes.map(n => n.userId))];
+  const allUsers = userIds.length > 0
+    ? await db.select({ id: users.id, name: users.name }).from(users)
+    : [];
+  
+  const userMap = new Map(allUsers.map(u => [u.id, u.name]));
+  
+  return allNotes.map(n => ({
+    id: n.id,
+    parcelId: n.parcelId,
+    userId: n.userId,
+    authorName: userMap.get(n.userId) || "Usuario",
+    content: n.content,
+    createdAt: n.createdAt?.toISOString() || new Date().toISOString(),
+    updatedAt: n.updatedAt?.toISOString() || new Date().toISOString(),
+  }));
+}
+
+export async function addParcelNote(parcelId: number, userId: number, content: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const result = await db.insert(parcelNotes).values({
+    parcelId,
+    userId,
+    content,
+  });
+  return { id: (result as any)[0].insertId, parcelId, userId, content };
+}
+
+export async function deleteParcelNote(noteId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.delete(parcelNotes).where(eq(parcelNotes.id, noteId));
+  return { success: true };
 }

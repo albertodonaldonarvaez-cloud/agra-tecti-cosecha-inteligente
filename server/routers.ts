@@ -1323,12 +1323,33 @@ export const appRouter = router({
         totalTrees: z.number().nullable().optional(),
         productiveTrees: z.number().nullable().optional(),
         newTrees: z.number().nullable().optional(),
-        notes: z.string().nullable().optional(),
+        cropId: z.number().nullable().optional(),
+        varietyId: z.number().nullable().optional(),
       }))
       .mutation(async ({ input }) => {
         const { parcelId, ...data } = input;
         await webodm.saveParcelDetails(parcelId, data);
         return { success: true };
+      }),
+
+    // Notas de parcela
+    getNotes: protectedProcedure
+      .input(z.object({ parcelId: z.number() }))
+      .query(async ({ input }) => {
+        return webodm.getParcelNotes(input.parcelId);
+      }),
+
+    addNote: protectedProcedure
+      .input(z.object({ parcelId: z.number(), content: z.string().min(1) }))
+      .mutation(async ({ input, ctx }) => {
+        if (!ctx.user) throw new TRPCError({ code: "UNAUTHORIZED" });
+        return webodm.addParcelNote(input.parcelId, ctx.user.id, input.content);
+      }),
+
+    deleteNote: protectedProcedure
+      .input(z.object({ noteId: z.number() }))
+      .mutation(async ({ input }) => {
+        return webodm.deleteParcelNote(input.noteId);
       }),
 
     getHarvestStats: protectedProcedure
@@ -1341,6 +1362,51 @@ export const appRouter = router({
       .input(z.object({ parcelCode: z.string() }))
       .query(async ({ input }) => {
         return webodm.getParcelDailyHarvest(input.parcelCode);
+      }),
+  }),
+
+  // CRUD de Cultivos y Variedades
+  crops: router({
+    list: protectedProcedure.query(async () => {
+      return webodm.getAllCrops();
+    }),
+
+    create: adminProcedure
+      .input(z.object({ name: z.string().min(1), description: z.string().nullable().optional() }))
+      .mutation(async ({ input }) => {
+        return webodm.createCrop(input);
+      }),
+
+    update: adminProcedure
+      .input(z.object({ id: z.number(), name: z.string().min(1).optional(), description: z.string().nullable().optional(), isActive: z.boolean().optional() }))
+      .mutation(async ({ input }) => {
+        const { id, ...data } = input;
+        return webodm.updateCrop(id, data);
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        return webodm.deleteCrop(input.id);
+      }),
+
+    createVariety: adminProcedure
+      .input(z.object({ cropId: z.number(), name: z.string().min(1), description: z.string().nullable().optional() }))
+      .mutation(async ({ input }) => {
+        return webodm.createVariety(input);
+      }),
+
+    updateVariety: adminProcedure
+      .input(z.object({ id: z.number(), name: z.string().min(1).optional(), description: z.string().nullable().optional(), isActive: z.boolean().optional() }))
+      .mutation(async ({ input }) => {
+        const { id, ...data } = input;
+        return webodm.updateVariety(id, data);
+      }),
+
+    deleteVariety: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        return webodm.deleteVariety(input.id);
       }),
   }),
 
