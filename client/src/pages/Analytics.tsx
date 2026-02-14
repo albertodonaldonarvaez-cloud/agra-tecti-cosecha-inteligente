@@ -353,18 +353,26 @@ function AnalyticsContent() {
                                 <span className="font-semibold text-red-600">{(parcel.wasteWeight / 1000).toFixed(1)}</span>
                                 <span className="ml-1 text-xs text-red-400">({parcel.total > 0 ? ((parcel.waste / parcel.total) * 100).toFixed(0) : 0}%)</span>
                               </td>
-                              <td className="py-3 px-3 text-right">
+                              <td
+                                className="py-3 px-3 text-right cursor-pointer hover:scale-105 transition-transform"
+                                onClick={() => parcel.parcelId && setLocation(`/parcel-analysis?parcelId=${parcel.parcelId}&tab=harvest`)}
+                                title="Ver cosecha de esta parcela"
+                              >
                                 {yieldPerHa !== null ? (
-                                  <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 font-bold text-xs px-2 py-1 rounded-full">
+                                  <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 font-bold text-xs px-2 py-1 rounded-full hover:bg-blue-100 transition-colors">
                                     {yieldPerHa.toFixed(1)}
                                   </span>
                                 ) : (
                                   <span className="text-xs text-gray-400">—</span>
                                 )}
                               </td>
-                              <td className="py-3 px-3 text-right">
+                              <td
+                                className="py-3 px-3 text-right cursor-pointer hover:scale-105 transition-transform"
+                                onClick={() => parcel.parcelId && setLocation(`/parcel-analysis?parcelId=${parcel.parcelId}&tab=harvest`)}
+                                title="Ver cosecha de esta parcela"
+                              >
                                 {yieldPerTree !== null ? (
-                                  <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 font-bold text-xs px-2 py-1 rounded-full">
+                                  <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 font-bold text-xs px-2 py-1 rounded-full hover:bg-amber-100 transition-colors">
                                     {yieldPerTree.toFixed(2)}
                                   </span>
                                 ) : (

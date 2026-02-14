@@ -7,6 +7,7 @@ import { FloatingNav } from "./components/FloatingNav";
 import { useAuth } from "./_core/hooks/useAuth";
 import { useActivityTracker } from "./hooks/useActivityTracker";
 import { Suspense, lazy } from "react";
+import { WelcomeTour } from "./components/WelcomeTour";
 
 // ====== CODE SPLITTING: Carga diferida de páginas ======
 // Solo Home y Login se cargan inmediatamente (son las más usadas al inicio)
@@ -80,6 +81,7 @@ function Router() {
         </Switch>
       </Suspense>
       <FloatingNav isAdmin={user.role === "admin"} />
+      <WelcomeTour userId={user.id} userName={user.name?.split(" ")[0]} />
     </>
   );
 }
