@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { BarChart3, Calendar, TrendingUp, Package, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
+import { BarChart3, Calendar, TrendingUp, Package, RefreshCw, ChevronDown, ChevronUp, Layers, ExternalLink, TreePine, Ruler } from "lucide-react";
+import { useLocation } from "wouter";
 import { useEffect, useState, useMemo, useCallback } from "react";
 
 export default function Analytics() {
@@ -20,6 +21,7 @@ export default function Analytics() {
 
 function AnalyticsContent() {
   const { user, loading } = useAuth();
+  const [, setLocation] = useLocation();
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [filterDates, setFilterDates] = useState<{ startDate?: string; endDate?: string }>({});
@@ -77,6 +79,8 @@ function AnalyticsContent() {
     if (!stats?.parcelStats) return [];
     return [...stats.parcelStats].sort((a: any, b: any) => {
       let fa: any, fb: any;
+      const getYieldPerHa = (p: any) => (p.productiveHectares && p.productiveHectares > 0) ? (p.weight / 1000) / p.productiveHectares : 0;
+      const getYieldPerTree = (p: any) => (p.productiveTrees && p.productiveTrees > 0) ? (p.weight / 1000) / p.productiveTrees : 0;
       switch (parcelSortField) {
         case "parcelName": fa = a.parcelName; fb = b.parcelName; break;
         case "total": fa = a.total; fb = b.total; break;
@@ -84,6 +88,8 @@ function AnalyticsContent() {
         case "firstQualityWeight": fa = a.firstQualityWeight; fb = b.firstQualityWeight; break;
         case "secondQualityWeight": fa = a.secondQualityWeight; fb = b.secondQualityWeight; break;
         case "wasteWeight": fa = a.wasteWeight; fb = b.wasteWeight; break;
+        case "yieldPerHa": fa = getYieldPerHa(a); fb = getYieldPerHa(b); break;
+        case "yieldPerTree": fa = getYieldPerTree(a); fb = getYieldPerTree(b); break;
         default: fa = a.total; fb = b.total;
       }
       let cmp = 0;
@@ -244,96 +250,204 @@ function AnalyticsContent() {
             </div>
 
             {/* Estadísticas por Parcela */}
-            <GlassCard className="p-4 md:p-6">
-              <h2 className="mb-3 md:mb-4 text-lg md:text-2xl font-semibold text-green-900">Estadísticas por Parcela</h2>
+            <GlassCard hover className="p-4 md:p-6">
+              <div className="flex items-center gap-2 mb-4 md:mb-5">
+                <div className="p-2 bg-emerald-100 rounded-lg">
+                  <Layers className="w-5 h-5 text-emerald-600" />
+                </div>
+                <div>
+                  <h2 className="text-lg md:text-2xl font-bold text-green-900">Estadísticas por Parcela</h2>
+                  <p className="text-xs text-green-600">Clic en el nombre para ver mapa y vuelos · Clic en cosecha para ver rendimiento</p>
+                </div>
+              </div>
               
               {sortedParcelStats.length > 0 ? (
                 <>
-                  {/* Vista desktop - tabla */}
+                  {/* Vista desktop - tabla moderna */}
                   <div className="hidden md:block overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="border-b border-green-200">
-                          <th className="pb-2 text-left font-semibold text-green-900 cursor-pointer hover:bg-green-50 px-2 py-1 select-none" onClick={() => handleParcelSort("parcelName")}>
+                        <tr className="bg-gradient-to-r from-green-50 to-emerald-50 border-b-2 border-green-200">
+                          <th className="py-3 text-left font-bold text-green-800 cursor-pointer hover:bg-green-100/50 px-3 select-none rounded-tl-lg transition-colors" onClick={() => handleParcelSort("parcelName")}>
                             Parcela <ParcelSortIcon field="parcelName" />
                           </th>
-                          <th className="pb-2 text-right font-semibold text-green-900 cursor-pointer hover:bg-green-50 px-2 py-1 select-none whitespace-nowrap" onClick={() => handleParcelSort("total")}>
+                          <th className="py-3 text-right font-bold text-green-800 cursor-pointer hover:bg-green-100/50 px-3 select-none whitespace-nowrap transition-colors" onClick={() => handleParcelSort("total")}>
                             Cajas <ParcelSortIcon field="total" />
                           </th>
-                          <th className="pb-2 text-right font-semibold text-green-900 cursor-pointer hover:bg-green-50 px-2 py-1 select-none whitespace-nowrap" onClick={() => handleParcelSort("weight")}>
-                            Peso (kg) <ParcelSortIcon field="weight" />
+                          <th className="py-3 text-right font-bold text-green-800 cursor-pointer hover:bg-green-100/50 px-3 select-none whitespace-nowrap transition-colors" onClick={() => handleParcelSort("weight")}>
+                            Kg Total <ParcelSortIcon field="weight" />
                           </th>
-                          <th className="pb-2 text-right font-semibold text-green-900 cursor-pointer hover:bg-green-50 px-2 py-1 select-none whitespace-nowrap" onClick={() => handleParcelSort("firstQualityWeight")}>
-                            1ra Cal. (kg) <ParcelSortIcon field="firstQualityWeight" />
+                          <th className="py-3 text-right font-bold text-green-800 cursor-pointer hover:bg-green-100/50 px-3 select-none whitespace-nowrap transition-colors" onClick={() => handleParcelSort("firstQualityWeight")}>
+                            1ra Cal. <ParcelSortIcon field="firstQualityWeight" />
                           </th>
-                          <th className="pb-2 text-right font-semibold text-green-900 cursor-pointer hover:bg-green-50 px-2 py-1 select-none whitespace-nowrap" onClick={() => handleParcelSort("secondQualityWeight")}>
-                            2da Cal. (kg) <ParcelSortIcon field="secondQualityWeight" />
+                          <th className="py-3 text-right font-bold text-green-800 cursor-pointer hover:bg-green-100/50 px-3 select-none whitespace-nowrap transition-colors" onClick={() => handleParcelSort("secondQualityWeight")}>
+                            2da Cal. <ParcelSortIcon field="secondQualityWeight" />
                           </th>
-                          <th className="pb-2 text-right font-semibold text-green-900 cursor-pointer hover:bg-green-50 px-2 py-1 select-none whitespace-nowrap" onClick={() => handleParcelSort("wasteWeight")}>
-                            Desp. (kg) <ParcelSortIcon field="wasteWeight" />
+                          <th className="py-3 text-right font-bold text-green-800 cursor-pointer hover:bg-green-100/50 px-3 select-none whitespace-nowrap transition-colors" onClick={() => handleParcelSort("wasteWeight")}>
+                            Desp. <ParcelSortIcon field="wasteWeight" />
+                          </th>
+                          <th className="py-3 text-right font-bold text-blue-800 cursor-pointer hover:bg-blue-50/50 px-3 select-none whitespace-nowrap transition-colors" onClick={() => handleParcelSort("yieldPerHa")}>
+                            <span className="flex items-center justify-end gap-1"><Ruler className="w-3.5 h-3.5" /> Kg/Ha <ParcelSortIcon field="yieldPerHa" /></span>
+                          </th>
+                          <th className="py-3 text-right font-bold text-amber-800 cursor-pointer hover:bg-amber-50/50 px-3 select-none whitespace-nowrap rounded-tr-lg transition-colors" onClick={() => handleParcelSort("yieldPerTree")}>
+                            <span className="flex items-center justify-end gap-1"><TreePine className="w-3.5 h-3.5" /> Kg/Árbol <ParcelSortIcon field="yieldPerTree" /></span>
                           </th>
                         </tr>
                       </thead>
                       <tbody>
-                        {sortedParcelStats.map((parcel: any) => (
-                          <tr key={parcel.parcelCode} className="border-b border-green-100 hover:bg-green-50/50">
-                            <td className="py-2.5 px-2 text-green-900">
-                              <div className="font-semibold text-sm">{parcel.parcelName}</div>
-                              <div className="text-xs text-green-600">{parcel.parcelCode}</div>
-                            </td>
-                            <td className="py-2.5 px-2 text-right text-green-900">{parcel.total}</td>
-                            <td className="py-2.5 px-2 text-right font-semibold text-green-900">{(parcel.weight / 1000).toFixed(2)}</td>
-                            <td className="py-2.5 px-2 text-right text-green-900">
-                              <span className="font-semibold">{(parcel.firstQualityWeight / 1000).toFixed(2)}</span>
-                              <span className="ml-1 text-xs text-green-600">({((parcel.firstQuality / parcel.total) * 100).toFixed(0)}%)</span>
-                            </td>
-                            <td className="py-2.5 px-2 text-right text-green-900">
-                              <span className="font-semibold">{(parcel.secondQualityWeight / 1000).toFixed(2)}</span>
-                              <span className="ml-1 text-xs text-yellow-600">({((parcel.secondQuality / parcel.total) * 100).toFixed(0)}%)</span>
-                            </td>
-                            <td className="py-2.5 px-2 text-right text-green-900">
-                              <span className="font-semibold">{(parcel.wasteWeight / 1000).toFixed(2)}</span>
-                              <span className="ml-1 text-xs text-red-600">({((parcel.waste / parcel.total) * 100).toFixed(0)}%)</span>
-                            </td>
-                          </tr>
-                        ))}
+                        {sortedParcelStats.map((parcel: any, idx: number) => {
+                          const weightKg = parcel.weight / 1000;
+                          const yieldPerHa = (parcel.productiveHectares && parcel.productiveHectares > 0) ? weightKg / parcel.productiveHectares : null;
+                          const yieldPerTree = (parcel.productiveTrees && parcel.productiveTrees > 0) ? weightKg / parcel.productiveTrees : null;
+                          const isLast = idx === sortedParcelStats.length - 1;
+                          return (
+                            <tr key={parcel.parcelCode} className={`border-b border-green-100/60 transition-all duration-200 hover:bg-gradient-to-r hover:from-green-50/80 hover:to-emerald-50/40 hover:shadow-sm ${isLast ? '' : ''}`}>
+                              <td className="py-3 px-3">
+                                <div
+                                  className="cursor-pointer group"
+                                  onClick={() => parcel.parcelId && setLocation(`/parcel-analysis?parcelId=${parcel.parcelId}&tab=map`)}
+                                  title="Ver mapa y vuelos"
+                                >
+                                  <div className="font-bold text-sm text-green-800 group-hover:text-emerald-600 transition-colors flex items-center gap-1">
+                                    {parcel.parcelName}
+                                    <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                  </div>
+                                  <div className="text-xs text-green-500">{parcel.parcelCode}</div>
+                                </div>
+                              </td>
+                              <td
+                                className="py-3 px-3 text-right text-green-900 font-medium cursor-pointer hover:text-emerald-600 transition-colors"
+                                onClick={() => parcel.parcelId && setLocation(`/parcel-analysis?parcelId=${parcel.parcelId}&tab=harvest`)}
+                                title="Ver cosecha"
+                              >
+                                {parcel.total}
+                              </td>
+                              <td
+                                className="py-3 px-3 text-right font-bold text-green-900 cursor-pointer hover:text-emerald-600 transition-colors"
+                                onClick={() => parcel.parcelId && setLocation(`/parcel-analysis?parcelId=${parcel.parcelId}&tab=harvest`)}
+                                title="Ver cosecha"
+                              >
+                                {weightKg.toFixed(1)}
+                              </td>
+                              <td
+                                className="py-3 px-3 text-right cursor-pointer hover:text-emerald-600 transition-colors"
+                                onClick={() => parcel.parcelId && setLocation(`/parcel-analysis?parcelId=${parcel.parcelId}&tab=harvest`)}
+                                title="Ver cosecha"
+                              >
+                                <span className="font-semibold text-green-800">{(parcel.firstQualityWeight / 1000).toFixed(1)}</span>
+                                <span className="ml-1 text-xs text-green-500">({parcel.total > 0 ? ((parcel.firstQuality / parcel.total) * 100).toFixed(0) : 0}%)</span>
+                              </td>
+                              <td
+                                className="py-3 px-3 text-right cursor-pointer hover:text-emerald-600 transition-colors"
+                                onClick={() => parcel.parcelId && setLocation(`/parcel-analysis?parcelId=${parcel.parcelId}&tab=harvest`)}
+                                title="Ver cosecha"
+                              >
+                                <span className="font-semibold text-yellow-700">{(parcel.secondQualityWeight / 1000).toFixed(1)}</span>
+                                <span className="ml-1 text-xs text-yellow-500">({parcel.total > 0 ? ((parcel.secondQuality / parcel.total) * 100).toFixed(0) : 0}%)</span>
+                              </td>
+                              <td
+                                className="py-3 px-3 text-right cursor-pointer hover:text-emerald-600 transition-colors"
+                                onClick={() => parcel.parcelId && setLocation(`/parcel-analysis?parcelId=${parcel.parcelId}&tab=harvest`)}
+                                title="Ver cosecha"
+                              >
+                                <span className="font-semibold text-red-600">{(parcel.wasteWeight / 1000).toFixed(1)}</span>
+                                <span className="ml-1 text-xs text-red-400">({parcel.total > 0 ? ((parcel.waste / parcel.total) * 100).toFixed(0) : 0}%)</span>
+                              </td>
+                              <td className="py-3 px-3 text-right">
+                                {yieldPerHa !== null ? (
+                                  <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 font-bold text-xs px-2 py-1 rounded-full">
+                                    {yieldPerHa.toFixed(1)}
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-gray-400">—</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-3 text-right">
+                                {yieldPerTree !== null ? (
+                                  <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 font-bold text-xs px-2 py-1 rounded-full">
+                                    {yieldPerTree.toFixed(2)}
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-gray-400">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
 
-                  {/* Vista móvil - tarjetas */}
+                  {/* Vista móvil - tarjetas modernas */}
                   <div className="md:hidden space-y-3">
-                    {sortedParcelStats.map((parcel: any) => (
-                      <div key={parcel.parcelCode} className="bg-white/60 rounded-lg p-3 border border-green-100">
-                        <div className="flex justify-between items-start mb-2">
-                          <div>
-                            <p className="font-semibold text-sm text-green-900">{parcel.parcelName}</p>
-                            <p className="text-xs text-green-600">{parcel.parcelCode}</p>
+                    {sortedParcelStats.map((parcel: any) => {
+                      const weightKg = parcel.weight / 1000;
+                      const yieldPerHa = (parcel.productiveHectares && parcel.productiveHectares > 0) ? weightKg / parcel.productiveHectares : null;
+                      const yieldPerTree = (parcel.productiveTrees && parcel.productiveTrees > 0) ? weightKg / parcel.productiveTrees : null;
+                      return (
+                        <div key={parcel.parcelCode} className="bg-white/70 rounded-xl p-3.5 border border-green-100 shadow-sm hover:shadow-md transition-all duration-200">
+                          <div className="flex justify-between items-start mb-2.5">
+                            <div
+                              className="cursor-pointer group"
+                              onClick={() => parcel.parcelId && setLocation(`/parcel-analysis?parcelId=${parcel.parcelId}&tab=map`)}
+                            >
+                              <p className="font-bold text-sm text-green-800 group-hover:text-emerald-600 transition-colors flex items-center gap-1">
+                                {parcel.parcelName}
+                                <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                              </p>
+                              <p className="text-xs text-green-500">{parcel.parcelCode}</p>
+                            </div>
+                            <div
+                              className="text-right cursor-pointer"
+                              onClick={() => parcel.parcelId && setLocation(`/parcel-analysis?parcelId=${parcel.parcelId}&tab=harvest`)}
+                            >
+                              <p className="font-bold text-sm text-green-900">{parcel.total} cajas</p>
+                              <p className="text-xs text-green-600">{weightKg.toFixed(1)} kg</p>
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <p className="font-bold text-sm text-green-900">{parcel.total} cajas</p>
-                            <p className="text-xs text-green-600">{(parcel.weight / 1000).toFixed(1)} kg</p>
+                          <div className="grid grid-cols-3 gap-2 text-xs mb-2">
+                            <div
+                              className="bg-green-50 rounded-lg p-2 text-center cursor-pointer hover:bg-green-100 transition-colors"
+                              onClick={() => parcel.parcelId && setLocation(`/parcel-analysis?parcelId=${parcel.parcelId}&tab=harvest`)}
+                            >
+                              <p className="text-gray-500 mb-0.5">1ra Cal.</p>
+                              <p className="font-bold text-green-700">{(parcel.firstQualityWeight / 1000).toFixed(1)}</p>
+                              <p className="text-green-600">{parcel.total > 0 ? ((parcel.firstQuality / parcel.total) * 100).toFixed(0) : 0}%</p>
+                            </div>
+                            <div
+                              className="bg-yellow-50 rounded-lg p-2 text-center cursor-pointer hover:bg-yellow-100 transition-colors"
+                              onClick={() => parcel.parcelId && setLocation(`/parcel-analysis?parcelId=${parcel.parcelId}&tab=harvest`)}
+                            >
+                              <p className="text-gray-500 mb-0.5">2da Cal.</p>
+                              <p className="font-bold text-yellow-700">{(parcel.secondQualityWeight / 1000).toFixed(1)}</p>
+                              <p className="text-yellow-600">{parcel.total > 0 ? ((parcel.secondQuality / parcel.total) * 100).toFixed(0) : 0}%</p>
+                            </div>
+                            <div
+                              className="bg-red-50 rounded-lg p-2 text-center cursor-pointer hover:bg-red-100 transition-colors"
+                              onClick={() => parcel.parcelId && setLocation(`/parcel-analysis?parcelId=${parcel.parcelId}&tab=harvest`)}
+                            >
+                              <p className="text-gray-500 mb-0.5">Desp.</p>
+                              <p className="font-bold text-red-700">{(parcel.wasteWeight / 1000).toFixed(1)}</p>
+                              <p className="text-red-600">{parcel.total > 0 ? ((parcel.waste / parcel.total) * 100).toFixed(0) : 0}%</p>
+                            </div>
                           </div>
+                          {(yieldPerHa !== null || yieldPerTree !== null) && (
+                            <div className="flex gap-2 pt-2 border-t border-green-100">
+                              {yieldPerHa !== null && (
+                                <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 font-bold text-xs px-2.5 py-1 rounded-full">
+                                  <Ruler className="w-3 h-3" /> {yieldPerHa.toFixed(1)} kg/ha
+                                </span>
+                              )}
+                              {yieldPerTree !== null && (
+                                <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 font-bold text-xs px-2.5 py-1 rounded-full">
+                                  <TreePine className="w-3 h-3" /> {yieldPerTree.toFixed(2)} kg/árbol
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
-                        <div className="grid grid-cols-3 gap-2 text-xs">
-                          <div className="bg-green-50 rounded p-2 text-center">
-                            <p className="text-gray-500 mb-0.5">1ra Calidad</p>
-                            <p className="font-bold text-green-700">{(parcel.firstQualityWeight / 1000).toFixed(1)} kg</p>
-                            <p className="text-green-600">{((parcel.firstQuality / parcel.total) * 100).toFixed(0)}%</p>
-                          </div>
-                          <div className="bg-yellow-50 rounded p-2 text-center">
-                            <p className="text-gray-500 mb-0.5">2da Calidad</p>
-                            <p className="font-bold text-yellow-700">{(parcel.secondQualityWeight / 1000).toFixed(1)} kg</p>
-                            <p className="text-yellow-600">{((parcel.secondQuality / parcel.total) * 100).toFixed(0)}%</p>
-                          </div>
-                          <div className="bg-red-50 rounded p-2 text-center">
-                            <p className="text-gray-500 mb-0.5">Desperdicio</p>
-                            <p className="font-bold text-red-700">{(parcel.wasteWeight / 1000).toFixed(1)} kg</p>
-                            <p className="text-red-600">{((parcel.waste / parcel.total) * 100).toFixed(0)}%</p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </>
               ) : (

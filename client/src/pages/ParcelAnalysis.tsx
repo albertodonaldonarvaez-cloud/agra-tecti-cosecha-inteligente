@@ -82,8 +82,14 @@ function formatProcessingTime(ms: number) {
 function ParcelAnalysisContent() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  const [selectedParcelId, setSelectedParcelId] = useState<number | null>(null);
-  const [activeTab, setActiveTab] = useState<"map" | "details" | "harvest">("map");
+
+  // Leer query params para navegación directa desde otras páginas
+  const urlParams = new URLSearchParams(window.location.search);
+  const initialParcelId = urlParams.get("parcelId") ? Number(urlParams.get("parcelId")) : null;
+  const initialTab = (urlParams.get("tab") as "map" | "details" | "harvest") || "map";
+
+  const [selectedParcelId, setSelectedParcelId] = useState<number | null>(initialParcelId);
+  const [activeTab, setActiveTab] = useState<"map" | "details" | "harvest">(initialTab);
 
   // Cargar parcelas (solo activas)
   const { data: allParcels, isLoading: parcelsLoading } = trpc.parcels.listActive.useQuery(undefined, {

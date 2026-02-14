@@ -7,7 +7,7 @@ import * as db from "./db";
 import * as dbExt from "./db_extended";
 import * as webodm from "./webodmService";
 import { getDb } from "./db";
-import { boxes, harvesters, parcels } from "../drizzle/schema";
+import { boxes, harvesters, parcels, parcelDetails } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
 
 export const appRouter = router({
@@ -1190,6 +1190,7 @@ export const appRouter = router({
             parcelMap.set(box.parcelCode, {
               parcelCode: box.parcelCode,
               parcelName: box.parcelName,
+              parcelId: null as number | null,
               total: 0,
               weight: 0,
               firstQuality: 0,
@@ -1198,6 +1199,8 @@ export const appRouter = router({
               firstQualityWeight: 0,
               secondQualityWeight: 0,
               wasteWeight: 0,
+              productiveHectares: null as number | null,
+              productiveTrees: null as number | null,
             });
           }
           const parcel = parcelMap.get(box.parcelCode);
@@ -1214,6 +1217,24 @@ export const appRouter = router({
             parcel.firstQualityWeight += box.weight;
           }
         });
+
+        // Enriquecer con datos de parcela (id, hectáreas, árboles)
+        const database = await db.getDb();
+        if (database) {
+          const allParcels = await database.select().from(parcels);
+          const allDetails = await database.select().from(parcelDetails);
+          for (const [code, stats] of parcelMap) {
+            const p = allParcels.find((pp: any) => pp.code === code);
+            if (p) {
+              stats.parcelId = p.id;
+              const det = allDetails.find((d: any) => d.parcelId === p.id);
+              if (det) {
+                stats.productiveHectares = det.productiveHectares ? parseFloat(det.productiveHectares) : null;
+                stats.productiveTrees = det.productiveTrees ?? null;
+              }
+            }
+          }
+        }
 
         // Estadísticas por cortadora
         const harvesterMap = new Map();
