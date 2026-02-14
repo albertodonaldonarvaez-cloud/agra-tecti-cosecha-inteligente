@@ -234,13 +234,13 @@ function ParcelAnalysisContent() {
 
             {/* Content */}
             {activeTab === "map" && (
-              <MapAndFlightsTab parcel={selectedParcel} mapping={selectedMapping} isAdmin={isAdmin} />
+              <MapAndFlightsTab key={`map-${selectedParcel?.id}`} parcel={selectedParcel} mapping={selectedMapping} isAdmin={isAdmin} />
             )}
             {activeTab === "details" && (
-              <ParcelDetailsTab parcel={selectedParcel} details={selectedDetails} isAdmin={isAdmin} />
+              <ParcelDetailsTab key={`details-${selectedParcel?.id}`} parcel={selectedParcel} details={selectedDetails} isAdmin={isAdmin} />
             )}
             {activeTab === "harvest" && (
-              <HarvestTab parcel={selectedParcel} />
+              <HarvestTab key={`harvest-${selectedParcel?.id}`} parcel={selectedParcel} />
             )}
           </>
         )}
@@ -476,20 +476,10 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     return task.uuid || String(task.id) || "";
   }, []);
 
-  // Resetear tarea seleccionada cuando cambia la parcela (mapping cambia)
-  useEffect(() => {
-    setSelectedTaskUuid(null);
-    setTileStatus("");
-    if (tileLayerRef.current) {
-      tileLayerRef.current.setVisible(false);
-      tileLayerRef.current.setSource(null as any);
-    }
-  }, [parcel?.id]);
-
   // Auto-seleccionar el último vuelo completado cuando llegan las tareas
+  // (al cambiar de parcela, el key={parcel.id} fuerza remount, así que selectedTaskUuid siempre empieza en null)
   useEffect(() => {
     if (!tasks || tasks.length === 0) return;
-    // Solo auto-seleccionar si no hay nada seleccionado
     if (selectedTaskUuid) return;
     const completed = tasks.filter((t: any) => t.status === 40);
     if (completed.length > 0) {
