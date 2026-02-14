@@ -130,6 +130,14 @@ async function startServer() {
     }).catch((err) => {
       console.error("Error al iniciar ODM AutoSync:", err);
     });
+
+    // Iniciar notificador de resumen diario de cosecha
+    // Envía resumen del día anterior a la hora configurada (NO al arrancar)
+    import("../harvestNotifier").then(({ startHarvestNotifier }) => {
+      startHarvestNotifier();
+    }).catch((err) => {
+      console.error("Error al iniciar HarvestNotifier:", err);
+    });
   });
 }
 

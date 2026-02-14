@@ -109,6 +109,42 @@ export const appRouter = router({
         const { sendTestMessage } = await import("./telegramBot");
         return await sendTestMessage(input.botToken, input.chatId);
       }),
+
+    // Configuración del resumen diario de cosecha
+    getHarvestConfig: adminProcedure.query(async () => {
+      const config = await db.getApiConfig();
+      if (!config) return { chatId: "", hour: 7, minute: 0, enabled: false };
+      return {
+        chatId: (config as any).telegramHarvestChatId || "",
+        hour: (config as any).telegramHarvestHour ?? 7,
+        minute: (config as any).telegramHarvestMinute ?? 0,
+        enabled: Boolean((config as any).telegramHarvestEnabled),
+      };
+    }),
+
+    saveHarvestConfig: adminProcedure
+      .input(z.object({
+        chatId: z.string(),
+        hour: z.number().min(0).max(23),
+        minute: z.number().min(0).max(59),
+        enabled: z.boolean(),
+      }))
+      .mutation(async ({ input }) => {
+        const { sql } = await import("drizzle-orm");
+        const database = await db.getDb();
+        if (!database) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB not available" });
+        await database.execute(
+          sql`UPDATE apiConfig SET telegramHarvestChatId = ${input.chatId}, telegramHarvestHour = ${input.hour}, telegramHarvestMinute = ${input.minute}, telegramHarvestEnabled = ${input.enabled ? 1 : 0}`
+        );
+        return { success: true };
+      }),
+
+    testHarvest: adminProcedure
+      .input(z.object({ botToken: z.string(), chatId: z.string() }))
+      .mutation(async ({ input }) => {
+        const { sendHarvestTestMessage } = await import("./harvestNotifier");
+        return await sendHarvestTestMessage(input.botToken, input.chatId);
+      }),
   }),
 
   boxes: router({

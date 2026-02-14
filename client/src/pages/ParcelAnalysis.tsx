@@ -476,6 +476,16 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     return task.uuid || String(task.id) || "";
   }, []);
 
+  // Resetear tarea seleccionada cuando cambia la parcela (mapping cambia)
+  useEffect(() => {
+    setSelectedTaskUuid(null);
+    setTileStatus("");
+    if (tileLayerRef.current) {
+      tileLayerRef.current.setVisible(false);
+      tileLayerRef.current.setSource(null as any);
+    }
+  }, [parcel?.id]);
+
   // Auto-seleccionar el último vuelo completado cuando llegan las tareas
   useEffect(() => {
     if (!tasks || tasks.length === 0) return;

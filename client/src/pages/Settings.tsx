@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save, Clock, Timer, CheckCircle, XCircle, Zap, Send, MessageCircle, Eye, EyeOff, Plane, Link2, Unlink } from "lucide-react";
+import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save, Clock, Timer, CheckCircle, XCircle, Zap, Send, MessageCircle, Eye, EyeOff, Plane, Link2, Unlink, Wheat } from "lucide-react";
 import LocationMapPicker from "@/components/LocationMapPicker";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -491,6 +491,9 @@ export default function Settings() {
 
           {/* Notificaciones Telegram */}
           <TelegramSection />
+
+          {/* Resumen de Cosecha por Telegram */}
+          <HarvestTelegramSection />
 
           {/* WebODM */}
           <WebODMSection />
@@ -1017,6 +1020,207 @@ function TelegramSection() {
   );
 }
 
+
+// ============ SECCIÓN RESUMEN COSECHA TELEGRAM ============
+function HarvestTelegramSection() {
+  const [chatId, setChatId] = useState("");
+  const [hour, setHour] = useState(7);
+  const [minute, setMinute] = useState(0);
+  const [enabled, setEnabled] = useState(false);
+
+  const { data: harvestConfig, refetch } = trpc.telegram.getHarvestConfig.useQuery(undefined, { retry: false });
+  const { data: telegramConfig } = trpc.telegram.getConfig.useQuery(undefined, { retry: false });
+
+  const saveConfig = trpc.telegram.saveHarvestConfig.useMutation({
+    onSuccess: () => {
+      toast.success("Configuración de resumen de cosecha guardada");
+      refetch();
+    },
+    onError: (error: any) => toast.error(error.message),
+  });
+
+  const testHarvest = trpc.telegram.testHarvest.useMutation({
+    onSuccess: (data: any) => {
+      if (data.success) {
+        toast.success("Mensaje de prueba enviado. Revisa tu chat de Telegram.");
+      } else {
+        toast.error(`Error: ${data.error}`);
+      }
+    },
+    onError: (error: any) => toast.error(error.message),
+  });
+
+  useEffect(() => {
+    if (harvestConfig) {
+      setChatId(harvestConfig.chatId || "");
+      setHour(harvestConfig.hour ?? 7);
+      setMinute(harvestConfig.minute ?? 0);
+      setEnabled(harvestConfig.enabled ?? false);
+    }
+  }, [harvestConfig]);
+
+  const handleSave = () => {
+    if (!chatId.trim()) {
+      toast.error("Por favor ingresa el Chat ID");
+      return;
+    }
+    saveConfig.mutate({ chatId: chatId.trim(), hour, minute, enabled });
+  };
+
+  const handleTest = () => {
+    if (!telegramConfig?.botToken) {
+      toast.error("Primero configura el Token del Bot en la sección de Telegram arriba");
+      return;
+    }
+    if (!chatId.trim()) {
+      toast.error("Por favor ingresa el Chat ID antes de probar");
+      return;
+    }
+    testHarvest.mutate({ botToken: telegramConfig.botToken, chatId: chatId.trim() });
+  };
+
+  const botConfigured = !!telegramConfig?.botToken;
+
+  return (
+    <GlassCard className="p-4 md:p-6 border-2 border-amber-200 bg-amber-50/30">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Wheat className="h-6 w-6 text-amber-600" />
+          <h2 className="text-lg md:text-2xl font-semibold text-amber-900">Resumen Diario de Cosecha</h2>
+        </div>
+        {enabled && chatId && (
+          <span className="flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
+            <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+            Activo
+          </span>
+        )}
+      </div>
+
+      <p className="mb-4 text-sm text-amber-700">
+        Envía automáticamente un resumen de la cosecha del día anterior a un chat de Telegram independiente.
+        Incluye total de cajas, kilos por calidad y desglose por parcela. <strong>No se envía al arrancar el servidor.</strong>
+      </p>
+
+      {!botConfigured && (
+        <div className="mb-4 rounded-lg bg-amber-100/80 p-3 text-sm text-amber-800 flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+          Primero configura el Token del Bot en la sección "Notificaciones Telegram" de arriba. Este resumen usa el mismo bot.
+        </div>
+      )}
+
+      <div className="space-y-4">
+        {/* Habilitado */}
+        <div className="flex items-center gap-3">
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-amber-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+          </label>
+          <span className="text-sm font-medium text-amber-800">
+            {enabled ? "Envío automático activado" : "Envío automático desactivado"}
+          </span>
+        </div>
+
+        {/* Chat ID */}
+        <div>
+          <Label htmlFor="harvestChatId" className="text-amber-800">Chat ID para Resumen de Cosecha</Label>
+          <Input
+            id="harvestChatId"
+            value={chatId}
+            onChange={(e) => setChatId(e.target.value)}
+            placeholder="-1001234567890"
+          />
+          <p className="mt-1 text-xs text-amber-600">
+            Puede ser diferente al Chat ID de sincronización. Ideal para un grupo de usuarios finales.
+          </p>
+        </div>
+
+        {/* Hora y Minuto */}
+        <div>
+          <Label className="text-amber-800">Hora de envío (hora de México)</Label>
+          <div className="flex items-center gap-2 mt-1">
+            <div className="flex items-center gap-1">
+              <Clock className="h-4 w-4 text-amber-500" />
+              <select
+                value={hour}
+                onChange={(e) => setHour(Number(e.target.value))}
+                className="px-3 py-2 border border-amber-200 rounded-lg bg-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+              >
+                {Array.from({ length: 24 }, (_, i) => (
+                  <option key={i} value={i}>{String(i).padStart(2, '0')}</option>
+                ))}
+              </select>
+              <span className="text-amber-700 font-bold">:</span>
+              <select
+                value={minute}
+                onChange={(e) => setMinute(Number(e.target.value))}
+                className="px-3 py-2 border border-amber-200 rounded-lg bg-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+              >
+                {Array.from({ length: 60 }, (_, i) => (
+                  <option key={i} value={i}>{String(i).padStart(2, '0')}</option>
+                ))}
+              </select>
+            </div>
+            <span className="text-xs text-amber-600">hrs</span>
+          </div>
+          <p className="mt-1 text-xs text-amber-600">
+            El resumen del día anterior se enviará a esta hora todos los días.
+          </p>
+        </div>
+
+        {/* Botones */}
+        <div className="flex gap-3">
+          <Button
+            onClick={handleSave}
+            disabled={saveConfig.isPending}
+            className="flex-1 bg-amber-600 hover:bg-amber-700"
+          >
+            <Save className="mr-2 h-4 w-4" />
+            {saveConfig.isPending ? "Guardando..." : "Guardar"}
+          </Button>
+          <Button
+            onClick={handleTest}
+            disabled={testHarvest.isPending || !chatId.trim() || !botConfigured}
+            variant="outline"
+            className="flex-1 border-amber-300 text-amber-700 hover:bg-amber-100"
+          >
+            <Send className="mr-2 h-4 w-4" />
+            {testHarvest.isPending ? "Enviando..." : "Probar Envío"}
+          </Button>
+        </div>
+
+        {/* Info del mensaje */}
+        <div className="rounded-lg bg-white/60 p-4 text-sm">
+          <p className="font-semibold text-amber-900 mb-2">El resumen incluye:</p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="flex items-center gap-2 text-gray-700">
+              <span>📦</span> Total de cajas del día
+            </div>
+            <div className="flex items-center gap-2 text-gray-700">
+              <span>⚖️</span> Kilos totales cosechados
+            </div>
+            <div className="flex items-center gap-2 text-gray-700">
+              <span>🟢</span> 1ra Calidad (kg y %)
+            </div>
+            <div className="flex items-center gap-2 text-gray-700">
+              <span>🟡</span> 2da Calidad (kg y %)
+            </div>
+            <div className="flex items-center gap-2 text-gray-700">
+              <span>🔴</span> Desperdicio (kg y %)
+            </div>
+            <div className="flex items-center gap-2 text-gray-700">
+              <span>🗺️</span> Desglose por parcela
+            </div>
+          </div>
+        </div>
+      </div>
+    </GlassCard>
+  );
+}
 
 // ============ SECCIÓN WebODM ============
 function WebODMSection() {
