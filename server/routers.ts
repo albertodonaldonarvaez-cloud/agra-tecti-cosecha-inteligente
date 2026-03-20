@@ -7,7 +7,7 @@ import * as db from "./db";
 import * as dbExt from "./db_extended";
 import * as webodm from "./webodmService";
 import { getDb } from "./db";
-import { boxes, harvesters, parcels, parcelDetails, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos } from "../drizzle/schema";
+import { boxes, harvesters, parcels, parcelDetails, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments } from "../drizzle/schema";
 import { eq, desc, and, gte, lte, inArray, sql } from "drizzle-orm";
 
 export const appRouter = router({
@@ -1848,6 +1848,267 @@ export const appRouter = router({
         total: totalResult?.count || 0,
         thisMonth: thisMonthResult?.count || 0,
         byType: byType.reduce((acc, r) => { acc[r.type] = r.count; return acc; }, {} as Record<string, number>),
+      };
+    }),
+  }),
+
+  // ===== ALMACENES =====
+  warehouse: router({
+    // --- PRODUCTOS ---
+    listProducts: protectedProcedure
+      .input(z.object({ category: z.string().optional(), search: z.string().optional(), lowStock: z.boolean().optional() }).optional())
+      .query(async ({ input }) => {
+        const drizzle = getDb();
+        let query = drizzle.select().from(warehouseProducts).orderBy(desc(warehouseProducts.updatedAt));
+        const results = await query;
+        let filtered = results;
+        if (input?.category) filtered = filtered.filter(p => p.category === input.category);
+        if (input?.search) { const s = input.search.toLowerCase(); filtered = filtered.filter(p => p.name.toLowerCase().includes(s) || (p.brand || '').toLowerCase().includes(s)); }
+        if (input?.lowStock) filtered = filtered.filter(p => p.currentStock !== null && p.minStock !== null && Number(p.currentStock) <= Number(p.minStock));
+        return filtered;
+      }),
+
+    getProduct: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        const drizzle = getDb();
+        const [product] = await drizzle.select().from(warehouseProducts).where(eq(warehouseProducts.id, input.id));
+        if (!product) throw new TRPCError({ code: 'NOT_FOUND', message: 'Producto no encontrado' });
+        const movements = await drizzle.select().from(warehouseProductMovements).where(eq(warehouseProductMovements.productId, input.id)).orderBy(desc(warehouseProductMovements.createdAt)).limit(50);
+        return { ...product, movements };
+      }),
+
+    createProduct: protectedProcedure
+      .input(z.object({
+        name: z.string(), category: z.string(), brand: z.string().optional(), activeIngredient: z.string().optional(),
+        concentration: z.string().optional(), presentation: z.string().optional(),
+        unit: z.string(), currentStock: z.number().optional(), minimumStock: z.number().optional(),
+        costPerUnit: z.number().optional(), supplier: z.string().optional(), supplierContact: z.string().optional(),
+        lotNumber: z.string().optional(), photoUrl: z.string().optional(),
+        storageLocation: z.string().optional(), expirationDate: z.string().optional(),
+        safetyDataSheet: z.string().optional(), description: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const drizzle = getDb();
+        const result = await drizzle.insert(warehouseProducts).values({
+          name: input.name, category: input.category as any, brand: input.brand || null,
+          activeIngredient: input.activeIngredient || null, concentration: input.concentration || null,
+          presentation: input.presentation || null, unit: input.unit as any,
+          currentStock: String(input.currentStock ?? 0), minimumStock: String(input.minimumStock ?? 0),
+          costPerUnit: input.costPerUnit ? String(input.costPerUnit) : null,
+          supplier: input.supplier || null, supplierContact: input.supplierContact || null,
+          lotNumber: input.lotNumber || null, photoUrl: input.photoUrl || null,
+          storageLocation: input.storageLocation || null, description: input.description || null,
+          expirationDate: input.expirationDate || null,
+          safetyDataSheet: input.safetyDataSheet || null, isActive: true,
+          createdByUserId: 0,
+        });
+        return { id: result.insertId };
+      }),
+
+    updateProduct: protectedProcedure
+      .input(z.object({
+        id: z.number(), name: z.string().optional(), category: z.string().optional(),
+        brand: z.string().optional(), activeIngredient: z.string().optional(),
+        concentration: z.string().optional(), presentation: z.string().optional(),
+        unit: z.string().optional(), minimumStock: z.number().optional(),
+        costPerUnit: z.number().optional(), supplier: z.string().optional(),
+        supplierContact: z.string().optional(), lotNumber: z.string().optional(),
+        photoUrl: z.string().optional(), description: z.string().optional(),
+        storageLocation: z.string().optional(), expirationDate: z.string().optional(),
+        safetyDataSheet: z.string().optional(), isActive: z.boolean().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const drizzle = getDb();
+        const { id, ...data } = input;
+        const updateData: any = {};
+        if (data.name !== undefined) updateData.name = data.name;
+        if (data.category !== undefined) updateData.category = data.category;
+        if (data.brand !== undefined) updateData.brand = data.brand || null;
+        if (data.activeIngredient !== undefined) updateData.activeIngredient = data.activeIngredient || null;
+        if (data.unit !== undefined) updateData.unit = data.unit;
+        if (data.minimumStock !== undefined) updateData.minimumStock = String(data.minimumStock);
+        if (data.costPerUnit !== undefined) updateData.costPerUnit = data.costPerUnit ? String(data.costPerUnit) : null;
+        if (data.supplier !== undefined) updateData.supplier = data.supplier || null;
+        if (data.supplierContact !== undefined) updateData.supplierContact = data.supplierContact || null;
+        if (data.lotNumber !== undefined) updateData.lotNumber = data.lotNumber || null;
+        if (data.photoUrl !== undefined) updateData.photoUrl = data.photoUrl || null;
+        if (data.description !== undefined) updateData.description = data.description || null;
+        if (data.storageLocation !== undefined) updateData.storageLocation = data.storageLocation || null;
+        if (data.expirationDate !== undefined) updateData.expirationDate = data.expirationDate || null;
+        if (data.safetyDataSheet !== undefined) updateData.safetyDataSheet = data.safetyDataSheet || null;
+        if (data.isActive !== undefined) updateData.isActive = data.isActive;
+        updateData.updatedAt = new Date();
+        await drizzle.update(warehouseProducts).set(updateData).where(eq(warehouseProducts.id, id));
+        return { success: true };
+      }),
+
+    deleteProduct: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const drizzle = getDb();
+        await drizzle.delete(warehouseProductMovements).where(eq(warehouseProductMovements.productId, input.id));
+        await drizzle.delete(warehouseProducts).where(eq(warehouseProducts.id, input.id));
+        return { success: true };
+      }),
+
+    // Movimiento de inventario (entrada/salida/ajuste)
+    addMovement: protectedProcedure
+      .input(z.object({
+        productId: z.number(), movementType: z.string(), quantity: z.number(),
+        reason: z.string().optional(), relatedActivityId: z.number().optional(),
+
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const drizzle = getDb();
+        const userId = (ctx as any).user?.id || 0;
+        // Obtener stock actual
+        const [product] = await drizzle.select().from(warehouseProducts).where(eq(warehouseProducts.id, input.productId));
+        if (!product) throw new TRPCError({ code: 'NOT_FOUND', message: 'Producto no encontrado' });
+        const currentStock = Number(product.currentStock) || 0;
+        let newStock = currentStock;
+        if (input.movementType === 'entrada') newStock = currentStock + input.quantity;
+        else if (input.movementType === 'salida') newStock = Math.max(0, currentStock - input.quantity);
+        else if (input.movementType === 'ajuste') newStock = input.quantity;
+        else if (input.movementType === 'devolucion') newStock = currentStock + input.quantity;
+        // Registrar movimiento
+        await drizzle.insert(warehouseProductMovements).values({
+          productId: input.productId, movementType: input.movementType as any,
+          quantity: String(input.quantity), previousStock: String(currentStock), newStock: String(newStock),
+          reason: input.reason || null, relatedActivityId: input.relatedActivityId || null,
+          performedByUserId: userId,
+        });
+        // Actualizar stock
+        await drizzle.update(warehouseProducts).set({ currentStock: String(newStock), updatedAt: new Date() }).where(eq(warehouseProducts.id, input.productId));
+        return { success: true, newStock };
+      }),
+
+    // --- HERRAMIENTAS ---
+    listTools: protectedProcedure
+      .input(z.object({ category: z.string().optional(), search: z.string().optional(), status: z.string().optional() }).optional())
+      .query(async ({ input }) => {
+        const drizzle = getDb();
+        let results = await drizzle.select().from(warehouseTools).orderBy(desc(warehouseTools.updatedAt));
+        if (input?.category) results = results.filter(t => t.category === input.category);
+        if (input?.search) { const s = input.search.toLowerCase(); results = results.filter(t => t.name.toLowerCase().includes(s) || (t.brand || '').toLowerCase().includes(s)); }
+        if (input?.status) results = results.filter(t => t.status === input.status);
+        return results;
+      }),
+
+    createTool: protectedProcedure
+      .input(z.object({
+        name: z.string(), category: z.string(), brand: z.string().optional(), model: z.string().optional(),
+        serialNumber: z.string().optional(), description: z.string().optional(),
+        status: z.string().optional(), conditionState: z.string().optional(),
+        acquisitionDate: z.string().optional(), acquisitionCost: z.number().optional(),
+        currentValue: z.number().optional(), storageLocation: z.string().optional(),
+        photoUrl: z.string().optional(), quantity: z.number().optional(),
+        lastMaintenanceDate: z.string().optional(), nextMaintenanceDate: z.string().optional(),
+        maintenanceNotes: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const drizzle = getDb();
+        const result = await drizzle.insert(warehouseTools).values({
+          name: input.name, category: input.category as any, brand: input.brand || null,
+          model: input.model || null, serialNumber: input.serialNumber || null,
+          description: input.description || null,
+          status: (input.status as any) || 'disponible', conditionState: (input.conditionState as any) || 'bueno',
+          acquisitionDate: input.acquisitionDate || null,
+          acquisitionCost: input.acquisitionCost ? String(input.acquisitionCost) : null,
+          currentValue: input.currentValue ? String(input.currentValue) : null,
+          storageLocation: input.storageLocation || null, photoUrl: input.photoUrl || null,
+          quantity: input.quantity ?? 1,
+          lastMaintenanceDate: input.lastMaintenanceDate || null,
+          nextMaintenanceDate: input.nextMaintenanceDate || null,
+          maintenanceNotes: input.maintenanceNotes || null, isActive: true,
+          createdByUserId: 0,
+        });
+        return { id: result.insertId };
+      }),
+
+    updateTool: protectedProcedure
+      .input(z.object({
+        id: z.number(), name: z.string().optional(), category: z.string().optional(),
+        brand: z.string().optional(), model: z.string().optional(), serialNumber: z.string().optional(),
+        description: z.string().optional(), status: z.string().optional(), conditionState: z.string().optional(),
+        storageLocation: z.string().optional(), photoUrl: z.string().optional(),
+        quantity: z.number().optional(), maintenanceNotes: z.string().optional(),
+        lastMaintenanceDate: z.string().optional(), nextMaintenanceDate: z.string().optional(),
+        isActive: z.boolean().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const drizzle = getDb();
+        const { id, ...data } = input;
+        const updateData: any = { updatedAt: new Date() };
+        Object.entries(data).forEach(([key, val]) => {
+          if (val !== undefined) updateData[key] = val === '' ? null : val;
+        });
+        await drizzle.update(warehouseTools).set(updateData).where(eq(warehouseTools.id, id));
+        return { success: true };
+      }),
+
+    deleteTool: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const drizzle = getDb();
+        await drizzle.delete(warehouseToolAssignments).where(eq(warehouseToolAssignments.toolId, input.id));
+        await drizzle.delete(warehouseTools).where(eq(warehouseTools.id, input.id));
+        return { success: true };
+      }),
+
+    // Asignar herramienta a actividad
+    assignTool: protectedProcedure
+      .input(z.object({
+        toolId: z.number(), relatedActivityId: z.number().optional(),
+        assignedTo: z.string().optional(), notes: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const drizzle = getDb();
+        const userId = (ctx as any).user?.id || 0;
+        await drizzle.insert(warehouseToolAssignments).values({
+          toolId: input.toolId, assignmentType: 'asignacion',
+          relatedActivityId: input.relatedActivityId || null,
+          assignedTo: input.assignedTo || null, performedByUserId: userId,
+          notes: input.notes || null,
+        });
+        await drizzle.update(warehouseTools).set({ status: 'en_uso', assignedTo: input.assignedTo || null, updatedAt: new Date() }).where(eq(warehouseTools.id, input.toolId));
+        return { success: true };
+      }),
+
+    returnTool: protectedProcedure
+      .input(z.object({ toolId: z.number(), conditionState: z.string().optional(), notes: z.string().optional() }))
+      .mutation(async ({ input, ctx }) => {
+        const drizzle = getDb();
+        const userId = (ctx as any).user?.id || 0;
+        // Registrar devolución
+        await drizzle.insert(warehouseToolAssignments).values({
+          toolId: input.toolId, assignmentType: 'devolucion',
+          performedByUserId: userId, notes: input.notes || null,
+        });
+        const updateData: any = { status: 'disponible', assignedTo: null, updatedAt: new Date() };
+        if (input.conditionState) updateData.conditionState = input.conditionState;
+        await drizzle.update(warehouseTools).set(updateData).where(eq(warehouseTools.id, input.toolId));
+        return { success: true };
+      }),
+
+    // Resumen de inventario
+    summary: protectedProcedure.query(async () => {
+      const drizzle = getDb();
+      const products = await drizzle.select().from(warehouseProducts).where(eq(warehouseProducts.isActive, true));
+      const tools = await drizzle.select().from(warehouseTools).where(eq(warehouseTools.isActive, true));
+      const lowStockProducts = products.filter(p => p.currentStock !== null && p.minimumStock !== null && Number(p.currentStock) <= Number(p.minimumStock));
+      const expiringProducts = products.filter(p => {
+        if (!p.expirationDate) return false;
+        const exp = new Date(p.expirationDate);
+        const in30 = new Date(); in30.setDate(in30.getDate() + 30);
+        return exp <= in30;
+      });
+      return {
+        totalProducts: products.length, totalTools: tools.length,
+        lowStockCount: lowStockProducts.length, lowStockProducts: lowStockProducts.map(p => ({ id: p.id, name: p.name, currentStock: p.currentStock, minimumStock: p.minimumStock, unit: p.unit })),
+        expiringCount: expiringProducts.length, expiringProducts: expiringProducts.map(p => ({ id: p.id, name: p.name, expirationDate: p.expirationDate })),
+        toolsByStatus: { disponible: tools.filter(t => t.status === 'disponible').length, en_uso: tools.filter(t => t.status === 'en_uso').length, mantenimiento: tools.filter(t => t.status === 'mantenimiento').length, dañado: tools.filter(t => t.status === 'dañado').length, baja: tools.filter(t => t.status === 'baja').length },
+        totalInventoryValue: products.reduce((sum, p) => sum + (Number(p.costPerUnit) || 0) * (Number(p.currentStock) || 0), 0),
       };
     }),
   }),

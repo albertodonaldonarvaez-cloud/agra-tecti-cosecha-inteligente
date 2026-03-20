@@ -442,12 +442,18 @@ function AnalyticsContent() {
                           {(yieldPerHa !== null || yieldPerTree !== null) && (
                             <div className="flex gap-2 pt-2 border-t border-green-100">
                               {yieldPerHa !== null && (
-                                <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 font-bold text-xs px-2.5 py-1 rounded-full">
+                                <span
+                                  className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 font-bold text-xs px-2.5 py-1 rounded-full cursor-pointer hover:bg-blue-100 hover:scale-105 transition-all"
+                                  onClick={() => parcel.parcelId && setLocation(`/parcel-analysis?parcelId=${parcel.parcelId}&tab=harvest`)}
+                                >
                                   <Ruler className="w-3 h-3" /> {yieldPerHa.toFixed(1)} kg/ha
                                 </span>
                               )}
                               {yieldPerTree !== null && (
-                                <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 font-bold text-xs px-2.5 py-1 rounded-full">
+                                <span
+                                  className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 font-bold text-xs px-2.5 py-1 rounded-full cursor-pointer hover:bg-amber-100 hover:scale-105 transition-all"
+                                  onClick={() => parcel.parcelId && setLocation(`/parcel-analysis?parcelId=${parcel.parcelId}&tab=harvest`)}
+                                >
                                   <TreePine className="w-3 h-3" /> {yieldPerTree.toFixed(2)} kg/árbol
                                 </span>
                               )}

@@ -360,3 +360,110 @@ export const fieldActivityPhotos = mysqlTable("fieldActivityPhotos", {
 });
 
 export type FieldActivityPhoto = typeof fieldActivityPhotos.$inferSelect;
+
+// ===== ALMACÉN =====
+
+// Catálogo de productos del almacén
+export const warehouseProducts = mysqlTable("warehouseProducts", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  brand: varchar("brand", { length: 255 }),
+  category: mysqlEnum("category", [
+    "fertilizante_granular", "fertilizante_liquido", "fertilizante_foliar", "fertilizante_organico",
+    "herbicida_preemergente", "herbicida_postemergente", "herbicida_selectivo", "herbicida_no_selectivo",
+    "insecticida", "fungicida", "acaricida", "nematicida",
+    "regulador_crecimiento", "bioestimulante", "enmienda_suelo", "nutriente_foliar",
+    "semilla", "sustrato", "agua", "otro"
+  ]).default("otro").notNull(),
+  description: text("description"),
+  activeIngredient: varchar("activeIngredient", { length: 255 }),
+  concentration: varchar("concentration", { length: 128 }),
+  presentation: varchar("presentation", { length: 128 }),
+  unit: mysqlEnum("unit", ["kg", "g", "lt", "ml", "ton", "bulto", "saco", "unidad", "otro"]).default("kg").notNull(),
+  currentStock: decimal("currentStock", { precision: 12, scale: 2 }).default("0").notNull(),
+  minimumStock: decimal("minimumStock", { precision: 12, scale: 2 }).default("0"),
+  costPerUnit: decimal("costPerUnit", { precision: 12, scale: 2 }),
+  supplier: varchar("supplier", { length: 255 }),
+  supplierContact: varchar("supplierContact", { length: 255 }),
+  lotNumber: varchar("lotNumber", { length: 128 }),
+  expirationDate: date("expirationDate"),
+  storageLocation: varchar("storageLocation", { length: 255 }),
+  photoUrl: text("photoUrl"),
+  safetyDataSheet: text("safetyDataSheet"),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type WarehouseProduct = typeof warehouseProducts.$inferSelect;
+export type InsertWarehouseProduct = typeof warehouseProducts.$inferInsert;
+
+// Movimientos de inventario de productos
+export const warehouseProductMovements = mysqlTable("warehouseProductMovements", {
+  id: int("id").autoincrement().primaryKey(),
+  productId: int("productId").notNull(),
+  movementType: mysqlEnum("movementType", ["entrada", "salida", "ajuste", "devolucion"]).notNull(),
+  quantity: decimal("quantity", { precision: 12, scale: 2 }).notNull(),
+  previousStock: decimal("previousStock", { precision: 12, scale: 2 }).notNull(),
+  newStock: decimal("newStock", { precision: 12, scale: 2 }).notNull(),
+  reason: varchar("reason", { length: 512 }),
+  relatedActivityId: int("relatedActivityId"),
+  invoiceNumber: varchar("invoiceNumber", { length: 128 }),
+  supplier: varchar("supplier", { length: 255 }),
+  costPerUnit: decimal("costPerUnit", { precision: 12, scale: 2 }),
+  totalCost: decimal("totalCost", { precision: 12, scale: 2 }),
+  performedByUserId: int("performedByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type WarehouseProductMovement = typeof warehouseProductMovements.$inferSelect;
+
+// Catálogo de herramientas/equipos
+export const warehouseTools = mysqlTable("warehouseTools", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  category: mysqlEnum("category", [
+    "tractor", "aspersora_manual", "aspersora_motorizada", "bomba_riego",
+    "sistema_goteo", "motosierra", "tijera_poda", "machete",
+    "azadon", "rastrillo", "desbrozadora", "fumigadora", "drone",
+    "vehiculo", "medicion", "proteccion", "transporte", "otro"
+  ]).default("otro").notNull(),
+  brand: varchar("brand", { length: 255 }),
+  model: varchar("model", { length: 255 }),
+  serialNumber: varchar("serialNumber", { length: 255 }),
+  description: text("description"),
+  status: mysqlEnum("status", ["disponible", "en_uso", "mantenimiento", "dañado", "baja"]).default("disponible").notNull(),
+  conditionState: mysqlEnum("conditionState", ["nuevo", "bueno", "regular", "malo"]).default("bueno").notNull(),
+  acquisitionDate: date("acquisitionDate"),
+  acquisitionCost: decimal("acquisitionCost", { precision: 12, scale: 2 }),
+  currentValue: decimal("currentValue", { precision: 12, scale: 2 }),
+  storageLocation: varchar("storageLocation", { length: 255 }),
+  assignedTo: varchar("assignedTo", { length: 255 }),
+  lastMaintenanceDate: date("lastMaintenanceDate"),
+  nextMaintenanceDate: date("nextMaintenanceDate"),
+  maintenanceNotes: text("maintenanceNotes"),
+  photoUrl: text("photoUrl"),
+  quantity: int("quantity").default(1).notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type WarehouseTool = typeof warehouseTools.$inferSelect;
+export type InsertWarehouseTool = typeof warehouseTools.$inferInsert;
+
+// Historial de uso/asignación de herramientas
+export const warehouseToolAssignments = mysqlTable("warehouseToolAssignments", {
+  id: int("id").autoincrement().primaryKey(),
+  toolId: int("toolId").notNull(),
+  assignmentType: mysqlEnum("assignmentType", ["asignacion", "devolucion", "mantenimiento", "baja"]).notNull(),
+  assignedTo: varchar("assignedTo", { length: 255 }),
+  relatedActivityId: int("relatedActivityId"),
+  notes: text("notes"),
+  performedByUserId: int("performedByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type WarehouseToolAssignment = typeof warehouseToolAssignments.$inferSelect;

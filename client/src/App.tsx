@@ -29,6 +29,7 @@ const Profile = lazy(() => import("./pages/Profile"));
 const ParcelAnalysis = lazy(() => import("./pages/ParcelAnalysis"));
 const CropsVarieties = lazy(() => import("./pages/CropsVarieties"));
 const FieldNotebook = lazy(() => import("./pages/FieldNotebook"));
+const Warehouse = lazy(() => import("./pages/Warehouse"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 // Componente de carga para Suspense
@@ -74,6 +75,7 @@ function Router() {
           <Route path="/parcel-analysis" component={ParcelAnalysis} />
           <Route path="/crops" component={CropsVarieties} />
           <Route path="/field-notebook" component={FieldNotebook} />
+          <Route path="/warehouse" component={Warehouse} />
           <Route path="/profile" component={Profile} />
           <Route path="/users" component={Users} />
           <Route path="/settings" component={Settings} />

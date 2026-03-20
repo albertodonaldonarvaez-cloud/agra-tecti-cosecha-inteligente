@@ -25,6 +25,7 @@ import {
   Leaf,
   Sprout,
   BookOpen,
+  Warehouse as WarehouseIcon,
   type LucideIcon
 } from "lucide-react";
 
@@ -186,6 +187,18 @@ export const PAGES_CONFIG: PageConfig[] = [
     adminOnly: false,
     defaultValue: true,
     order: 11,
+    showInNav: true,
+  },
+  {
+    permissionKey: "canViewWarehouse",
+    path: "/warehouse",
+    icon: WarehouseIcon,
+    label: "Almacén",
+    fullName: "Almacenes",
+    description: "Gestión de inventario de productos y herramientas",
+    adminOnly: false,
+    defaultValue: true,
+    order: 12,
     showInNav: true,
   },
   {
