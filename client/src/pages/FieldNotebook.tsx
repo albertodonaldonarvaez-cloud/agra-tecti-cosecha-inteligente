@@ -1,8 +1,8 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { trpc } from "../lib/trpc";
-import { useAuth } from "../_core/hooks/useAuth";
-import { ProtectedPage } from "../_core/components/ProtectedPage";
-import GlassCard from "../components/GlassCard";
+import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { ProtectedPage } from "@/components/ProtectedPage";
+import { GlassCard } from "@/components/GlassCard";
 import { toast } from "sonner";
 import {
   BookOpen, Plus, Search, Filter, Calendar, User, Clock, MapPin, Package, Wrench,

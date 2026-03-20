@@ -1,12 +1,10 @@
 import { useState, useMemo, useCallback } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useTRPC } from "../_core/trpc";
-import { GlassCard } from "../components/GlassCard";
+import { trpc } from "@/lib/trpc";
+import { GlassCard } from "@/components/GlassCard";
 import {
-  Package, Wrench, Plus, Search, Filter, Edit2, Trash2, X, Save,
-  AlertTriangle, ArrowDownCircle, ArrowUpCircle, Camera, ChevronDown, ChevronUp,
-  Box, Droplets, Bug, Leaf, FlaskConical, Warehouse as WarehouseIcon,
-  TrendingDown, TrendingUp, History, ImageIcon, RefreshCw
+  Package, Wrench, Plus, Search, Edit2, Trash2, X, Save,
+  AlertTriangle, ArrowDownCircle, ArrowUpCircle, ChevronDown, ChevronUp,
+  Box, TrendingUp, History, RefreshCw, Warehouse as WarehouseIcon
 } from "lucide-react";
 
 // ===== CONSTANTES =====
@@ -84,7 +82,6 @@ export default function Warehouse() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-3">
@@ -95,7 +92,6 @@ export default function Warehouse() {
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="flex gap-2">
         {tabs.map((tab) => (
           <button
@@ -113,7 +109,6 @@ export default function Warehouse() {
         ))}
       </div>
 
-      {/* Content */}
       {activeTab === "products" && <ProductsTab />}
       {activeTab === "tools" && <ToolsTab />}
     </div>
@@ -123,8 +118,6 @@ export default function Warehouse() {
 // ===== PESTAÑA DE PRODUCTOS =====
 
 function ProductsTab() {
-  const trpc = useTRPC();
-  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [showLowStock, setShowLowStock] = useState(false);
@@ -133,26 +126,26 @@ function ProductsTab() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [showMovementForm, setShowMovementForm] = useState<number | null>(null);
 
-  const { data: products = [], isLoading } = useQuery(trpc.warehouse.products.list.queryOptions());
+  const utils = trpc.useUtils();
+  const { data: products = [], isLoading } = trpc.warehouse.listProducts.useQuery();
 
-  const createMut = useMutation(trpc.warehouse.products.create.mutationOptions({
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: trpc.warehouse.products.list.queryKey() }); setShowForm(false); resetForm(); },
-  }));
-  const updateMut = useMutation(trpc.warehouse.products.update.mutationOptions({
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: trpc.warehouse.products.list.queryKey() }); setEditingId(null); resetForm(); },
-  }));
-  const deleteMut = useMutation(trpc.warehouse.products.delete.mutationOptions({
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: trpc.warehouse.products.list.queryKey() }); },
-  }));
-  const addMovementMut = useMutation(trpc.warehouse.products.addMovement.mutationOptions({
+  const createMut = trpc.warehouse.createProduct.useMutation({
+    onSuccess: () => { utils.warehouse.listProducts.invalidate(); setShowForm(false); resetForm(); },
+  });
+  const updateMut = trpc.warehouse.updateProduct.useMutation({
+    onSuccess: () => { utils.warehouse.listProducts.invalidate(); setEditingId(null); resetForm(); },
+  });
+  const deleteMut = trpc.warehouse.deleteProduct.useMutation({
+    onSuccess: () => { utils.warehouse.listProducts.invalidate(); },
+  });
+  const addMovementMut = trpc.warehouse.addMovement.useMutation({
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: trpc.warehouse.products.list.queryKey() });
+      utils.warehouse.listProducts.invalidate();
       setShowMovementForm(null);
-      setMovementForm({ type: "entrada", quantity: "", reason: "", invoiceNumber: "", supplier: "", costPerUnit: "" });
+      setMovementForm({ type: "entrada", quantity: "", reason: "" });
     },
-  }));
+  });
 
-  // Form state
   const [form, setForm] = useState({
     name: "", brand: "", category: "otro", description: "", activeIngredient: "",
     concentration: "", presentation: "", unit: "kg", currentStock: "0", minimumStock: "0",
@@ -161,7 +154,7 @@ function ProductsTab() {
   });
 
   const [movementForm, setMovementForm] = useState({
-    type: "entrada", quantity: "", reason: "", invoiceNumber: "", supplier: "", costPerUnit: "",
+    type: "entrada", quantity: "", reason: "",
   });
 
   const resetForm = useCallback(() => {
@@ -174,7 +167,7 @@ function ProductsTab() {
   }, []);
 
   const filtered = useMemo(() => {
-    let list = products.filter((p: any) => p.isActive !== false);
+    let list = (products as any[]).filter((p: any) => p.isActive !== false);
     if (search) {
       const s = search.toLowerCase();
       list = list.filter((p: any) => p.name?.toLowerCase().includes(s) || p.brand?.toLowerCase().includes(s) || p.activeIngredient?.toLowerCase().includes(s));
@@ -185,27 +178,38 @@ function ProductsTab() {
   }, [products, search, categoryFilter, showLowStock]);
 
   const stats = useMemo(() => {
-    const active = products.filter((p: any) => p.isActive !== false);
+    const active = (products as any[]).filter((p: any) => p.isActive !== false);
     const lowStock = active.filter((p: any) => Number(p.currentStock) <= Number(p.minimumStock || 0) && Number(p.minimumStock || 0) > 0);
     const totalValue = active.reduce((sum: number, p: any) => sum + (Number(p.currentStock) * Number(p.costPerUnit || 0)), 0);
     return { total: active.length, lowStock: lowStock.length, totalValue };
   }, [products]);
 
   const handleSave = () => {
-    const data = {
-      name: form.name, brand: form.brand || undefined, category: form.category,
-      description: form.description || undefined, activeIngredient: form.activeIngredient || undefined,
-      concentration: form.concentration || undefined, presentation: form.presentation || undefined,
-      unit: form.unit, currentStock: form.currentStock, minimumStock: form.minimumStock || undefined,
-      costPerUnit: form.costPerUnit || undefined, supplier: form.supplier || undefined,
-      supplierContact: form.supplierContact || undefined, lotNumber: form.lotNumber || undefined,
-      expirationDate: form.expirationDate || undefined, storageLocation: form.storageLocation || undefined,
-      photoUrl: form.photoUrl || undefined,
-    };
     if (editingId) {
-      updateMut.mutate({ id: editingId, ...data });
+      updateMut.mutate({
+        id: editingId,
+        name: form.name || undefined, brand: form.brand || undefined, category: form.category || undefined,
+        description: form.description || undefined, activeIngredient: form.activeIngredient || undefined,
+        unit: form.unit || undefined,
+        minimumStock: form.minimumStock ? Number(form.minimumStock) : undefined,
+        costPerUnit: form.costPerUnit ? Number(form.costPerUnit) : undefined,
+        supplier: form.supplier || undefined, supplierContact: form.supplierContact || undefined,
+        lotNumber: form.lotNumber || undefined, expirationDate: form.expirationDate || undefined,
+        storageLocation: form.storageLocation || undefined, photoUrl: form.photoUrl || undefined,
+      });
     } else {
-      createMut.mutate(data);
+      createMut.mutate({
+        name: form.name, category: form.category, unit: form.unit,
+        brand: form.brand || undefined, description: form.description || undefined,
+        activeIngredient: form.activeIngredient || undefined,
+        concentration: form.concentration || undefined, presentation: form.presentation || undefined,
+        currentStock: form.currentStock ? Number(form.currentStock) : undefined,
+        minimumStock: form.minimumStock ? Number(form.minimumStock) : undefined,
+        costPerUnit: form.costPerUnit ? Number(form.costPerUnit) : undefined,
+        supplier: form.supplier || undefined, supplierContact: form.supplierContact || undefined,
+        lotNumber: form.lotNumber || undefined, expirationDate: form.expirationDate || undefined,
+        storageLocation: form.storageLocation || undefined, photoUrl: form.photoUrl || undefined,
+      });
     }
   };
 
@@ -229,11 +233,8 @@ function ProductsTab() {
     addMovementMut.mutate({
       productId,
       movementType: movementForm.type,
-      quantity: movementForm.quantity,
+      quantity: Number(movementForm.quantity),
       reason: movementForm.reason || undefined,
-      invoiceNumber: movementForm.invoiceNumber || undefined,
-      supplier: movementForm.supplier || undefined,
-      costPerUnit: movementForm.costPerUnit || undefined,
     });
   };
 
@@ -451,7 +452,6 @@ function ProductsTab() {
                 </div>
               </div>
 
-              {/* Expanded Details */}
               {isExpanded && (
                 <div className="border-t border-white/10 p-4 space-y-4">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
@@ -464,11 +464,10 @@ function ProductsTab() {
                   </div>
                   {p.description && <p className="text-sm text-white/60">{p.description}</p>}
 
-                  {/* Movement Form */}
                   {showMovementForm === p.id ? (
                     <div className="bg-white/5 rounded-lg p-3 space-y-3">
                       <h5 className="text-sm font-medium text-white">Registrar Movimiento</h5>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <select value={movementForm.type} onChange={(e) => setMovementForm({ ...movementForm, type: e.target.value })}
                           className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none">
                           <option value="entrada">Entrada</option>
@@ -480,12 +479,6 @@ function ProductsTab() {
                           placeholder="Cantidad" className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none" />
                         <input type="text" value={movementForm.reason} onChange={(e) => setMovementForm({ ...movementForm, reason: e.target.value })}
                           placeholder="Motivo" className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none" />
-                        <input type="text" value={movementForm.invoiceNumber} onChange={(e) => setMovementForm({ ...movementForm, invoiceNumber: e.target.value })}
-                          placeholder="No. Factura" className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none" />
-                        <input type="text" value={movementForm.supplier} onChange={(e) => setMovementForm({ ...movementForm, supplier: e.target.value })}
-                          placeholder="Proveedor" className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none" />
-                        <input type="number" step="0.01" value={movementForm.costPerUnit} onChange={(e) => setMovementForm({ ...movementForm, costPerUnit: e.target.value })}
-                          placeholder="Costo/Unidad" className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none" />
                       </div>
                       <div className="flex gap-2">
                         <button onClick={() => handleAddMovement(p.id)} disabled={addMovementMut.isPending}
@@ -500,7 +493,6 @@ function ProductsTab() {
                     </div>
                   ) : null}
 
-                  {/* Movements History */}
                   {p.movements && p.movements.length > 0 && (
                     <div>
                       <h5 className="text-sm font-medium text-white/70 mb-2 flex items-center gap-1"><History className="w-4 h-4" /> Últimos Movimientos</h5>
@@ -528,7 +520,6 @@ function ProductsTab() {
                     </div>
                   )}
 
-                  {/* Actions */}
                   <div className="flex gap-2 pt-2 border-t border-white/10">
                     <button onClick={() => setShowMovementForm(showMovementForm === p.id ? null : p.id)}
                       className="flex items-center gap-1 px-3 py-1.5 bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded-lg text-xs font-medium hover:bg-blue-500/30 transition-all">
@@ -556,8 +547,6 @@ function ProductsTab() {
 // ===== PESTAÑA DE HERRAMIENTAS =====
 
 function ToolsTab() {
-  const trpc = useTRPC();
-  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -565,17 +554,18 @@ function ToolsTab() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  const { data: tools = [], isLoading } = useQuery(trpc.warehouse.tools.list.queryOptions());
+  const utils = trpc.useUtils();
+  const { data: tools = [], isLoading } = trpc.warehouse.listTools.useQuery();
 
-  const createMut = useMutation(trpc.warehouse.tools.create.mutationOptions({
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: trpc.warehouse.tools.list.queryKey() }); setShowForm(false); resetForm(); },
-  }));
-  const updateMut = useMutation(trpc.warehouse.tools.update.mutationOptions({
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: trpc.warehouse.tools.list.queryKey() }); setEditingId(null); resetForm(); },
-  }));
-  const deleteMut = useMutation(trpc.warehouse.tools.delete.mutationOptions({
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: trpc.warehouse.tools.list.queryKey() }); },
-  }));
+  const createMut = trpc.warehouse.createTool.useMutation({
+    onSuccess: () => { utils.warehouse.listTools.invalidate(); setShowForm(false); resetForm(); },
+  });
+  const updateMut = trpc.warehouse.updateTool.useMutation({
+    onSuccess: () => { utils.warehouse.listTools.invalidate(); setEditingId(null); resetForm(); },
+  });
+  const deleteMut = trpc.warehouse.deleteTool.useMutation({
+    onSuccess: () => { utils.warehouse.listTools.invalidate(); },
+  });
 
   const [form, setForm] = useState({
     name: "", category: "otro", brand: "", model: "", serialNumber: "",
@@ -596,7 +586,7 @@ function ToolsTab() {
   }, []);
 
   const filtered = useMemo(() => {
-    let list = tools.filter((t: any) => t.isActive !== false);
+    let list = (tools as any[]).filter((t: any) => t.isActive !== false);
     if (search) {
       const s = search.toLowerCase();
       list = list.filter((t: any) => t.name?.toLowerCase().includes(s) || t.brand?.toLowerCase().includes(s) || t.serialNumber?.toLowerCase().includes(s));
@@ -607,7 +597,7 @@ function ToolsTab() {
   }, [tools, search, categoryFilter, statusFilter]);
 
   const stats = useMemo(() => {
-    const active = tools.filter((t: any) => t.isActive !== false);
+    const active = (tools as any[]).filter((t: any) => t.isActive !== false);
     const available = active.filter((t: any) => t.status === "disponible").length;
     const inMaintenance = active.filter((t: any) => t.status === "mantenimiento" || t.status === "dañado").length;
     const totalValue = active.reduce((sum: number, t: any) => sum + Number(t.currentValue || t.acquisitionCost || 0), 0);
@@ -615,13 +605,14 @@ function ToolsTab() {
   }, [tools]);
 
   const handleSave = () => {
-    const data = {
+    const data: any = {
       name: form.name, category: form.category, brand: form.brand || undefined,
       model: form.model || undefined, serialNumber: form.serialNumber || undefined,
       description: form.description || undefined, status: form.status,
       conditionState: form.conditionState, acquisitionDate: form.acquisitionDate || undefined,
-      acquisitionCost: form.acquisitionCost || undefined, currentValue: form.currentValue || undefined,
-      storageLocation: form.storageLocation || undefined, assignedTo: form.assignedTo || undefined,
+      acquisitionCost: form.acquisitionCost ? Number(form.acquisitionCost) : undefined,
+      currentValue: form.currentValue ? Number(form.currentValue) : undefined,
+      storageLocation: form.storageLocation || undefined,
       lastMaintenanceDate: form.lastMaintenanceDate || undefined,
       nextMaintenanceDate: form.nextMaintenanceDate || undefined,
       maintenanceNotes: form.maintenanceNotes || undefined,
