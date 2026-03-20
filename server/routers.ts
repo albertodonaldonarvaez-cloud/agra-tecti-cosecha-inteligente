@@ -7,8 +7,8 @@ import * as db from "./db";
 import * as dbExt from "./db_extended";
 import * as webodm from "./webodmService";
 import { getDb } from "./db";
-import { boxes, harvesters, parcels, parcelDetails } from "../drizzle/schema";
-import { eq } from "drizzle-orm";
+import { boxes, harvesters, parcels, parcelDetails, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos } from "../drizzle/schema";
+import { eq, desc, and, gte, lte, inArray, sql } from "drizzle-orm";
 
 export const appRouter = router({
   auth: router({
@@ -1498,7 +1498,358 @@ export const appRouter = router({
       const result = await triggerManualOdmSync();
       return result || { totalProjects: 0, totalTasks: 0, newTasks: [], completedTasks: [], processingTasks: [], failedTasks: [], parcelSummary: [] };
     }),
+   }),
+
+  // ===== LIBRETA DE CAMPO =====
+  fieldNotebook: router({
+    // Listar actividades con filtros
+    list: protectedProcedure
+      .input(z.object({
+        startDate: z.string().optional(),
+        endDate: z.string().optional(),
+        activityType: z.string().optional(),
+        parcelId: z.number().optional(),
+        status: z.string().optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        const drizzle = getDb();
+        const filters: any[] = [];
+        if (input?.activityType) filters.push(eq(fieldActivities.activityType, input.activityType as any));
+        if (input?.status) filters.push(eq(fieldActivities.status, input.status as any));
+        if (input?.startDate) filters.push(gte(fieldActivities.activityDate, input.startDate));
+        if (input?.endDate) filters.push(lte(fieldActivities.activityDate, input.endDate));
+
+        let query = drizzle.select().from(fieldActivities).orderBy(desc(fieldActivities.activityDate), desc(fieldActivities.id));
+        if (filters.length > 0) {
+          query = query.where(and(...filters)) as any;
+        }
+        const activities = await query;
+
+        // Enriquecer con parcelas, productos, herramientas y fotos
+        const enriched = await Promise.all(activities.map(async (act) => {
+          const [actParcels, actProducts, actTools, actPhotos] = await Promise.all([
+            drizzle.select().from(fieldActivityParcels).where(eq(fieldActivityParcels.activityId, act.id)),
+            drizzle.select().from(fieldActivityProducts).where(eq(fieldActivityProducts.activityId, act.id)),
+            drizzle.select().from(fieldActivityTools).where(eq(fieldActivityTools.activityId, act.id)),
+            drizzle.select().from(fieldActivityPhotos).where(eq(fieldActivityPhotos.activityId, act.id)),
+          ]);
+
+          // Obtener nombres de parcelas
+          let parcelNames: { id: number; name: string }[] = [];
+          if (actParcels.length > 0) {
+            const parcelIds = actParcels.map(p => p.parcelId);
+            const parcelRows = await drizzle.select({ id: parcels.id, name: parcels.name }).from(parcels).where(inArray(parcels.id, parcelIds));
+            parcelNames = parcelRows;
+          }
+
+          return {
+            ...act,
+            parcels: parcelNames,
+            products: actProducts,
+            tools: actTools,
+            photos: actPhotos,
+          };
+        }));
+
+        // Filtrar por parcelId si se especificó
+        if (input?.parcelId) {
+          return enriched.filter(a => a.parcels.some(p => p.id === input.parcelId));
+        }
+        return enriched;
+      }),
+
+    // Obtener una actividad por ID
+    getById: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        const drizzle = getDb();
+        const [activity] = await drizzle.select().from(fieldActivities).where(eq(fieldActivities.id, input.id));
+        if (!activity) throw new TRPCError({ code: "NOT_FOUND", message: "Actividad no encontrada" });
+
+        const [actParcels, actProducts, actTools, actPhotos] = await Promise.all([
+          drizzle.select().from(fieldActivityParcels).where(eq(fieldActivityParcels.activityId, activity.id)),
+          drizzle.select().from(fieldActivityProducts).where(eq(fieldActivityProducts.activityId, activity.id)),
+          drizzle.select().from(fieldActivityTools).where(eq(fieldActivityTools.activityId, activity.id)),
+          drizzle.select().from(fieldActivityPhotos).where(eq(fieldActivityPhotos.activityId, activity.id)),
+        ]);
+
+        let parcelNames: { id: number; name: string }[] = [];
+        if (actParcels.length > 0) {
+          const parcelIds = actParcels.map(p => p.parcelId);
+          const parcelRows = await drizzle.select({ id: parcels.id, name: parcels.name }).from(parcels).where(inArray(parcels.id, parcelIds));
+          parcelNames = parcelRows;
+        }
+
+        return { ...activity, parcels: parcelNames, products: actProducts, tools: actTools, photos: actPhotos };
+      }),
+
+    // Crear nueva actividad
+    create: protectedProcedure
+      .input(z.object({
+        activityType: z.string(),
+        activitySubtype: z.string().optional(),
+        description: z.string().optional(),
+        performedBy: z.string(),
+        activityDate: z.string(),
+        startTime: z.string().optional(),
+        endTime: z.string().optional(),
+        durationMinutes: z.number().optional(),
+        weatherCondition: z.string().optional(),
+        temperature: z.string().optional(),
+        status: z.string().optional(),
+        parcelIds: z.array(z.number()).optional(),
+        products: z.array(z.object({
+          productName: z.string(),
+          productType: z.string().optional(),
+          quantity: z.string().optional(),
+          unit: z.string().optional(),
+          dosisPerHectare: z.string().optional(),
+          applicationMethod: z.string().optional(),
+          notes: z.string().optional(),
+        })).optional(),
+        tools: z.array(z.object({
+          toolName: z.string(),
+          toolType: z.string().optional(),
+          notes: z.string().optional(),
+        })).optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const drizzle = getDb();
+        const userId = (ctx as any).user?.id || 0;
+
+        // Calcular duración si no se proporcionó
+        let duration = input.durationMinutes;
+        if (!duration && input.startTime && input.endTime) {
+          const [sh, sm] = input.startTime.split(":").map(Number);
+          const [eh, em] = input.endTime.split(":").map(Number);
+          duration = (eh * 60 + em) - (sh * 60 + sm);
+          if (duration < 0) duration += 24 * 60;
+        }
+
+        const [result] = await drizzle.insert(fieldActivities).values({
+          activityType: input.activityType as any,
+          activitySubtype: input.activitySubtype || null,
+          description: input.description || null,
+          performedBy: input.performedBy,
+          activityDate: input.activityDate,
+          startTime: input.startTime || null,
+          endTime: input.endTime || null,
+          durationMinutes: duration || null,
+          weatherCondition: input.weatherCondition || null,
+          temperature: input.temperature || null,
+          status: (input.status as any) || "completada",
+          createdByUserId: userId,
+        });
+
+        const activityId = result.insertId;
+
+        // Insertar parcelas
+        if (input.parcelIds && input.parcelIds.length > 0) {
+          await drizzle.insert(fieldActivityParcels).values(
+            input.parcelIds.map(pid => ({ activityId, parcelId: pid }))
+          );
+        }
+
+        // Insertar productos
+        if (input.products && input.products.length > 0) {
+          await drizzle.insert(fieldActivityProducts).values(
+            input.products.map(p => ({
+              activityId,
+              productName: p.productName,
+              productType: (p.productType as any) || "otro",
+              quantity: p.quantity || null,
+              unit: (p.unit as any) || "kg",
+              dosisPerHectare: p.dosisPerHectare || null,
+              applicationMethod: p.applicationMethod || null,
+              notes: p.notes || null,
+            }))
+          );
+        }
+
+        // Insertar herramientas
+        if (input.tools && input.tools.length > 0) {
+          await drizzle.insert(fieldActivityTools).values(
+            input.tools.map(t => ({
+              activityId,
+              toolName: t.toolName,
+              toolType: (t.toolType as any) || "otro",
+              notes: t.notes || null,
+            }))
+          );
+        }
+
+        return { id: activityId, success: true };
+      }),
+
+    // Actualizar actividad
+    update: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        activityType: z.string().optional(),
+        activitySubtype: z.string().optional(),
+        description: z.string().optional(),
+        performedBy: z.string().optional(),
+        activityDate: z.string().optional(),
+        startTime: z.string().optional(),
+        endTime: z.string().optional(),
+        durationMinutes: z.number().optional(),
+        weatherCondition: z.string().optional(),
+        temperature: z.string().optional(),
+        status: z.string().optional(),
+        parcelIds: z.array(z.number()).optional(),
+        products: z.array(z.object({
+          productName: z.string(),
+          productType: z.string().optional(),
+          quantity: z.string().optional(),
+          unit: z.string().optional(),
+          dosisPerHectare: z.string().optional(),
+          applicationMethod: z.string().optional(),
+          notes: z.string().optional(),
+        })).optional(),
+        tools: z.array(z.object({
+          toolName: z.string(),
+          toolType: z.string().optional(),
+          notes: z.string().optional(),
+        })).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const drizzle = getDb();
+        const updateData: any = {};
+        if (input.activityType) updateData.activityType = input.activityType;
+        if (input.activitySubtype !== undefined) updateData.activitySubtype = input.activitySubtype || null;
+        if (input.description !== undefined) updateData.description = input.description || null;
+        if (input.performedBy) updateData.performedBy = input.performedBy;
+        if (input.activityDate) updateData.activityDate = input.activityDate;
+        if (input.startTime !== undefined) updateData.startTime = input.startTime || null;
+        if (input.endTime !== undefined) updateData.endTime = input.endTime || null;
+        if (input.durationMinutes !== undefined) updateData.durationMinutes = input.durationMinutes;
+        if (input.weatherCondition !== undefined) updateData.weatherCondition = input.weatherCondition || null;
+        if (input.temperature !== undefined) updateData.temperature = input.temperature || null;
+        if (input.status) updateData.status = input.status;
+
+        // Calcular duración
+        if (input.startTime && input.endTime) {
+          const [sh, sm] = input.startTime.split(":").map(Number);
+          const [eh, em] = input.endTime.split(":").map(Number);
+          let dur = (eh * 60 + em) - (sh * 60 + sm);
+          if (dur < 0) dur += 24 * 60;
+          updateData.durationMinutes = dur;
+        }
+
+        await drizzle.update(fieldActivities).set(updateData).where(eq(fieldActivities.id, input.id));
+
+        // Reemplazar parcelas
+        if (input.parcelIds !== undefined) {
+          await drizzle.delete(fieldActivityParcels).where(eq(fieldActivityParcels.activityId, input.id));
+          if (input.parcelIds.length > 0) {
+            await drizzle.insert(fieldActivityParcels).values(
+              input.parcelIds.map(pid => ({ activityId: input.id, parcelId: pid }))
+            );
+          }
+        }
+
+        // Reemplazar productos
+        if (input.products !== undefined) {
+          await drizzle.delete(fieldActivityProducts).where(eq(fieldActivityProducts.activityId, input.id));
+          if (input.products.length > 0) {
+            await drizzle.insert(fieldActivityProducts).values(
+              input.products.map(p => ({
+                activityId: input.id,
+                productName: p.productName,
+                productType: (p.productType as any) || "otro",
+                quantity: p.quantity || null,
+                unit: (p.unit as any) || "kg",
+                dosisPerHectare: p.dosisPerHectare || null,
+                applicationMethod: p.applicationMethod || null,
+                notes: p.notes || null,
+              }))
+            );
+          }
+        }
+
+        // Reemplazar herramientas
+        if (input.tools !== undefined) {
+          await drizzle.delete(fieldActivityTools).where(eq(fieldActivityTools.activityId, input.id));
+          if (input.tools.length > 0) {
+            await drizzle.insert(fieldActivityTools).values(
+              input.tools.map(t => ({
+                activityId: input.id,
+                toolName: t.toolName,
+                toolType: (t.toolType as any) || "otro",
+                notes: t.notes || null,
+              }))
+            );
+          }
+        }
+
+        return { success: true };
+      }),
+
+    // Eliminar actividad
+    delete: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const drizzle = getDb();
+        // Eliminar relaciones primero
+        await Promise.all([
+          drizzle.delete(fieldActivityParcels).where(eq(fieldActivityParcels.activityId, input.id)),
+          drizzle.delete(fieldActivityProducts).where(eq(fieldActivityProducts.activityId, input.id)),
+          drizzle.delete(fieldActivityTools).where(eq(fieldActivityTools.activityId, input.id)),
+          drizzle.delete(fieldActivityPhotos).where(eq(fieldActivityPhotos.activityId, input.id)),
+        ]);
+        await drizzle.delete(fieldActivities).where(eq(fieldActivities.id, input.id));
+        return { success: true };
+      }),
+
+    // Agregar foto a una actividad
+    addPhoto: protectedProcedure
+      .input(z.object({
+        activityId: z.number(),
+        photoUrl: z.string(),
+        photoType: z.string().optional(),
+        caption: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const drizzle = getDb();
+        const userId = (ctx as any).user?.id || 0;
+        await drizzle.insert(fieldActivityPhotos).values({
+          activityId: input.activityId,
+          photoUrl: input.photoUrl,
+          photoType: (input.photoType as any) || "durante",
+          caption: input.caption || null,
+          uploadedByUserId: userId,
+        });
+        return { success: true };
+      }),
+
+    // Eliminar foto
+    deletePhoto: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const drizzle = getDb();
+        await drizzle.delete(fieldActivityPhotos).where(eq(fieldActivityPhotos.id, input.id));
+        return { success: true };
+      }),
+
+    // Estadísticas rápidas
+    stats: protectedProcedure.query(async () => {
+      const drizzle = getDb();
+      const [totalResult] = await drizzle.select({ count: sql<number>`COUNT(*)` }).from(fieldActivities);
+      const [thisMonthResult] = await drizzle.select({ count: sql<number>`COUNT(*)` }).from(fieldActivities)
+        .where(gte(fieldActivities.activityDate, sql`DATE_FORMAT(NOW(), '%Y-%m-01')`));
+
+      // Contar por tipo
+      const byType = await drizzle.select({
+        type: fieldActivities.activityType,
+        count: sql<number>`COUNT(*)`,
+      }).from(fieldActivities).groupBy(fieldActivities.activityType);
+
+      return {
+        total: totalResult?.count || 0,
+        thisMonth: thisMonthResult?.count || 0,
+        byType: byType.reduce((acc, r) => { acc[r.type] = r.count; return acc; }, {} as Record<string, number>),
+      };
+    }),
   }),
 });
-
 export type AppRouter = typeof appRouter;

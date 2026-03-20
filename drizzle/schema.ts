@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, boolean } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, boolean, decimal, date } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -272,3 +272,91 @@ export const parcelNotes = mysqlTable("parcelNotes", {
 
 export type ParcelNote = typeof parcelNotes.$inferSelect;
 export type InsertParcelNote = typeof parcelNotes.$inferInsert;
+
+// ===== LIBRETA DE CAMPO =====
+
+// Tabla principal de actividades de campo
+export const fieldActivities = mysqlTable("fieldActivities", {
+  id: int("id").autoincrement().primaryKey(),
+  activityType: mysqlEnum("activityType", [
+    "riego", "fertilizacion", "nutricion", "poda",
+    "control_maleza", "control_plagas", "aplicacion_fitosanitaria", "otro"
+  ]).notNull(),
+  activitySubtype: varchar("activitySubtype", { length: 128 }),
+  description: text("description"),
+  performedBy: varchar("performedBy", { length: 255 }).notNull(),
+  activityDate: date("activityDate").notNull(),
+  startTime: varchar("startTime", { length: 8 }),
+  endTime: varchar("endTime", { length: 8 }),
+  durationMinutes: int("durationMinutes"),
+  weatherCondition: varchar("weatherCondition", { length: 128 }),
+  temperature: varchar("temperature", { length: 16 }),
+  status: mysqlEnum("status", ["planificada", "en_progreso", "completada", "cancelada"]).default("completada").notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type FieldActivity = typeof fieldActivities.$inferSelect;
+export type InsertFieldActivity = typeof fieldActivities.$inferInsert;
+
+// Parcelas afectadas por una actividad
+export const fieldActivityParcels = mysqlTable("fieldActivityParcels", {
+  id: int("id").autoincrement().primaryKey(),
+  activityId: int("activityId").notNull(),
+  parcelId: int("parcelId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type FieldActivityParcel = typeof fieldActivityParcels.$inferSelect;
+
+// Productos utilizados en una actividad
+export const fieldActivityProducts = mysqlTable("fieldActivityProducts", {
+  id: int("id").autoincrement().primaryKey(),
+  activityId: int("activityId").notNull(),
+  productName: varchar("productName", { length: 255 }).notNull(),
+  productType: mysqlEnum("productType", [
+    "fertilizante_granular", "fertilizante_liquido", "fertilizante_foliar", "fertilizante_organico",
+    "herbicida_preemergente", "herbicida_postemergente", "herbicida_selectivo", "herbicida_no_selectivo",
+    "insecticida", "fungicida", "acaricida", "nematicida",
+    "regulador_crecimiento", "bioestimulante", "enmienda_suelo", "nutriente_foliar",
+    "agua", "otro"
+  ]).default("otro").notNull(),
+  quantity: varchar("quantity", { length: 32 }),
+  unit: mysqlEnum("unit", ["kg", "g", "lt", "ml", "ton", "bulto", "saco", "unidad", "otro"]).default("kg"),
+  dosisPerHectare: varchar("dosisPerHectare", { length: 64 }),
+  applicationMethod: varchar("applicationMethod", { length: 128 }),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type FieldActivityProduct = typeof fieldActivityProducts.$inferSelect;
+
+// Herramientas / equipos utilizados
+export const fieldActivityTools = mysqlTable("fieldActivityTools", {
+  id: int("id").autoincrement().primaryKey(),
+  activityId: int("activityId").notNull(),
+  toolName: varchar("toolName", { length: 255 }).notNull(),
+  toolType: mysqlEnum("toolType", [
+    "tractor", "aspersora_manual", "aspersora_motorizada", "bomba_riego",
+    "sistema_goteo", "motosierra", "tijera_poda", "machete",
+    "azadon", "rastrillo", "desbrozadora", "fumigadora", "drone", "vehiculo", "otro"
+  ]).default("otro").notNull(),
+  notes: varchar("notes", { length: 512 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type FieldActivityTool = typeof fieldActivityTools.$inferSelect;
+
+// Fotos de la actividad (antes y después)
+export const fieldActivityPhotos = mysqlTable("fieldActivityPhotos", {
+  id: int("id").autoincrement().primaryKey(),
+  activityId: int("activityId").notNull(),
+  photoType: mysqlEnum("photoType", ["antes", "despues", "durante", "producto", "otro"]).default("durante").notNull(),
+  photoUrl: text("photoUrl").notNull(),
+  caption: varchar("caption", { length: 512 }),
+  uploadedByUserId: int("uploadedByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type FieldActivityPhoto = typeof fieldActivityPhotos.$inferSelect;

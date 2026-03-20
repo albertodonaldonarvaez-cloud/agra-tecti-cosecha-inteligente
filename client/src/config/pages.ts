@@ -24,6 +24,7 @@ import {
   CloudSun,
   Leaf,
   Sprout,
+  BookOpen,
   type LucideIcon
 } from "lucide-react";
 
@@ -176,6 +177,18 @@ export const PAGES_CONFIG: PageConfig[] = [
     showInNav: true,
   },
   {
+    permissionKey: "canViewFieldNotebook",
+    path: "/field-notebook",
+    icon: BookOpen,
+    label: "Libreta",
+    fullName: "Libreta de Campo",
+    description: "Registro de actividades agrícolas: riego, fertilización, podas, etc.",
+    adminOnly: false,
+    defaultValue: true,
+    order: 11,
+    showInNav: true,
+  },
+  {
     permissionKey: "canViewCrops",
     path: "/crops",
     icon: Sprout,
@@ -184,7 +197,7 @@ export const PAGES_CONFIG: PageConfig[] = [
     description: "Gestionar cultivos y sus variedades",
     adminOnly: true,
     defaultValue: false,
-    order: 11,
+    order: 13,
     showInNav: true,
   },
   {
@@ -196,7 +209,7 @@ export const PAGES_CONFIG: PageConfig[] = [
     description: "Ver y resolver errores de sincronización",
     adminOnly: true,
     defaultValue: false,
-    order: 12,
+    order: 14,
     showInNav: false, // No mostrar en nav por ahora
   },
 ];
