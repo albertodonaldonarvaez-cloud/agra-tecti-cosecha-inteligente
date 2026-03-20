@@ -3,7 +3,7 @@ import { trpc } from "../lib/trpc";
 import { useAuth } from "../_core/hooks/useAuth";
 import { ProtectedPage } from "../_core/components/ProtectedPage";
 import GlassCard from "../components/GlassCard";
-import { toast } from "react-hot-toast";
+import { toast } from "sonner";
 import {
   BookOpen, Plus, Search, Filter, Calendar, User, Clock, MapPin, Package, Wrench,
   Trash2, Edit3, ChevronDown, ChevronUp, Save, X, Droplets, FlaskConical, Scissors,
