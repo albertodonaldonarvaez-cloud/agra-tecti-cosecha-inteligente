@@ -102,16 +102,36 @@ CREATE TABLE IF NOT EXISTS warehouseToolAssignments (
   INDEX idx_date (createdAt)
 );
 
--- ===== PERMISO PARA VER ALMACENES =====
-ALTER TABLE users ADD COLUMN IF NOT EXISTS canViewWarehouse BOOLEAN NOT NULL DEFAULT TRUE;
+-- ===== COLUMNAS ADICIONALES (compatibles con MySQL < 8.0.28) =====
+-- Usa SELECT INTO @var + PREPARE/EXECUTE para agregar columnas solo si no existen
+
+-- 1) users.canViewWarehouse
+SET @col = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'canViewWarehouse');
+SET @sql = IF(@col = 0, 'ALTER TABLE users ADD COLUMN canViewWarehouse BOOLEAN NOT NULL DEFAULT TRUE', 'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 -- Dar acceso a todos los usuarios
 UPDATE users SET canViewWarehouse = TRUE;
 
--- ===== AGREGAR productId a fieldActivityProducts para vincular con almacén =====
-ALTER TABLE fieldActivityProducts ADD COLUMN IF NOT EXISTS warehouseProductId INT;
+-- 2) fieldActivityProducts.warehouseProductId
+SET @col = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'fieldActivityProducts' AND COLUMN_NAME = 'warehouseProductId');
+SET @sql = IF(@col = 0, 'ALTER TABLE fieldActivityProducts ADD COLUMN warehouseProductId INT', 'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
--- ===== AGREGAR toolId a fieldActivityTools para vincular con almacén =====
-ALTER TABLE fieldActivityTools ADD COLUMN IF NOT EXISTS warehouseToolId INT;
+-- 3) fieldActivityTools.warehouseToolId
+SET @col = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'fieldActivityTools' AND COLUMN_NAME = 'warehouseToolId');
+SET @sql = IF(@col = 0, 'ALTER TABLE fieldActivityTools ADD COLUMN warehouseToolId INT', 'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
--- ===== PERMISO PARA LIBRETA DE CAMPO =====
-ALTER TABLE users ADD COLUMN IF NOT EXISTS canViewFieldNotebook BOOLEAN NOT NULL DEFAULT TRUE;
+-- 4) users.canViewFieldNotebook
+SET @col = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'canViewFieldNotebook');
+SET @sql = IF(@col = 0, 'ALTER TABLE users ADD COLUMN canViewFieldNotebook BOOLEAN NOT NULL DEFAULT TRUE', 'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
