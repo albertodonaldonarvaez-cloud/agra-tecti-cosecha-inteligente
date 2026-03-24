@@ -1864,7 +1864,7 @@ export const appRouter = router({
         let filtered = results;
         if (input?.category) filtered = filtered.filter(p => p.category === input.category);
         if (input?.search) { const s = input.search.toLowerCase(); filtered = filtered.filter(p => p.name.toLowerCase().includes(s) || (p.brand || '').toLowerCase().includes(s)); }
-        if (input?.lowStock) filtered = filtered.filter(p => p.currentStock !== null && p.minStock !== null && Number(p.currentStock) <= Number(p.minStock));
+        if (input?.lowStock) filtered = filtered.filter(p => p.currentStock !== null && p.minimumStock !== null && Number(p.currentStock) <= Number(p.minimumStock));
         return filtered;
       }),
 

@@ -1,6 +1,9 @@
 import { useState, useMemo, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import { GlassCard } from "@/components/GlassCard";
+import { ProtectedPage } from "@/components/ProtectedPage";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { toast } from "sonner";
 import {
   Package, Wrench, Plus, Search, Edit2, Trash2, X, Save,
   AlertTriangle, ArrowDownCircle, ArrowUpCircle, ChevronDown, ChevronUp,
@@ -73,44 +76,59 @@ const UNITS = ["kg", "g", "lt", "ml", "ton", "bulto", "saco", "unidad", "otro"];
 // ===== COMPONENTE PRINCIPAL =====
 
 export default function Warehouse() {
+  return (
+    <ProtectedPage permission="canViewWarehouse">
+      <WarehouseContent />
+    </ProtectedPage>
+  );
+}
+
+function WarehouseContent() {
   const [activeTab, setActiveTab] = useState<"products" | "tools">("products");
 
-  const tabs = [
-    { id: "products" as const, label: "Productos", icon: Package, color: "emerald" },
-    { id: "tools" as const, label: "Herramientas y Equipos", icon: Wrench, color: "amber" },
-  ];
-
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-            <WarehouseIcon className="w-7 h-7 text-indigo-400" />
-            Almacenes
-          </h1>
-          <p className="text-white/60 text-sm mt-1">Gestión de productos, herramientas y equipos</p>
+    <div className="min-h-screen bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50 p-4 md:p-6 pb-24">
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-bold text-gray-800 flex items-center gap-2">
+              <WarehouseIcon className="w-7 h-7 text-green-600" />
+              Almacenes
+            </h1>
+            <p className="text-sm text-gray-500 mt-1">Gestión de productos, herramientas y equipos</p>
+          </div>
         </div>
-      </div>
 
-      <div className="flex gap-2">
-        {tabs.map((tab) => (
+        {/* Tabs */}
+        <div className="flex gap-2">
           <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => setActiveTab("products")}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 ${
-              activeTab === tab.id
-                ? `bg-${tab.color}-500/20 text-${tab.color}-300 border border-${tab.color}-500/30 shadow-lg shadow-${tab.color}-500/10`
-                : "bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80 border border-white/10"
+              activeTab === "products"
+                ? "bg-emerald-100 text-emerald-700 border border-emerald-300 shadow-md"
+                : "bg-white/60 text-gray-500 hover:bg-white hover:text-gray-700 border border-gray-200"
             }`}
           >
-            <tab.icon className="w-4 h-4" />
-            {tab.label}
+            <Package className="w-4 h-4" />
+            Productos
           </button>
-        ))}
-      </div>
+          <button
+            onClick={() => setActiveTab("tools")}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 ${
+              activeTab === "tools"
+                ? "bg-amber-100 text-amber-700 border border-amber-300 shadow-md"
+                : "bg-white/60 text-gray-500 hover:bg-white hover:text-gray-700 border border-gray-200"
+            }`}
+          >
+            <Wrench className="w-4 h-4" />
+            Herramientas y Equipos
+          </button>
+        </div>
 
-      {activeTab === "products" && <ProductsTab />}
-      {activeTab === "tools" && <ToolsTab />}
+        {activeTab === "products" && <ProductsTab />}
+        {activeTab === "tools" && <ToolsTab />}
+      </div>
     </div>
   );
 }
@@ -130,20 +148,25 @@ function ProductsTab() {
   const { data: products = [], isLoading } = trpc.warehouse.listProducts.useQuery();
 
   const createMut = trpc.warehouse.createProduct.useMutation({
-    onSuccess: () => { utils.warehouse.listProducts.invalidate(); setShowForm(false); resetForm(); },
+    onSuccess: () => { utils.warehouse.listProducts.invalidate(); setShowForm(false); resetForm(); toast.success("Producto creado"); },
+    onError: (e: any) => toast.error(e.message || "Error al crear producto"),
   });
   const updateMut = trpc.warehouse.updateProduct.useMutation({
-    onSuccess: () => { utils.warehouse.listProducts.invalidate(); setEditingId(null); resetForm(); },
+    onSuccess: () => { utils.warehouse.listProducts.invalidate(); setEditingId(null); setShowForm(false); resetForm(); toast.success("Producto actualizado"); },
+    onError: (e: any) => toast.error(e.message || "Error al actualizar"),
   });
   const deleteMut = trpc.warehouse.deleteProduct.useMutation({
-    onSuccess: () => { utils.warehouse.listProducts.invalidate(); },
+    onSuccess: () => { utils.warehouse.listProducts.invalidate(); toast.success("Producto eliminado"); },
+    onError: (e: any) => toast.error(e.message || "Error al eliminar"),
   });
   const addMovementMut = trpc.warehouse.addMovement.useMutation({
     onSuccess: () => {
       utils.warehouse.listProducts.invalidate();
       setShowMovementForm(null);
       setMovementForm({ type: "entrada", quantity: "", reason: "" });
+      toast.success("Movimiento registrado");
     },
+    onError: (e: any) => toast.error(e.message || "Error al registrar movimiento"),
   });
 
   const [form, setForm] = useState({
@@ -238,7 +261,16 @@ function ProductsTab() {
     });
   };
 
-  if (isLoading) return <div className="text-white/60 text-center py-12">Cargando productos...</div>;
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-green-200 border-t-green-600" />
+          <p className="text-green-600 text-sm">Cargando productos...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -246,25 +278,25 @@ function ProductsTab() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <GlassCard hover={true} className="p-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-emerald-500/20"><Package className="w-5 h-5 text-emerald-400" /></div>
-            <div><p className="text-white/50 text-xs">Total Productos</p><p className="text-xl font-bold text-white">{stats.total}</p></div>
+            <div className="p-2 rounded-lg bg-emerald-100"><Package className="w-5 h-5 text-emerald-600" /></div>
+            <div><p className="text-xs text-gray-500">Total Productos</p><p className="text-xl font-bold text-gray-800">{stats.total}</p></div>
           </div>
         </GlassCard>
         <GlassCard hover={true} className="p-4 cursor-pointer" onClick={() => setShowLowStock(!showLowStock)}>
           <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-lg ${stats.lowStock > 0 ? "bg-red-500/20" : "bg-green-500/20"}`}>
-              <AlertTriangle className={`w-5 h-5 ${stats.lowStock > 0 ? "text-red-400" : "text-green-400"}`} />
+            <div className={`p-2 rounded-lg ${stats.lowStock > 0 ? "bg-red-100" : "bg-green-100"}`}>
+              <AlertTriangle className={`w-5 h-5 ${stats.lowStock > 0 ? "text-red-600" : "text-green-600"}`} />
             </div>
             <div>
-              <p className="text-white/50 text-xs">Stock Bajo</p>
-              <p className={`text-xl font-bold ${stats.lowStock > 0 ? "text-red-400" : "text-green-400"}`}>{stats.lowStock}</p>
+              <p className="text-xs text-gray-500">Stock Bajo</p>
+              <p className={`text-xl font-bold ${stats.lowStock > 0 ? "text-red-600" : "text-green-600"}`}>{stats.lowStock}</p>
             </div>
           </div>
         </GlassCard>
         <GlassCard hover={true} className="p-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-blue-500/20"><TrendingUp className="w-5 h-5 text-blue-400" /></div>
-            <div><p className="text-white/50 text-xs">Valor Inventario</p><p className="text-xl font-bold text-white">${stats.totalValue.toLocaleString("es-MX", { minimumFractionDigits: 2 })}</p></div>
+            <div className="p-2 rounded-lg bg-blue-100"><TrendingUp className="w-5 h-5 text-blue-600" /></div>
+            <div><p className="text-xs text-gray-500">Valor Inventario</p><p className="text-xl font-bold text-gray-800">${stats.totalValue.toLocaleString("es-MX", { minimumFractionDigits: 2 })}</p></div>
           </div>
         </GlassCard>
       </div>
@@ -272,20 +304,20 @@ function ProductsTab() {
       {/* Filters & Add */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar producto, marca o ingrediente..."
-            className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-emerald-500/50" />
+            className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
         </div>
         <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}
-          className="px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none">
+          className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-gray-700 text-sm focus:outline-none focus:border-emerald-400">
           <option value="">Todas las categorías</option>
           {Object.entries(PRODUCT_CATEGORIES).map(([k, v]) => (
             <option key={k} value={k}>{v.label}</option>
           ))}
         </select>
         <button onClick={() => { resetForm(); setEditingId(null); setShowForm(!showForm); }}
-          className="flex items-center gap-2 px-4 py-2.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-xl text-sm font-medium hover:bg-emerald-500/30 transition-all">
+          className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl shadow-lg hover:shadow-xl transition-all text-sm font-semibold">
           <Plus className="w-4 h-4" /> Nuevo Producto
         </button>
       </div>
@@ -293,105 +325,105 @@ function ProductsTab() {
       {/* Form */}
       {showForm && (
         <GlassCard className="p-5">
-          <h3 className="text-lg font-semibold text-white mb-4">{editingId ? "Editar Producto" : "Nuevo Producto"}</h3>
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">{editingId ? "Editar Producto" : "Nuevo Producto"}</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Nombre *</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Nombre *</label>
               <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Marca</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Marca</label>
               <input type="text" value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Categoría</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Categoría</label>
               <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none">
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-700 text-sm focus:outline-none focus:border-emerald-400">
                 {Object.entries(PRODUCT_CATEGORIES).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
               </select>
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Ingrediente Activo</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Ingrediente Activo</label>
               <input type="text" value={form.activeIngredient} onChange={(e) => setForm({ ...form, activeIngredient: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Concentración</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Concentración</label>
               <input type="text" value={form.concentration} onChange={(e) => setForm({ ...form, concentration: e.target.value })}
-                placeholder="Ej: 46-0-0" className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500/50" />
+                placeholder="Ej: 46-0-0" className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Presentación</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Presentación</label>
               <input type="text" value={form.presentation} onChange={(e) => setForm({ ...form, presentation: e.target.value })}
-                placeholder="Ej: Saco 50kg" className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500/50" />
+                placeholder="Ej: Saco 50kg" className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Unidad</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Unidad</label>
               <select value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none">
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-700 text-sm focus:outline-none focus:border-emerald-400">
                 {UNITS.map((u) => (<option key={u} value={u}>{u}</option>))}
               </select>
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Stock Actual</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Stock Actual</label>
               <input type="number" value={form.currentStock} onChange={(e) => setForm({ ...form, currentStock: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Stock Mínimo</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Stock Mínimo</label>
               <input type="number" value={form.minimumStock} onChange={(e) => setForm({ ...form, minimumStock: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Costo por Unidad ($)</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Costo por Unidad ($)</label>
               <input type="number" step="0.01" value={form.costPerUnit} onChange={(e) => setForm({ ...form, costPerUnit: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Proveedor</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Proveedor</label>
               <input type="text" value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Contacto Proveedor</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Contacto Proveedor</label>
               <input type="text" value={form.supplierContact} onChange={(e) => setForm({ ...form, supplierContact: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">No. Lote</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">No. Lote</label>
               <input type="text" value={form.lotNumber} onChange={(e) => setForm({ ...form, lotNumber: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Fecha Caducidad</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Fecha Caducidad</label>
               <input type="date" value={form.expirationDate} onChange={(e) => setForm({ ...form, expirationDate: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Ubicación Almacén</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Ubicación Almacén</label>
               <input type="text" value={form.storageLocation} onChange={(e) => setForm({ ...form, storageLocation: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">URL Foto</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">URL Foto</label>
               <input type="text" value={form.photoUrl} onChange={(e) => setForm({ ...form, photoUrl: e.target.value })}
-                placeholder="https://..." className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500/50" />
+                placeholder="https://..." className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
             </div>
             <div className="sm:col-span-2 lg:col-span-3">
-              <label className="text-white/60 text-xs mb-1 block">Descripción</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Descripción</label>
               <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500/50 resize-none" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 resize-none" />
             </div>
           </div>
           <div className="flex gap-3 mt-4">
             <button onClick={handleSave} disabled={!form.name || createMut.isPending || updateMut.isPending}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-lg text-sm font-medium hover:bg-emerald-500/30 transition-all disabled:opacity-50">
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg text-sm font-semibold shadow-md hover:shadow-lg transition-all disabled:opacity-50">
               <Save className="w-4 h-4" /> {editingId ? "Actualizar" : "Guardar"}
             </button>
             <button onClick={() => { setShowForm(false); setEditingId(null); resetForm(); }}
-              className="flex items-center gap-2 px-4 py-2 bg-white/5 text-white/60 border border-white/10 rounded-lg text-sm hover:bg-white/10 transition-all">
+              className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-600 border border-gray-200 rounded-lg text-sm hover:bg-gray-200 transition-all">
               <X className="w-4 h-4" /> Cancelar
             </button>
           </div>
@@ -401,7 +433,11 @@ function ProductsTab() {
       {/* Product List */}
       <div className="space-y-3">
         {filtered.length === 0 ? (
-          <GlassCard className="p-8 text-center"><p className="text-white/40">No se encontraron productos</p></GlassCard>
+          <GlassCard className="p-8 text-center">
+            <Package className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-gray-500">No se encontraron productos</p>
+            <p className="text-gray-400 text-sm mt-1">Agrega tu primer producto con el botón de arriba</p>
+          </GlassCard>
         ) : filtered.map((p: any) => {
           const cat = PRODUCT_CATEGORIES[p.category] || PRODUCT_CATEGORIES.otro;
           const stock = Number(p.currentStock || 0);
@@ -415,25 +451,25 @@ function ProductsTab() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-start gap-3 flex-1 min-w-0">
                     {p.photoUrl ? (
-                      <img src={p.photoUrl} alt={p.name} className="w-12 h-12 rounded-lg object-cover border border-white/10 flex-shrink-0" />
+                      <img src={p.photoUrl} alt={p.name} className="w-12 h-12 rounded-lg object-cover border border-gray-200 flex-shrink-0" />
                     ) : (
-                      <div className="w-12 h-12 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center flex-shrink-0">
-                        <Package className="w-6 h-6 text-white/30" />
+                      <div className="w-12 h-12 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center flex-shrink-0">
+                        <Package className="w-6 h-6 text-emerald-400" />
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h4 className="text-white font-medium truncate">{p.name}</h4>
-                        <span className={`px-2 py-0.5 rounded-full text-xs bg-${cat.color}-500/20 text-${cat.color}-300 border border-${cat.color}-500/20`}>
+                        <h4 className="text-gray-800 font-semibold truncate">{p.name}</h4>
+                        <span className={`px-2 py-0.5 rounded-full text-xs bg-${cat.color}-100 text-${cat.color}-700 border border-${cat.color}-200`}>
                           {cat.label}
                         </span>
                         {isLow && (
-                          <span className="px-2 py-0.5 rounded-full text-xs bg-red-500/20 text-red-300 border border-red-500/20 flex items-center gap-1">
+                          <span className="px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-700 border border-red-200 flex items-center gap-1">
                             <AlertTriangle className="w-3 h-3" /> Stock Bajo
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-4 mt-1 text-xs text-white/50">
+                      <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
                         {p.brand && <span>{p.brand}</span>}
                         {p.activeIngredient && <span>{p.activeIngredient}</span>}
                         {p.presentation && <span>{p.presentation}</span>}
@@ -442,51 +478,51 @@ function ProductsTab() {
                   </div>
                   <div className="flex items-center gap-4 flex-shrink-0">
                     <div className="text-right">
-                      <p className={`text-lg font-bold ${isLow ? "text-red-400" : "text-emerald-400"}`}>
-                        {stock.toLocaleString("es-MX")} <span className="text-xs font-normal text-white/50">{p.unit}</span>
+                      <p className={`text-lg font-bold ${isLow ? "text-red-600" : "text-emerald-600"}`}>
+                        {stock.toLocaleString("es-MX")} <span className="text-xs font-normal text-gray-500">{p.unit}</span>
                       </p>
-                      {minStock > 0 && <p className="text-xs text-white/40">Mín: {minStock}</p>}
+                      {minStock > 0 && <p className="text-xs text-gray-400">Mín: {minStock}</p>}
                     </div>
-                    {isExpanded ? <ChevronUp className="w-5 h-5 text-white/40" /> : <ChevronDown className="w-5 h-5 text-white/40" />}
+                    {isExpanded ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
                   </div>
                 </div>
               </div>
 
               {isExpanded && (
-                <div className="border-t border-white/10 p-4 space-y-4">
+                <div className="border-t border-gray-200/60 p-4 space-y-4 bg-gray-50/30">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-                    {p.costPerUnit && <div><span className="text-white/40">Costo/Unidad:</span> <span className="text-white">${Number(p.costPerUnit).toFixed(2)}</span></div>}
-                    {p.supplier && <div><span className="text-white/40">Proveedor:</span> <span className="text-white">{p.supplier}</span></div>}
-                    {p.lotNumber && <div><span className="text-white/40">Lote:</span> <span className="text-white">{p.lotNumber}</span></div>}
-                    {p.expirationDate && <div><span className="text-white/40">Caducidad:</span> <span className="text-white">{p.expirationDate}</span></div>}
-                    {p.storageLocation && <div><span className="text-white/40">Ubicación:</span> <span className="text-white">{p.storageLocation}</span></div>}
-                    {p.concentration && <div><span className="text-white/40">Concentración:</span> <span className="text-white">{p.concentration}</span></div>}
+                    {p.costPerUnit && <div><span className="text-gray-400">Costo/Unidad:</span> <span className="text-gray-700 font-medium">${Number(p.costPerUnit).toFixed(2)}</span></div>}
+                    {p.supplier && <div><span className="text-gray-400">Proveedor:</span> <span className="text-gray-700">{p.supplier}</span></div>}
+                    {p.lotNumber && <div><span className="text-gray-400">Lote:</span> <span className="text-gray-700">{p.lotNumber}</span></div>}
+                    {p.expirationDate && <div><span className="text-gray-400">Caducidad:</span> <span className="text-gray-700">{p.expirationDate}</span></div>}
+                    {p.storageLocation && <div><span className="text-gray-400">Ubicación:</span> <span className="text-gray-700">{p.storageLocation}</span></div>}
+                    {p.concentration && <div><span className="text-gray-400">Concentración:</span> <span className="text-gray-700">{p.concentration}</span></div>}
                   </div>
-                  {p.description && <p className="text-sm text-white/60">{p.description}</p>}
+                  {p.description && <p className="text-sm text-gray-500">{p.description}</p>}
 
                   {showMovementForm === p.id ? (
-                    <div className="bg-white/5 rounded-lg p-3 space-y-3">
-                      <h5 className="text-sm font-medium text-white">Registrar Movimiento</h5>
+                    <div className="bg-white rounded-lg p-3 space-y-3 border border-gray-200">
+                      <h5 className="text-sm font-semibold text-gray-700">Registrar Movimiento</h5>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <select value={movementForm.type} onChange={(e) => setMovementForm({ ...movementForm, type: e.target.value })}
-                          className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none">
+                          className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-700 text-sm focus:outline-none focus:border-emerald-400">
                           <option value="entrada">Entrada</option>
                           <option value="salida">Salida</option>
                           <option value="ajuste">Ajuste</option>
                           <option value="devolucion">Devolución</option>
                         </select>
                         <input type="number" step="0.01" value={movementForm.quantity} onChange={(e) => setMovementForm({ ...movementForm, quantity: e.target.value })}
-                          placeholder="Cantidad" className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none" />
+                          placeholder="Cantidad" className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400" />
                         <input type="text" value={movementForm.reason} onChange={(e) => setMovementForm({ ...movementForm, reason: e.target.value })}
-                          placeholder="Motivo" className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none" />
+                          placeholder="Motivo" className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400" />
                       </div>
                       <div className="flex gap-2">
                         <button onClick={() => handleAddMovement(p.id)} disabled={addMovementMut.isPending}
-                          className="px-3 py-1.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-lg text-xs font-medium hover:bg-emerald-500/30 transition-all disabled:opacity-50">
+                          className="px-3 py-1.5 bg-emerald-100 text-emerald-700 border border-emerald-300 rounded-lg text-xs font-medium hover:bg-emerald-200 transition-all disabled:opacity-50">
                           Registrar
                         </button>
                         <button onClick={() => setShowMovementForm(null)}
-                          className="px-3 py-1.5 bg-white/5 text-white/60 border border-white/10 rounded-lg text-xs hover:bg-white/10 transition-all">
+                          className="px-3 py-1.5 bg-gray-100 text-gray-600 border border-gray-200 rounded-lg text-xs hover:bg-gray-200 transition-all">
                           Cancelar
                         </button>
                       </div>
@@ -495,24 +531,24 @@ function ProductsTab() {
 
                   {p.movements && p.movements.length > 0 && (
                     <div>
-                      <h5 className="text-sm font-medium text-white/70 mb-2 flex items-center gap-1"><History className="w-4 h-4" /> Últimos Movimientos</h5>
+                      <h5 className="text-sm font-medium text-gray-600 mb-2 flex items-center gap-1"><History className="w-4 h-4" /> Últimos Movimientos</h5>
                       <div className="space-y-1">
                         {p.movements.slice(0, 5).map((m: any) => (
-                          <div key={m.id} className="flex items-center justify-between text-xs bg-white/5 rounded-lg px-3 py-2">
+                          <div key={m.id} className="flex items-center justify-between text-xs bg-white rounded-lg px-3 py-2 border border-gray-100">
                             <div className="flex items-center gap-2">
                               {m.movementType === "entrada" || m.movementType === "devolucion" ? (
-                                <ArrowDownCircle className="w-4 h-4 text-emerald-400" />
+                                <ArrowDownCircle className="w-4 h-4 text-emerald-500" />
                               ) : (
-                                <ArrowUpCircle className="w-4 h-4 text-red-400" />
+                                <ArrowUpCircle className="w-4 h-4 text-red-500" />
                               )}
-                              <span className="text-white capitalize">{m.movementType}</span>
-                              {m.reason && <span className="text-white/40">- {m.reason}</span>}
+                              <span className="text-gray-700 capitalize">{m.movementType}</span>
+                              {m.reason && <span className="text-gray-400">- {m.reason}</span>}
                             </div>
                             <div className="flex items-center gap-3">
-                              <span className={m.movementType === "entrada" || m.movementType === "devolucion" ? "text-emerald-400" : "text-red-400"}>
+                              <span className={m.movementType === "entrada" || m.movementType === "devolucion" ? "text-emerald-600 font-medium" : "text-red-600 font-medium"}>
                                 {m.movementType === "entrada" || m.movementType === "devolucion" ? "+" : "-"}{Number(m.quantity).toLocaleString("es-MX")}
                               </span>
-                              <span className="text-white/30">{new Date(m.createdAt).toLocaleDateString("es-MX")}</span>
+                              <span className="text-gray-400">{new Date(m.createdAt).toLocaleDateString("es-MX")}</span>
                             </div>
                           </div>
                         ))}
@@ -520,17 +556,17 @@ function ProductsTab() {
                     </div>
                   )}
 
-                  <div className="flex gap-2 pt-2 border-t border-white/10">
+                  <div className="flex gap-2 pt-2 border-t border-gray-200/60">
                     <button onClick={() => setShowMovementForm(showMovementForm === p.id ? null : p.id)}
-                      className="flex items-center gap-1 px-3 py-1.5 bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded-lg text-xs font-medium hover:bg-blue-500/30 transition-all">
+                      className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 transition-all">
                       <RefreshCw className="w-3 h-3" /> Movimiento
                     </button>
                     <button onClick={() => startEdit(p)}
-                      className="flex items-center gap-1 px-3 py-1.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-medium hover:bg-amber-500/30 transition-all">
+                      className="flex items-center gap-1 px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-xs font-medium hover:bg-amber-100 transition-all">
                       <Edit2 className="w-3 h-3" /> Editar
                     </button>
                     <button onClick={() => { if (confirm("¿Desactivar este producto?")) deleteMut.mutate({ id: p.id }); }}
-                      className="flex items-center gap-1 px-3 py-1.5 bg-red-500/20 text-red-300 border border-red-500/30 rounded-lg text-xs font-medium hover:bg-red-500/30 transition-all">
+                      className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded-lg text-xs font-medium hover:bg-red-100 transition-all">
                       <Trash2 className="w-3 h-3" /> Desactivar
                     </button>
                   </div>
@@ -558,20 +594,23 @@ function ToolsTab() {
   const { data: tools = [], isLoading } = trpc.warehouse.listTools.useQuery();
 
   const createMut = trpc.warehouse.createTool.useMutation({
-    onSuccess: () => { utils.warehouse.listTools.invalidate(); setShowForm(false); resetForm(); },
+    onSuccess: () => { utils.warehouse.listTools.invalidate(); setShowForm(false); resetForm(); toast.success("Herramienta creada"); },
+    onError: (e: any) => toast.error(e.message || "Error al crear herramienta"),
   });
   const updateMut = trpc.warehouse.updateTool.useMutation({
-    onSuccess: () => { utils.warehouse.listTools.invalidate(); setEditingId(null); resetForm(); },
+    onSuccess: () => { utils.warehouse.listTools.invalidate(); setEditingId(null); setShowForm(false); resetForm(); toast.success("Herramienta actualizada"); },
+    onError: (e: any) => toast.error(e.message || "Error al actualizar"),
   });
   const deleteMut = trpc.warehouse.deleteTool.useMutation({
-    onSuccess: () => { utils.warehouse.listTools.invalidate(); },
+    onSuccess: () => { utils.warehouse.listTools.invalidate(); toast.success("Herramienta eliminada"); },
+    onError: (e: any) => toast.error(e.message || "Error al eliminar"),
   });
 
   const [form, setForm] = useState({
     name: "", category: "otro", brand: "", model: "", serialNumber: "",
     description: "", status: "disponible", conditionState: "bueno",
     acquisitionDate: "", acquisitionCost: "", currentValue: "",
-    storageLocation: "", assignedTo: "", lastMaintenanceDate: "",
+    storageLocation: "", lastMaintenanceDate: "",
     nextMaintenanceDate: "", maintenanceNotes: "", photoUrl: "", quantity: "1",
   });
 
@@ -580,7 +619,7 @@ function ToolsTab() {
       name: "", category: "otro", brand: "", model: "", serialNumber: "",
       description: "", status: "disponible", conditionState: "bueno",
       acquisitionDate: "", acquisitionCost: "", currentValue: "",
-      storageLocation: "", assignedTo: "", lastMaintenanceDate: "",
+      storageLocation: "", lastMaintenanceDate: "",
       nextMaintenanceDate: "", maintenanceNotes: "", photoUrl: "", quantity: "1",
     });
   }, []);
@@ -632,7 +671,7 @@ function ToolsTab() {
       description: t.description || "", status: t.status || "disponible",
       conditionState: t.conditionState || "bueno", acquisitionDate: t.acquisitionDate || "",
       acquisitionCost: String(t.acquisitionCost || ""), currentValue: String(t.currentValue || ""),
-      storageLocation: t.storageLocation || "", assignedTo: t.assignedTo || "",
+      storageLocation: t.storageLocation || "",
       lastMaintenanceDate: t.lastMaintenanceDate || "", nextMaintenanceDate: t.nextMaintenanceDate || "",
       maintenanceNotes: t.maintenanceNotes || "", photoUrl: t.photoUrl || "",
       quantity: String(t.quantity || 1),
@@ -641,7 +680,16 @@ function ToolsTab() {
     setShowForm(true);
   };
 
-  if (isLoading) return <div className="text-white/60 text-center py-12">Cargando herramientas...</div>;
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-amber-200 border-t-amber-600" />
+          <p className="text-amber-600 text-sm">Cargando herramientas...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -649,28 +697,28 @@ function ToolsTab() {
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
         <GlassCard hover={true} className="p-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-amber-500/20"><Wrench className="w-5 h-5 text-amber-400" /></div>
-            <div><p className="text-white/50 text-xs">Total Equipos</p><p className="text-xl font-bold text-white">{stats.total}</p></div>
+            <div className="p-2 rounded-lg bg-amber-100"><Wrench className="w-5 h-5 text-amber-600" /></div>
+            <div><p className="text-xs text-gray-500">Total Equipos</p><p className="text-xl font-bold text-gray-800">{stats.total}</p></div>
           </div>
         </GlassCard>
         <GlassCard hover={true} className="p-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-emerald-500/20"><Box className="w-5 h-5 text-emerald-400" /></div>
-            <div><p className="text-white/50 text-xs">Disponibles</p><p className="text-xl font-bold text-emerald-400">{stats.available}</p></div>
+            <div className="p-2 rounded-lg bg-emerald-100"><Box className="w-5 h-5 text-emerald-600" /></div>
+            <div><p className="text-xs text-gray-500">Disponibles</p><p className="text-xl font-bold text-emerald-600">{stats.available}</p></div>
           </div>
         </GlassCard>
         <GlassCard hover={true} className="p-4">
           <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-lg ${stats.inMaintenance > 0 ? "bg-yellow-500/20" : "bg-green-500/20"}`}>
-              <AlertTriangle className={`w-5 h-5 ${stats.inMaintenance > 0 ? "text-yellow-400" : "text-green-400"}`} />
+            <div className={`p-2 rounded-lg ${stats.inMaintenance > 0 ? "bg-yellow-100" : "bg-green-100"}`}>
+              <AlertTriangle className={`w-5 h-5 ${stats.inMaintenance > 0 ? "text-yellow-600" : "text-green-600"}`} />
             </div>
-            <div><p className="text-white/50 text-xs">Mantenimiento/Daño</p><p className="text-xl font-bold text-yellow-400">{stats.inMaintenance}</p></div>
+            <div><p className="text-xs text-gray-500">Mantenimiento/Daño</p><p className="text-xl font-bold text-yellow-600">{stats.inMaintenance}</p></div>
           </div>
         </GlassCard>
         <GlassCard hover={true} className="p-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-blue-500/20"><TrendingUp className="w-5 h-5 text-blue-400" /></div>
-            <div><p className="text-white/50 text-xs">Valor Total</p><p className="text-xl font-bold text-white">${stats.totalValue.toLocaleString("es-MX", { minimumFractionDigits: 2 })}</p></div>
+            <div className="p-2 rounded-lg bg-blue-100"><TrendingUp className="w-5 h-5 text-blue-600" /></div>
+            <div><p className="text-xs text-gray-500">Valor Total</p><p className="text-xl font-bold text-gray-800">${stats.totalValue.toLocaleString("es-MX", { minimumFractionDigits: 2 })}</p></div>
           </div>
         </GlassCard>
       </div>
@@ -678,23 +726,23 @@ function ToolsTab() {
       {/* Filters & Add */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar herramienta, marca o serie..."
-            className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-amber-500/50" />
+            className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-gray-800 text-sm focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" />
         </div>
         <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}
-          className="px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none">
+          className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-gray-700 text-sm focus:outline-none focus:border-amber-400">
           <option value="">Todas las categorías</option>
           {Object.entries(TOOL_CATEGORIES).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
         </select>
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none">
+          className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-gray-700 text-sm focus:outline-none focus:border-amber-400">
           <option value="">Todos los estados</option>
           {Object.entries(TOOL_STATUS).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
         </select>
         <button onClick={() => { resetForm(); setEditingId(null); setShowForm(!showForm); }}
-          className="flex items-center gap-2 px-4 py-2.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-xl text-sm font-medium hover:bg-amber-500/30 transition-all">
+          className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl shadow-lg hover:shadow-xl transition-all text-sm font-semibold">
           <Plus className="w-4 h-4" /> Nueva Herramienta
         </button>
       </div>
@@ -702,112 +750,107 @@ function ToolsTab() {
       {/* Form */}
       {showForm && (
         <GlassCard className="p-5">
-          <h3 className="text-lg font-semibold text-white mb-4">{editingId ? "Editar Herramienta" : "Nueva Herramienta"}</h3>
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">{editingId ? "Editar Herramienta" : "Nueva Herramienta"}</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Nombre *</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Nombre *</label>
               <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Categoría</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Categoría</label>
               <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none">
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-700 text-sm focus:outline-none focus:border-amber-400">
                 {Object.entries(TOOL_CATEGORIES).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
               </select>
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Marca</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Marca</label>
               <input type="text" value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Modelo</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Modelo</label>
               <input type="text" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">No. Serie</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">No. Serie</label>
               <input type="text" value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Cantidad</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Cantidad</label>
               <input type="number" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Estado</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Estado</label>
               <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none">
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-700 text-sm focus:outline-none focus:border-amber-400">
                 {Object.entries(TOOL_STATUS).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
               </select>
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Condición</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Condición</label>
               <select value={form.conditionState} onChange={(e) => setForm({ ...form, conditionState: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none">
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-700 text-sm focus:outline-none focus:border-amber-400">
                 {Object.entries(TOOL_CONDITION).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
               </select>
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Fecha Adquisición</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Fecha Adquisición</label>
               <input type="date" value={form.acquisitionDate} onChange={(e) => setForm({ ...form, acquisitionDate: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Costo Adquisición ($)</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Costo Adquisición ($)</label>
               <input type="number" step="0.01" value={form.acquisitionCost} onChange={(e) => setForm({ ...form, acquisitionCost: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Valor Actual ($)</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Valor Actual ($)</label>
               <input type="number" step="0.01" value={form.currentValue} onChange={(e) => setForm({ ...form, currentValue: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Ubicación</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Ubicación</label>
               <input type="text" value={form.storageLocation} onChange={(e) => setForm({ ...form, storageLocation: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Asignado a</label>
-              <input type="text" value={form.assignedTo} onChange={(e) => setForm({ ...form, assignedTo: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500/50" />
-            </div>
-            <div>
-              <label className="text-white/60 text-xs mb-1 block">Último Mantenimiento</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Último Mantenimiento</label>
               <input type="date" value={form.lastMaintenanceDate} onChange={(e) => setForm({ ...form, lastMaintenanceDate: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Próximo Mantenimiento</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Próximo Mantenimiento</label>
               <input type="date" value={form.nextMaintenanceDate} onChange={(e) => setForm({ ...form, nextMaintenanceDate: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500/50" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" />
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">URL Foto</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">URL Foto</label>
               <input type="text" value={form.photoUrl} onChange={(e) => setForm({ ...form, photoUrl: e.target.value })}
-                placeholder="https://..." className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500/50" />
+                placeholder="https://..." className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" />
             </div>
             <div className="sm:col-span-2 lg:col-span-3">
-              <label className="text-white/60 text-xs mb-1 block">Descripción</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Descripción</label>
               <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500/50 resize-none" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 resize-none" />
             </div>
             <div className="sm:col-span-2 lg:col-span-3">
-              <label className="text-white/60 text-xs mb-1 block">Notas de Mantenimiento</label>
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Notas de Mantenimiento</label>
               <textarea value={form.maintenanceNotes} onChange={(e) => setForm({ ...form, maintenanceNotes: e.target.value })} rows={2}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500/50 resize-none" />
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 resize-none" />
             </div>
           </div>
           <div className="flex gap-3 mt-4">
             <button onClick={handleSave} disabled={!form.name || createMut.isPending || updateMut.isPending}
-              className="flex items-center gap-2 px-4 py-2 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-lg text-sm font-medium hover:bg-amber-500/30 transition-all disabled:opacity-50">
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg text-sm font-semibold shadow-md hover:shadow-lg transition-all disabled:opacity-50">
               <Save className="w-4 h-4" /> {editingId ? "Actualizar" : "Guardar"}
             </button>
             <button onClick={() => { setShowForm(false); setEditingId(null); resetForm(); }}
-              className="flex items-center gap-2 px-4 py-2 bg-white/5 text-white/60 border border-white/10 rounded-lg text-sm hover:bg-white/10 transition-all">
+              className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-600 border border-gray-200 rounded-lg text-sm hover:bg-gray-200 transition-all">
               <X className="w-4 h-4" /> Cancelar
             </button>
           </div>
@@ -817,7 +860,11 @@ function ToolsTab() {
       {/* Tool List */}
       <div className="space-y-3">
         {filtered.length === 0 ? (
-          <GlassCard className="p-8 text-center"><p className="text-white/40">No se encontraron herramientas</p></GlassCard>
+          <GlassCard className="p-8 text-center">
+            <Wrench className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-gray-500">No se encontraron herramientas</p>
+            <p className="text-gray-400 text-sm mt-1">Agrega tu primera herramienta con el botón de arriba</p>
+          </GlassCard>
         ) : filtered.map((t: any) => {
           const cat = TOOL_CATEGORIES[t.category] || TOOL_CATEGORIES.otro;
           const st = TOOL_STATUS[t.status] || TOOL_STATUS.disponible;
@@ -830,62 +877,62 @@ function ToolsTab() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-start gap-3 flex-1 min-w-0">
                     {t.photoUrl ? (
-                      <img src={t.photoUrl} alt={t.name} className="w-12 h-12 rounded-lg object-cover border border-white/10 flex-shrink-0" />
+                      <img src={t.photoUrl} alt={t.name} className="w-12 h-12 rounded-lg object-cover border border-gray-200 flex-shrink-0" />
                     ) : (
-                      <div className="w-12 h-12 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center flex-shrink-0">
-                        <Wrench className="w-6 h-6 text-white/30" />
+                      <div className="w-12 h-12 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-center flex-shrink-0">
+                        <Wrench className="w-6 h-6 text-amber-400" />
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h4 className="text-white font-medium truncate">{t.name}</h4>
-                        <span className={`px-2 py-0.5 rounded-full text-xs bg-${cat.color}-500/20 text-${cat.color}-300 border border-${cat.color}-500/20`}>
+                        <h4 className="text-gray-800 font-semibold truncate">{t.name}</h4>
+                        <span className={`px-2 py-0.5 rounded-full text-xs bg-${cat.color}-100 text-${cat.color}-700 border border-${cat.color}-200`}>
                           {cat.label}
                         </span>
-                        <span className={`px-2 py-0.5 rounded-full text-xs bg-${st.color}-500/20 text-${st.color}-300 border border-${st.color}-500/20`}>
+                        <span className={`px-2 py-0.5 rounded-full text-xs bg-${st.color}-100 text-${st.color}-700 border border-${st.color}-200`}>
                           {st.label}
                         </span>
-                        <span className={`px-2 py-0.5 rounded-full text-xs bg-${cond.color}-500/20 text-${cond.color}-300 border border-${cond.color}-500/20`}>
+                        <span className={`px-2 py-0.5 rounded-full text-xs bg-${cond.color}-100 text-${cond.color}-700 border border-${cond.color}-200`}>
                           {cond.label}
                         </span>
                       </div>
-                      <div className="flex items-center gap-4 mt-1 text-xs text-white/50">
+                      <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
                         {t.brand && <span>{t.brand}</span>}
                         {t.model && <span>{t.model}</span>}
                         {t.serialNumber && <span>S/N: {t.serialNumber}</span>}
-                        {t.quantity > 1 && <span className="text-amber-300">x{t.quantity}</span>}
+                        {t.quantity > 1 && <span className="text-amber-600 font-medium">x{t.quantity}</span>}
                       </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {t.assignedTo && (
-                      <span className="text-xs text-white/40 bg-white/5 px-2 py-1 rounded-lg">{t.assignedTo}</span>
+                      <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-lg">{t.assignedTo}</span>
                     )}
-                    {isExpanded ? <ChevronUp className="w-5 h-5 text-white/40" /> : <ChevronDown className="w-5 h-5 text-white/40" />}
+                    {isExpanded ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
                   </div>
                 </div>
               </div>
 
               {isExpanded && (
-                <div className="border-t border-white/10 p-4 space-y-4">
+                <div className="border-t border-gray-200/60 p-4 space-y-4 bg-gray-50/30">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-                    {t.acquisitionDate && <div><span className="text-white/40">Adquisición:</span> <span className="text-white">{t.acquisitionDate}</span></div>}
-                    {t.acquisitionCost && <div><span className="text-white/40">Costo:</span> <span className="text-white">${Number(t.acquisitionCost).toLocaleString("es-MX")}</span></div>}
-                    {t.currentValue && <div><span className="text-white/40">Valor Actual:</span> <span className="text-white">${Number(t.currentValue).toLocaleString("es-MX")}</span></div>}
-                    {t.storageLocation && <div><span className="text-white/40">Ubicación:</span> <span className="text-white">{t.storageLocation}</span></div>}
-                    {t.lastMaintenanceDate && <div><span className="text-white/40">Último Mtto:</span> <span className="text-white">{t.lastMaintenanceDate}</span></div>}
-                    {t.nextMaintenanceDate && <div><span className="text-white/40">Próximo Mtto:</span> <span className="text-white">{t.nextMaintenanceDate}</span></div>}
+                    {t.acquisitionDate && <div><span className="text-gray-400">Adquisición:</span> <span className="text-gray-700">{t.acquisitionDate}</span></div>}
+                    {t.acquisitionCost && <div><span className="text-gray-400">Costo:</span> <span className="text-gray-700 font-medium">${Number(t.acquisitionCost).toLocaleString("es-MX")}</span></div>}
+                    {t.currentValue && <div><span className="text-gray-400">Valor Actual:</span> <span className="text-gray-700 font-medium">${Number(t.currentValue).toLocaleString("es-MX")}</span></div>}
+                    {t.storageLocation && <div><span className="text-gray-400">Ubicación:</span> <span className="text-gray-700">{t.storageLocation}</span></div>}
+                    {t.lastMaintenanceDate && <div><span className="text-gray-400">Último Mtto:</span> <span className="text-gray-700">{t.lastMaintenanceDate}</span></div>}
+                    {t.nextMaintenanceDate && <div><span className="text-gray-400">Próximo Mtto:</span> <span className="text-gray-700">{t.nextMaintenanceDate}</span></div>}
                   </div>
-                  {t.description && <p className="text-sm text-white/60">{t.description}</p>}
-                  {t.maintenanceNotes && <p className="text-sm text-white/60 italic">Notas: {t.maintenanceNotes}</p>}
+                  {t.description && <p className="text-sm text-gray-500">{t.description}</p>}
+                  {t.maintenanceNotes && <p className="text-sm text-gray-500 italic">Notas: {t.maintenanceNotes}</p>}
 
-                  <div className="flex gap-2 pt-2 border-t border-white/10">
+                  <div className="flex gap-2 pt-2 border-t border-gray-200/60">
                     <button onClick={() => startEdit(t)}
-                      className="flex items-center gap-1 px-3 py-1.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-medium hover:bg-amber-500/30 transition-all">
+                      className="flex items-center gap-1 px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-xs font-medium hover:bg-amber-100 transition-all">
                       <Edit2 className="w-3 h-3" /> Editar
                     </button>
                     <button onClick={() => { if (confirm("¿Desactivar esta herramienta?")) deleteMut.mutate({ id: t.id }); }}
-                      className="flex items-center gap-1 px-3 py-1.5 bg-red-500/20 text-red-300 border border-red-500/30 rounded-lg text-xs font-medium hover:bg-red-500/30 transition-all">
+                      className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded-lg text-xs font-medium hover:bg-red-100 transition-all">
                       <Trash2 className="w-3 h-3" /> Desactivar
                     </button>
                   </div>
