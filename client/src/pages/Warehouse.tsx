@@ -7,7 +7,8 @@ import { toast } from "sonner";
 import {
   Package, Wrench, Plus, Search, Edit2, Trash2, X, Save,
   AlertTriangle, ArrowDownCircle, ArrowUpCircle, ChevronDown, ChevronUp,
-  Box, TrendingUp, History, RefreshCw, Warehouse as WarehouseIcon
+  Box, TrendingUp, History, RefreshCw, Warehouse as WarehouseIcon,
+  Users, Phone, Mail, MapPin, Globe, Star, Building2, Copy, ExternalLink
 } from "lucide-react";
 
 // ===== CONSTANTES =====
@@ -73,6 +74,19 @@ const TOOL_CONDITION: Record<string, { label: string; color: string }> = {
 
 const UNITS = ["kg", "g", "lt", "ml", "ton", "bulto", "saco", "unidad", "otro"];
 
+const SUPPLIER_CATEGORIES: Record<string, { label: string; color: string }> = {
+  fertilizantes: { label: "Fertilizantes", color: "emerald" },
+  agroquimicos: { label: "Agroquímicos", color: "purple" },
+  semillas: { label: "Semillas", color: "green" },
+  herramientas: { label: "Herramientas", color: "amber" },
+  maquinaria: { label: "Maquinaria", color: "orange" },
+  riego: { label: "Riego", color: "cyan" },
+  empaques: { label: "Empaques", color: "stone" },
+  servicios: { label: "Servicios", color: "blue" },
+  combustible: { label: "Combustible", color: "red" },
+  otro: { label: "Otro", color: "gray" },
+};
+
 // ===== COMPONENTE PRINCIPAL =====
 
 export default function Warehouse() {
@@ -84,7 +98,7 @@ export default function Warehouse() {
 }
 
 function WarehouseContent() {
-  const [activeTab, setActiveTab] = useState<"products" | "tools">("products");
+  const [activeTab, setActiveTab] = useState<"products" | "tools" | "suppliers">("products");
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50 p-4 md:p-6 pb-24">
@@ -124,10 +138,22 @@ function WarehouseContent() {
             <Wrench className="w-4 h-4" />
             Herramientas y Equipos
           </button>
+          <button
+            onClick={() => setActiveTab("suppliers")}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 ${
+              activeTab === "suppliers"
+                ? "bg-blue-100 text-blue-700 border border-blue-300 shadow-md"
+                : "bg-white/60 text-gray-500 hover:bg-white hover:text-gray-700 border border-gray-200"
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            Proveedores
+          </button>
         </div>
 
         {activeTab === "products" && <ProductsTab />}
         {activeTab === "tools" && <ToolsTab />}
+        {activeTab === "suppliers" && <SuppliersTab />}
       </div>
     </div>
   );
@@ -172,7 +198,7 @@ function ProductsTab() {
   const [form, setForm] = useState({
     name: "", brand: "", category: "otro", description: "", activeIngredient: "",
     concentration: "", presentation: "", unit: "kg", currentStock: "0", minimumStock: "0",
-    costPerUnit: "", supplier: "", supplierContact: "", lotNumber: "", expirationDate: "",
+    costPerUnit: "", supplierId: "", lotNumber: "", expirationDate: "",
     storageLocation: "", photoUrl: "",
   });
 
@@ -180,11 +206,13 @@ function ProductsTab() {
     type: "entrada", quantity: "", reason: "",
   });
 
+  const { data: suppliers = [] } = trpc.warehouse.listSuppliers.useQuery();
+
   const resetForm = useCallback(() => {
     setForm({
       name: "", brand: "", category: "otro", description: "", activeIngredient: "",
       concentration: "", presentation: "", unit: "kg", currentStock: "0", minimumStock: "0",
-      costPerUnit: "", supplier: "", supplierContact: "", lotNumber: "", expirationDate: "",
+      costPerUnit: "", supplierId: "", lotNumber: "", expirationDate: "",
       storageLocation: "", photoUrl: "",
     });
   }, []);
@@ -216,7 +244,7 @@ function ProductsTab() {
         unit: form.unit || undefined,
         minimumStock: form.minimumStock ? Number(form.minimumStock) : undefined,
         costPerUnit: form.costPerUnit ? Number(form.costPerUnit) : undefined,
-        supplier: form.supplier || undefined, supplierContact: form.supplierContact || undefined,
+        supplierId: form.supplierId ? Number(form.supplierId) : undefined,
         lotNumber: form.lotNumber || undefined, expirationDate: form.expirationDate || undefined,
         storageLocation: form.storageLocation || undefined, photoUrl: form.photoUrl || undefined,
       });
@@ -229,7 +257,7 @@ function ProductsTab() {
         currentStock: form.currentStock ? Number(form.currentStock) : undefined,
         minimumStock: form.minimumStock ? Number(form.minimumStock) : undefined,
         costPerUnit: form.costPerUnit ? Number(form.costPerUnit) : undefined,
-        supplier: form.supplier || undefined, supplierContact: form.supplierContact || undefined,
+        supplierId: form.supplierId ? Number(form.supplierId) : undefined,
         lotNumber: form.lotNumber || undefined, expirationDate: form.expirationDate || undefined,
         storageLocation: form.storageLocation || undefined, photoUrl: form.photoUrl || undefined,
       });
@@ -243,7 +271,7 @@ function ProductsTab() {
       concentration: p.concentration || "", presentation: p.presentation || "",
       unit: p.unit || "kg", currentStock: String(p.currentStock || 0),
       minimumStock: String(p.minimumStock || 0), costPerUnit: String(p.costPerUnit || ""),
-      supplier: p.supplier || "", supplierContact: p.supplierContact || "",
+      supplierId: String(p.supplierId || ""),
       lotNumber: p.lotNumber || "", expirationDate: p.expirationDate || "",
       storageLocation: p.storageLocation || "", photoUrl: p.photoUrl || "",
     });
@@ -381,15 +409,15 @@ function ProductsTab() {
               <input type="number" step="0.01" value={form.costPerUnit} onChange={(e) => setForm({ ...form, costPerUnit: e.target.value })}
                 className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
             </div>
-            <div>
-              <label className="text-gray-600 text-xs mb-1 block font-medium">Proveedor</label>
-              <input type="text" value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })}
-                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
-            </div>
-            <div>
-              <label className="text-gray-600 text-xs mb-1 block font-medium">Contacto Proveedor</label>
-              <input type="text" value={form.supplierContact} onChange={(e) => setForm({ ...form, supplierContact: e.target.value })}
-                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
+            <div className="sm:col-span-2">
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Proveedor (del cat\u00e1logo)</label>
+              <select value={form.supplierId} onChange={(e) => setForm({ ...form, supplierId: e.target.value })}
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-700 text-sm focus:outline-none focus:border-emerald-400">
+                <option value="">Sin proveedor asignado</option>
+                {(suppliers as any[]).map((s: any) => (
+                  <option key={s.id} value={s.id}>{s.companyName}{s.contactName ? ` - ${s.contactName}` : ""}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="text-gray-600 text-xs mb-1 block font-medium">No. Lote</label>
@@ -492,7 +520,8 @@ function ProductsTab() {
                 <div className="border-t border-gray-200/60 p-4 space-y-4 bg-gray-50/30">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                     {p.costPerUnit && <div><span className="text-gray-400">Costo/Unidad:</span> <span className="text-gray-700 font-medium">${Number(p.costPerUnit).toFixed(2)}</span></div>}
-                    {p.supplier && <div><span className="text-gray-400">Proveedor:</span> <span className="text-gray-700">{p.supplier}</span></div>}
+                    {p.supplierId && <div><span className="text-gray-400">Proveedor:</span> <span className="text-gray-700">{(suppliers as any[]).find((s: any) => s.id === p.supplierId)?.companyName || p.supplier || "—"}</span></div>}
+                    {!p.supplierId && p.supplier && <div><span className="text-gray-400">Proveedor:</span> <span className="text-gray-700">{p.supplier}</span></div>}
                     {p.lotNumber && <div><span className="text-gray-400">Lote:</span> <span className="text-gray-700">{p.lotNumber}</span></div>}
                     {p.expirationDate && <div><span className="text-gray-400">Caducidad:</span> <span className="text-gray-700">{p.expirationDate}</span></div>}
                     {p.storageLocation && <div><span className="text-gray-400">Ubicación:</span> <span className="text-gray-700">{p.storageLocation}</span></div>}
@@ -934,6 +963,552 @@ function ToolsTab() {
                     <button onClick={() => { if (confirm("¿Desactivar esta herramienta?")) deleteMut.mutate({ id: t.id }); }}
                       className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded-lg text-xs font-medium hover:bg-red-100 transition-all">
                       <Trash2 className="w-3 h-3" /> Desactivar
+                    </button>
+                  </div>
+                </div>
+              )}
+            </GlassCard>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ===== PESTAÑA DE PROVEEDORES =====
+
+function SuppliersTab() {
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+
+  const utils = trpc.useUtils();
+  const { data: suppliers = [], isLoading } = trpc.warehouse.listSuppliers.useQuery();
+
+  const createMut = trpc.warehouse.createSupplier.useMutation({
+    onSuccess: () => { utils.warehouse.listSuppliers.invalidate(); setShowForm(false); resetForm(); toast.success("Proveedor creado"); },
+    onError: (e: any) => toast.error(e.message || "Error al crear proveedor"),
+  });
+  const updateMut = trpc.warehouse.updateSupplier.useMutation({
+    onSuccess: () => { utils.warehouse.listSuppliers.invalidate(); setEditingId(null); setShowForm(false); resetForm(); toast.success("Proveedor actualizado"); },
+    onError: (e: any) => toast.error(e.message || "Error al actualizar"),
+  });
+  const deleteMut = trpc.warehouse.deleteSupplier.useMutation({
+    onSuccess: () => { utils.warehouse.listSuppliers.invalidate(); toast.success("Proveedor eliminado"); },
+    onError: (e: any) => toast.error(e.message || "Error al eliminar"),
+  });
+
+  const [form, setForm] = useState({
+    companyName: "", contactName: "", phone: "", phone2: "",
+    email: "", website: "", rfc: "", address: "",
+    city: "", state: "", postalCode: "", category: "otro",
+    productsOffered: "", paymentTerms: "", bankAccount: "",
+    notes: "", rating: "",
+  });
+
+  const resetForm = useCallback(() => {
+    setForm({
+      companyName: "", contactName: "", phone: "", phone2: "",
+      email: "", website: "", rfc: "", address: "",
+      city: "", state: "", postalCode: "", category: "otro",
+      productsOffered: "", paymentTerms: "", bankAccount: "",
+      notes: "", rating: "",
+    });
+  }, []);
+
+  const filtered = useMemo(() => {
+    let list = (suppliers as any[]);
+    if (search) {
+      const s = search.toLowerCase();
+      list = list.filter((sup: any) =>
+        sup.companyName?.toLowerCase().includes(s) ||
+        sup.contactName?.toLowerCase().includes(s) ||
+        sup.email?.toLowerCase().includes(s) ||
+        sup.productsOffered?.toLowerCase().includes(s)
+      );
+    }
+    if (categoryFilter) list = list.filter((sup: any) => sup.category === categoryFilter);
+    return list;
+  }, [suppliers, search, categoryFilter]);
+
+  const handleSave = () => {
+    const data: any = {
+      companyName: form.companyName,
+      contactName: form.contactName || undefined,
+      phone: form.phone || undefined, phone2: form.phone2 || undefined,
+      email: form.email || undefined, website: form.website || undefined,
+      rfc: form.rfc || undefined, address: form.address || undefined,
+      city: form.city || undefined, state: form.state || undefined,
+      postalCode: form.postalCode || undefined, category: form.category || undefined,
+      productsOffered: form.productsOffered || undefined,
+      paymentTerms: form.paymentTerms || undefined,
+      bankAccount: form.bankAccount || undefined,
+      notes: form.notes || undefined,
+      rating: form.rating ? Number(form.rating) : undefined,
+    };
+    if (editingId) {
+      updateMut.mutate({ id: editingId, ...data });
+    } else {
+      createMut.mutate(data);
+    }
+  };
+
+  const startEdit = (s: any) => {
+    setForm({
+      companyName: s.companyName || "", contactName: s.contactName || "",
+      phone: s.phone || "", phone2: s.phone2 || "",
+      email: s.email || "", website: s.website || "",
+      rfc: s.rfc || "", address: s.address || "",
+      city: s.city || "", state: s.state || "",
+      postalCode: s.postalCode || "", category: s.category || "otro",
+      productsOffered: s.productsOffered || "",
+      paymentTerms: s.paymentTerms || "", bankAccount: s.bankAccount || "",
+      notes: s.notes || "", rating: String(s.rating || ""),
+    });
+    setEditingId(s.id);
+    setShowForm(true);
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success("Copiado al portapapeles");
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600" />
+          <p className="text-blue-600 text-sm">Cargando proveedores...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Stats */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <GlassCard hover={true} className="p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-blue-100"><Building2 className="w-5 h-5 text-blue-600" /></div>
+            <div><p className="text-xs text-gray-500">Total Proveedores</p><p className="text-xl font-bold text-gray-800">{(suppliers as any[]).length}</p></div>
+          </div>
+        </GlassCard>
+        <GlassCard hover={true} className="p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-emerald-100"><Package className="w-5 h-5 text-emerald-600" /></div>
+            <div><p className="text-xs text-gray-500">Categorías Activas</p><p className="text-xl font-bold text-gray-800">{new Set((suppliers as any[]).map((s: any) => s.category)).size}</p></div>
+          </div>
+        </GlassCard>
+        <GlassCard hover={true} className="p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-amber-100"><Star className="w-5 h-5 text-amber-600" /></div>
+            <div><p className="text-xs text-gray-500">Mejor Calificados</p><p className="text-xl font-bold text-gray-800">{(suppliers as any[]).filter((s: any) => s.rating && s.rating >= 4).length}</p></div>
+          </div>
+        </GlassCard>
+      </div>
+
+      {/* Filters & Add */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar proveedor, contacto, email..."
+            className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+        </div>
+        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}
+          className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-gray-700 text-sm focus:outline-none focus:border-blue-400">
+          <option value="">Todas las categorías</option>
+          {Object.entries(SUPPLIER_CATEGORIES).map(([k, v]) => (
+            <option key={k} value={k}>{v.label}</option>
+          ))}
+        </select>
+        <button onClick={() => { resetForm(); setEditingId(null); setShowForm(!showForm); }}
+          className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl shadow-lg hover:shadow-xl transition-all text-sm font-semibold">
+          <Plus className="w-4 h-4" /> Nuevo Proveedor
+        </button>
+      </div>
+
+      {/* Form */}
+      {showForm && (
+        <GlassCard className="p-5">
+          <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+            <Building2 className="w-5 h-5 text-blue-600" />
+            {editingId ? "Editar Proveedor" : "Nuevo Proveedor"}
+          </h3>
+
+          {/* Sección: Datos de la Empresa */}
+          <div className="mb-4">
+            <h4 className="text-sm font-semibold text-gray-600 mb-3 flex items-center gap-1 border-b border-gray-200 pb-2">
+              <Building2 className="w-4 h-4" /> Datos de la Empresa
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div>
+                <label className="text-gray-600 text-xs mb-1 block font-medium">Nombre de Empresa *</label>
+                <input type="text" value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })}
+                  placeholder="Ej: Agroquímicos del Norte S.A."
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+              </div>
+              <div>
+                <label className="text-gray-600 text-xs mb-1 block font-medium">RFC</label>
+                <input type="text" value={form.rfc} onChange={(e) => setForm({ ...form, rfc: e.target.value.toUpperCase() })}
+                  placeholder="Ej: AGN1234567A1" maxLength={13}
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 uppercase" />
+              </div>
+              <div>
+                <label className="text-gray-600 text-xs mb-1 block font-medium">Categoría</label>
+                <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-700 text-sm focus:outline-none focus:border-blue-400">
+                  {Object.entries(SUPPLIER_CATEGORIES).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
+                </select>
+              </div>
+              <div>
+                <label className="text-gray-600 text-xs mb-1 block font-medium">Sitio Web</label>
+                <input type="text" value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })}
+                  placeholder="https://www.ejemplo.com"
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+              </div>
+              <div>
+                <label className="text-gray-600 text-xs mb-1 block font-medium">Calificación (1-5)</label>
+                <select value={form.rating} onChange={(e) => setForm({ ...form, rating: e.target.value })}
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-700 text-sm focus:outline-none focus:border-blue-400">
+                  <option value="">Sin calificar</option>
+                  <option value="1">1 - Malo</option>
+                  <option value="2">2 - Regular</option>
+                  <option value="3">3 - Bueno</option>
+                  <option value="4">4 - Muy Bueno</option>
+                  <option value="5">5 - Excelente</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Sección: Contacto */}
+          <div className="mb-4">
+            <h4 className="text-sm font-semibold text-gray-600 mb-3 flex items-center gap-1 border-b border-gray-200 pb-2">
+              <Phone className="w-4 h-4" /> Información de Contacto
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div>
+                <label className="text-gray-600 text-xs mb-1 block font-medium">Nombre de Contacto</label>
+                <input type="text" value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })}
+                  placeholder="Ej: Juan Pérez"
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+              </div>
+              <div>
+                <label className="text-gray-600 text-xs mb-1 block font-medium">Teléfono Principal</label>
+                <input type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  placeholder="Ej: 614-123-4567"
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+              </div>
+              <div>
+                <label className="text-gray-600 text-xs mb-1 block font-medium">Teléfono Secundario</label>
+                <input type="tel" value={form.phone2} onChange={(e) => setForm({ ...form, phone2: e.target.value })}
+                  placeholder="Ej: 614-765-4321"
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+              </div>
+              <div>
+                <label className="text-gray-600 text-xs mb-1 block font-medium">Correo Electrónico</label>
+                <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
+                  placeholder="ventas@ejemplo.com"
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+              </div>
+            </div>
+          </div>
+
+          {/* Sección: Dirección */}
+          <div className="mb-4">
+            <h4 className="text-sm font-semibold text-gray-600 mb-3 flex items-center gap-1 border-b border-gray-200 pb-2">
+              <MapPin className="w-4 h-4" /> Dirección
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="sm:col-span-2">
+                <label className="text-gray-600 text-xs mb-1 block font-medium">Dirección</label>
+                <input type="text" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })}
+                  placeholder="Calle, número, colonia"
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+              </div>
+              <div>
+                <label className="text-gray-600 text-xs mb-1 block font-medium">Ciudad</label>
+                <input type="text" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })}
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+              </div>
+              <div>
+                <label className="text-gray-600 text-xs mb-1 block font-medium">Estado</label>
+                <input type="text" value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })}
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+              </div>
+              <div>
+                <label className="text-gray-600 text-xs mb-1 block font-medium">C.P.</label>
+                <input type="text" value={form.postalCode} onChange={(e) => setForm({ ...form, postalCode: e.target.value })}
+                  maxLength={5} placeholder="31000"
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+              </div>
+            </div>
+          </div>
+
+          {/* Sección: Comercial */}
+          <div className="mb-4">
+            <h4 className="text-sm font-semibold text-gray-600 mb-3 flex items-center gap-1 border-b border-gray-200 pb-2">
+              <TrendingUp className="w-4 h-4" /> Información Comercial
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="sm:col-span-2 lg:col-span-3">
+                <label className="text-gray-600 text-xs mb-1 block font-medium">Productos que Maneja</label>
+                <textarea value={form.productsOffered} onChange={(e) => setForm({ ...form, productsOffered: e.target.value })} rows={2}
+                  placeholder="Ej: Fertilizantes granulados, herbicidas, insecticidas..."
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 resize-none" />
+              </div>
+              <div>
+                <label className="text-gray-600 text-xs mb-1 block font-medium">Condiciones de Pago</label>
+                <input type="text" value={form.paymentTerms} onChange={(e) => setForm({ ...form, paymentTerms: e.target.value })}
+                  placeholder="Ej: 30 días crédito, contado"
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+              </div>
+              <div>
+                <label className="text-gray-600 text-xs mb-1 block font-medium">Cuenta Bancaria / CLABE</label>
+                <input type="text" value={form.bankAccount} onChange={(e) => setForm({ ...form, bankAccount: e.target.value })}
+                  placeholder="CLABE interbancaria"
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+              </div>
+              <div className="sm:col-span-2 lg:col-span-3">
+                <label className="text-gray-600 text-xs mb-1 block font-medium">Notas</label>
+                <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2}
+                  placeholder="Observaciones, horarios de atención, etc."
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 resize-none" />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex gap-3 mt-4">
+            <button onClick={handleSave} disabled={!form.companyName || createMut.isPending || updateMut.isPending}
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg text-sm font-semibold shadow-md hover:shadow-lg transition-all disabled:opacity-50">
+              <Save className="w-4 h-4" /> {editingId ? "Actualizar" : "Guardar"}
+            </button>
+            <button onClick={() => { setShowForm(false); setEditingId(null); resetForm(); }}
+              className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-600 border border-gray-200 rounded-lg text-sm hover:bg-gray-200 transition-all">
+              <X className="w-4 h-4" /> Cancelar
+            </button>
+          </div>
+        </GlassCard>
+      )}
+
+      {/* Supplier List */}
+      <div className="space-y-3">
+        {filtered.length === 0 ? (
+          <GlassCard className="p-8 text-center">
+            <Building2 className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-gray-500">No se encontraron proveedores</p>
+            <p className="text-gray-400 text-sm mt-1">Agrega tu primer proveedor con el botón de arriba</p>
+          </GlassCard>
+        ) : filtered.map((s: any) => {
+          const cat = SUPPLIER_CATEGORIES[s.category] || SUPPLIER_CATEGORIES.otro;
+          const isExpanded = expandedId === s.id;
+
+          return (
+            <GlassCard key={s.id} hover={true} className="overflow-hidden">
+              <div className="p-4 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : s.id)}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    <div className="w-12 h-12 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center flex-shrink-0">
+                      <Building2 className="w-6 h-6 text-blue-400" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="text-gray-800 font-semibold truncate">{s.companyName}</h4>
+                        <span className={`px-2 py-0.5 rounded-full text-xs bg-${cat.color}-100 text-${cat.color}-700 border border-${cat.color}-200`}>
+                          {cat.label}
+                        </span>
+                        {s.rating && (
+                          <span className="flex items-center gap-0.5 text-xs text-amber-600">
+                            {[...Array(s.rating)].map((_, i) => (
+                              <Star key={i} className="w-3 h-3 fill-amber-400 text-amber-400" />
+                            ))}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-4 mt-1 text-xs text-gray-500 flex-wrap">
+                        {s.contactName && <span className="flex items-center gap-1"><Users className="w-3 h-3" />{s.contactName}</span>}
+                        {s.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{s.phone}</span>}
+                        {s.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{s.email}</span>}
+                        {s.city && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{s.city}{s.state ? `, ${s.state}` : ""}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex-shrink-0">
+                    {isExpanded ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
+                  </div>
+                </div>
+              </div>
+
+              {isExpanded && (
+                <div className="border-t border-gray-200/60 p-4 space-y-4 bg-gray-50/30">
+                  {/* Datos de contacto con botones de copiar */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {s.phone && (
+                      <div className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-gray-100">
+                        <div className="flex items-center gap-2 text-sm">
+                          <Phone className="w-4 h-4 text-blue-500" />
+                          <div>
+                            <p className="text-gray-400 text-xs">Teléfono</p>
+                            <p className="text-gray-700 font-medium">{s.phone}</p>
+                          </div>
+                        </div>
+                        <button onClick={(e) => { e.stopPropagation(); copyToClipboard(s.phone); }}
+                          className="p-1.5 hover:bg-gray-100 rounded-lg transition-all" title="Copiar">
+                          <Copy className="w-3.5 h-3.5 text-gray-400" />
+                        </button>
+                      </div>
+                    )}
+                    {s.phone2 && (
+                      <div className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-gray-100">
+                        <div className="flex items-center gap-2 text-sm">
+                          <Phone className="w-4 h-4 text-blue-500" />
+                          <div>
+                            <p className="text-gray-400 text-xs">Tel. Secundario</p>
+                            <p className="text-gray-700 font-medium">{s.phone2}</p>
+                          </div>
+                        </div>
+                        <button onClick={(e) => { e.stopPropagation(); copyToClipboard(s.phone2); }}
+                          className="p-1.5 hover:bg-gray-100 rounded-lg transition-all" title="Copiar">
+                          <Copy className="w-3.5 h-3.5 text-gray-400" />
+                        </button>
+                      </div>
+                    )}
+                    {s.email && (
+                      <div className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-gray-100">
+                        <div className="flex items-center gap-2 text-sm">
+                          <Mail className="w-4 h-4 text-emerald-500" />
+                          <div>
+                            <p className="text-gray-400 text-xs">Correo</p>
+                            <p className="text-gray-700 font-medium truncate">{s.email}</p>
+                          </div>
+                        </div>
+                        <button onClick={(e) => { e.stopPropagation(); copyToClipboard(s.email); }}
+                          className="p-1.5 hover:bg-gray-100 rounded-lg transition-all" title="Copiar">
+                          <Copy className="w-3.5 h-3.5 text-gray-400" />
+                        </button>
+                      </div>
+                    )}
+                    {s.website && (
+                      <div className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-gray-100">
+                        <div className="flex items-center gap-2 text-sm">
+                          <Globe className="w-4 h-4 text-purple-500" />
+                          <div>
+                            <p className="text-gray-400 text-xs">Sitio Web</p>
+                            <a href={s.website.startsWith("http") ? s.website : `https://${s.website}`} target="_blank" rel="noopener noreferrer"
+                              className="text-blue-600 hover:underline font-medium truncate block" onClick={(e) => e.stopPropagation()}>
+                              {s.website}
+                            </a>
+                          </div>
+                        </div>
+                        <a href={s.website.startsWith("http") ? s.website : `https://${s.website}`} target="_blank" rel="noopener noreferrer"
+                          className="p-1.5 hover:bg-gray-100 rounded-lg transition-all" onClick={(e) => e.stopPropagation()}>
+                          <ExternalLink className="w-3.5 h-3.5 text-gray-400" />
+                        </a>
+                      </div>
+                    )}
+                    {s.rfc && (
+                      <div className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-gray-100">
+                        <div className="flex items-center gap-2 text-sm">
+                          <Building2 className="w-4 h-4 text-gray-500" />
+                          <div>
+                            <p className="text-gray-400 text-xs">RFC</p>
+                            <p className="text-gray-700 font-medium">{s.rfc}</p>
+                          </div>
+                        </div>
+                        <button onClick={(e) => { e.stopPropagation(); copyToClipboard(s.rfc); }}
+                          className="p-1.5 hover:bg-gray-100 rounded-lg transition-all" title="Copiar">
+                          <Copy className="w-3.5 h-3.5 text-gray-400" />
+                        </button>
+                      </div>
+                    )}
+                    {s.bankAccount && (
+                      <div className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-gray-100">
+                        <div className="flex items-center gap-2 text-sm">
+                          <TrendingUp className="w-4 h-4 text-green-500" />
+                          <div>
+                            <p className="text-gray-400 text-xs">Cuenta Bancaria</p>
+                            <p className="text-gray-700 font-medium">{s.bankAccount}</p>
+                          </div>
+                        </div>
+                        <button onClick={(e) => { e.stopPropagation(); copyToClipboard(s.bankAccount); }}
+                          className="p-1.5 hover:bg-gray-100 rounded-lg transition-all" title="Copiar">
+                          <Copy className="w-3.5 h-3.5 text-gray-400" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Dirección completa */}
+                  {(s.address || s.city) && (
+                    <div className="bg-white rounded-lg px-3 py-2 border border-gray-100">
+                      <div className="flex items-start gap-2 text-sm">
+                        <MapPin className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className="text-gray-400 text-xs">Dirección</p>
+                          <p className="text-gray-700">
+                            {[s.address, s.city, s.state, s.postalCode ? `C.P. ${s.postalCode}` : ""].filter(Boolean).join(", ")}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Info comercial */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                    {s.productsOffered && (
+                      <div className="bg-white rounded-lg px-3 py-2 border border-gray-100 sm:col-span-2">
+                        <p className="text-gray-400 text-xs mb-1">Productos que Maneja</p>
+                        <p className="text-gray-700">{s.productsOffered}</p>
+                      </div>
+                    )}
+                    {s.paymentTerms && (
+                      <div className="bg-white rounded-lg px-3 py-2 border border-gray-100">
+                        <p className="text-gray-400 text-xs mb-1">Condiciones de Pago</p>
+                        <p className="text-gray-700">{s.paymentTerms}</p>
+                      </div>
+                    )}
+                    {s.notes && (
+                      <div className="bg-white rounded-lg px-3 py-2 border border-gray-100">
+                        <p className="text-gray-400 text-xs mb-1">Notas</p>
+                        <p className="text-gray-700 italic">{s.notes}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2 pt-2 border-t border-gray-200/60">
+                    {s.phone && (
+                      <a href={`tel:${s.phone}`}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-lg text-xs font-medium hover:bg-green-100 transition-all"
+                        onClick={(e) => e.stopPropagation()}>
+                        <Phone className="w-3 h-3" /> Llamar
+                      </a>
+                    )}
+                    {s.email && (
+                      <a href={`mailto:${s.email}`}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 transition-all"
+                        onClick={(e) => e.stopPropagation()}>
+                        <Mail className="w-3 h-3" /> Email
+                      </a>
+                    )}
+                    {s.phone && (
+                      <a href={`https://wa.me/${s.phone.replace(/[^0-9]/g, "")}`} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-1 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-medium hover:bg-emerald-100 transition-all"
+                        onClick={(e) => e.stopPropagation()}>
+                        <ExternalLink className="w-3 h-3" /> WhatsApp
+                      </a>
+                    )}
+                    <button onClick={() => startEdit(s)}
+                      className="flex items-center gap-1 px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-xs font-medium hover:bg-amber-100 transition-all">
+                      <Edit2 className="w-3 h-3" /> Editar
+                    </button>
+                    <button onClick={() => { if (confirm("¿Eliminar este proveedor? Los productos vinculados quedarán sin proveedor.")) deleteMut.mutate({ id: s.id }); }}
+                      className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded-lg text-xs font-medium hover:bg-red-100 transition-all">
+                      <Trash2 className="w-3 h-3" /> Eliminar
                     </button>
                   </div>
                 </div>

@@ -7,7 +7,7 @@ import * as db from "./db";
 import * as dbExt from "./db_extended";
 import * as webodm from "./webodmService";
 import { getDb } from "./db";
-import { boxes, harvesters, parcels, parcelDetails, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments } from "../drizzle/schema";
+import { boxes, harvesters, parcels, parcelDetails, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments } from "../drizzle/schema";
 import { eq, desc, and, gte, lte, inArray, sql } from "drizzle-orm";
 
 export const appRouter = router({
@@ -1883,7 +1883,7 @@ export const appRouter = router({
         name: z.string(), category: z.string(), brand: z.string().optional(), activeIngredient: z.string().optional(),
         concentration: z.string().optional(), presentation: z.string().optional(),
         unit: z.string(), currentStock: z.number().optional(), minimumStock: z.number().optional(),
-        costPerUnit: z.number().optional(), supplier: z.string().optional(), supplierContact: z.string().optional(),
+        costPerUnit: z.number().optional(), supplierId: z.number().optional(), supplier: z.string().optional(), supplierContact: z.string().optional(),
         lotNumber: z.string().optional(), photoUrl: z.string().optional(),
         storageLocation: z.string().optional(), expirationDate: z.string().optional(),
         safetyDataSheet: z.string().optional(), description: z.string().optional(),
@@ -1896,6 +1896,7 @@ export const appRouter = router({
           presentation: input.presentation || null, unit: input.unit as any,
           currentStock: String(input.currentStock ?? 0), minimumStock: String(input.minimumStock ?? 0),
           costPerUnit: input.costPerUnit ? String(input.costPerUnit) : null,
+          supplierId: input.supplierId ?? null,
           supplier: input.supplier || null, supplierContact: input.supplierContact || null,
           lotNumber: input.lotNumber || null, photoUrl: input.photoUrl || null,
           storageLocation: input.storageLocation || null, description: input.description || null,
@@ -1912,8 +1913,8 @@ export const appRouter = router({
         brand: z.string().optional(), activeIngredient: z.string().optional(),
         concentration: z.string().optional(), presentation: z.string().optional(),
         unit: z.string().optional(), minimumStock: z.number().optional(),
-        costPerUnit: z.number().optional(), supplier: z.string().optional(),
-        supplierContact: z.string().optional(), lotNumber: z.string().optional(),
+        costPerUnit: z.number().optional(), supplierId: z.number().optional(),
+        supplier: z.string().optional(), supplierContact: z.string().optional(), lotNumber: z.string().optional(),
         photoUrl: z.string().optional(), description: z.string().optional(),
         storageLocation: z.string().optional(), expirationDate: z.string().optional(),
         safetyDataSheet: z.string().optional(), isActive: z.boolean().optional(),
@@ -1929,6 +1930,7 @@ export const appRouter = router({
         if (data.unit !== undefined) updateData.unit = data.unit;
         if (data.minimumStock !== undefined) updateData.minimumStock = String(data.minimumStock);
         if (data.costPerUnit !== undefined) updateData.costPerUnit = data.costPerUnit ? String(data.costPerUnit) : null;
+        if (data.supplierId !== undefined) updateData.supplierId = data.supplierId ?? null;
         if (data.supplier !== undefined) updateData.supplier = data.supplier || null;
         if (data.supplierContact !== undefined) updateData.supplierContact = data.supplierContact || null;
         if (data.lotNumber !== undefined) updateData.lotNumber = data.lotNumber || null;
@@ -2088,6 +2090,96 @@ export const appRouter = router({
         const updateData: any = { status: 'disponible', assignedTo: null, updatedAt: new Date() };
         if (input.conditionState) updateData.conditionState = input.conditionState;
         await drizzle.update(warehouseTools).set(updateData).where(eq(warehouseTools.id, input.toolId));
+        return { success: true };
+      }),
+
+    // --- PROVEEDORES ---
+    listSuppliers: protectedProcedure
+      .input(z.object({ category: z.string().optional(), search: z.string().optional(), activeOnly: z.boolean().optional() }).optional())
+      .query(async ({ input }) => {
+        const drizzle = getDb();
+        let results = await drizzle.select().from(warehouseSuppliers).orderBy(desc(warehouseSuppliers.updatedAt));
+        if (input?.activeOnly !== false) results = results.filter(s => s.isActive);
+        if (input?.category) results = results.filter(s => s.category === input.category);
+        if (input?.search) {
+          const s = input.search.toLowerCase();
+          results = results.filter(sup => sup.companyName.toLowerCase().includes(s) || (sup.contactName || '').toLowerCase().includes(s) || (sup.productsOffered || '').toLowerCase().includes(s));
+        }
+        return results;
+      }),
+
+    getSupplier: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        const drizzle = getDb();
+        const [supplier] = await drizzle.select().from(warehouseSuppliers).where(eq(warehouseSuppliers.id, input.id));
+        if (!supplier) throw new TRPCError({ code: 'NOT_FOUND', message: 'Proveedor no encontrado' });
+        // Obtener productos vinculados a este proveedor
+        const products = await drizzle.select().from(warehouseProducts).where(eq(warehouseProducts.supplierId, input.id));
+        return { ...supplier, products };
+      }),
+
+    createSupplier: protectedProcedure
+      .input(z.object({
+        companyName: z.string(), contactName: z.string().optional(),
+        phone: z.string().optional(), phone2: z.string().optional(),
+        email: z.string().optional(), website: z.string().optional(),
+        rfc: z.string().optional(), address: z.string().optional(),
+        city: z.string().optional(), state: z.string().optional(),
+        postalCode: z.string().optional(), category: z.string().optional(),
+        productsOffered: z.string().optional(), paymentTerms: z.string().optional(),
+        bankAccount: z.string().optional(), notes: z.string().optional(),
+        rating: z.number().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const drizzle = getDb();
+        const result = await drizzle.insert(warehouseSuppliers).values({
+          companyName: input.companyName, contactName: input.contactName || null,
+          phone: input.phone || null, phone2: input.phone2 || null,
+          email: input.email || null, website: input.website || null,
+          rfc: input.rfc || null, address: input.address || null,
+          city: input.city || null, state: input.state || null,
+          postalCode: input.postalCode || null,
+          category: (input.category as any) || 'otro',
+          productsOffered: input.productsOffered || null,
+          paymentTerms: input.paymentTerms || null,
+          bankAccount: input.bankAccount || null,
+          notes: input.notes || null, rating: input.rating ?? null,
+          isActive: true,
+        });
+        return { id: result.insertId };
+      }),
+
+    updateSupplier: protectedProcedure
+      .input(z.object({
+        id: z.number(), companyName: z.string().optional(), contactName: z.string().optional(),
+        phone: z.string().optional(), phone2: z.string().optional(),
+        email: z.string().optional(), website: z.string().optional(),
+        rfc: z.string().optional(), address: z.string().optional(),
+        city: z.string().optional(), state: z.string().optional(),
+        postalCode: z.string().optional(), category: z.string().optional(),
+        productsOffered: z.string().optional(), paymentTerms: z.string().optional(),
+        bankAccount: z.string().optional(), notes: z.string().optional(),
+        rating: z.number().optional(), isActive: z.boolean().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const drizzle = getDb();
+        const { id, ...data } = input;
+        const updateData: any = { updatedAt: new Date() };
+        Object.entries(data).forEach(([key, val]) => {
+          if (val !== undefined) updateData[key] = val === '' ? null : val;
+        });
+        await drizzle.update(warehouseSuppliers).set(updateData).where(eq(warehouseSuppliers.id, id));
+        return { success: true };
+      }),
+
+    deleteSupplier: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const drizzle = getDb();
+        // Desvincula productos de este proveedor
+        await drizzle.update(warehouseProducts).set({ supplierId: null }).where(eq(warehouseProducts.supplierId, input.id));
+        await drizzle.delete(warehouseSuppliers).where(eq(warehouseSuppliers.id, input.id));
         return { success: true };
       }),
 

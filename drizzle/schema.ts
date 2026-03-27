@@ -363,6 +363,37 @@ export type FieldActivityPhoto = typeof fieldActivityPhotos.$inferSelect;
 
 // ===== ALMACÉN =====
 
+// Catálogo de proveedores
+export const warehouseSuppliers = mysqlTable("warehouseSuppliers", {
+  id: int("id").autoincrement().primaryKey(),
+  companyName: varchar("companyName", { length: 255 }).notNull(),
+  contactName: varchar("contactName", { length: 255 }),
+  phone: varchar("phone", { length: 50 }),
+  phone2: varchar("phone2", { length: 50 }),
+  email: varchar("email", { length: 255 }),
+  website: varchar("website", { length: 255 }),
+  rfc: varchar("rfc", { length: 20 }),
+  address: text("address"),
+  city: varchar("city", { length: 128 }),
+  state: varchar("state", { length: 128 }),
+  postalCode: varchar("postalCode", { length: 10 }),
+  category: mysqlEnum("category", [
+    "fertilizantes", "agroquimicos", "semillas", "herramientas", "maquinaria",
+    "riego", "empaques", "servicios", "combustible", "otro"
+  ]).default("otro").notNull(),
+  productsOffered: text("productsOffered"),
+  paymentTerms: varchar("paymentTerms", { length: 255 }),
+  bankAccount: varchar("bankAccount", { length: 255 }),
+  notes: text("notes"),
+  rating: int("rating"),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type WarehouseSupplier = typeof warehouseSuppliers.$inferSelect;
+export type InsertWarehouseSupplier = typeof warehouseSuppliers.$inferInsert;
+
 // Catálogo de productos del almacén
 export const warehouseProducts = mysqlTable("warehouseProducts", {
   id: int("id").autoincrement().primaryKey(),
@@ -383,6 +414,7 @@ export const warehouseProducts = mysqlTable("warehouseProducts", {
   currentStock: decimal("currentStock", { precision: 12, scale: 2 }).default("0").notNull(),
   minimumStock: decimal("minimumStock", { precision: 12, scale: 2 }).default("0"),
   costPerUnit: decimal("costPerUnit", { precision: 12, scale: 2 }),
+  supplierId: int("supplierId"),
   supplier: varchar("supplier", { length: 255 }),
   supplierContact: varchar("supplierContact", { length: 255 }),
   lotNumber: varchar("lotNumber", { length: 128 }),
