@@ -1885,11 +1885,25 @@ export const appRouter = router({
         unit: z.string(), currentStock: z.number().optional(), minimumStock: z.number().optional(),
         costPerUnit: z.number().optional(), supplierId: z.number().optional(), supplier: z.string().optional(), supplierContact: z.string().optional(),
         lotNumber: z.string().optional(), photoUrl: z.string().optional(),
+        photoBase64: z.string().optional(),
         storageLocation: z.string().optional(), expirationDate: z.string().optional(),
         safetyDataSheet: z.string().optional(), description: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
         const drizzle = await getDb();
+        let finalPhotoUrl = input.photoUrl || null;
+        // Si se envió foto en base64, guardarla localmente
+        if (input.photoBase64) {
+          const fs = await import("fs");
+          const path = await import("path");
+          const dir = `/app/photos/warehouse/products`;
+          fs.mkdirSync(dir, { recursive: true });
+          const fileName = `product-${Date.now()}.jpg`;
+          const filePath = path.join(dir, fileName);
+          const buffer = Buffer.from(input.photoBase64, "base64");
+          fs.writeFileSync(filePath, buffer);
+          finalPhotoUrl = `/app/photos/warehouse/products/${fileName}`;
+        }
         const result = await drizzle.insert(warehouseProducts).values({
           name: input.name, category: input.category as any, brand: input.brand || null,
           activeIngredient: input.activeIngredient || null, concentration: input.concentration || null,
@@ -1898,7 +1912,7 @@ export const appRouter = router({
           costPerUnit: input.costPerUnit ? String(input.costPerUnit) : null,
           supplierId: input.supplierId ?? null,
           supplier: input.supplier || null, supplierContact: input.supplierContact || null,
-          lotNumber: input.lotNumber || null, photoUrl: input.photoUrl || null,
+          lotNumber: input.lotNumber || null, photoUrl: finalPhotoUrl,
           storageLocation: input.storageLocation || null, description: input.description || null,
           expirationDate: input.expirationDate || null,
           safetyDataSheet: input.safetyDataSheet || null, isActive: true,
@@ -1915,13 +1929,14 @@ export const appRouter = router({
         unit: z.string().optional(), minimumStock: z.number().optional(),
         costPerUnit: z.number().optional(), supplierId: z.number().optional(),
         supplier: z.string().optional(), supplierContact: z.string().optional(), lotNumber: z.string().optional(),
-        photoUrl: z.string().optional(), description: z.string().optional(),
+        photoUrl: z.string().optional(), photoBase64: z.string().optional(),
+        description: z.string().optional(),
         storageLocation: z.string().optional(), expirationDate: z.string().optional(),
         safetyDataSheet: z.string().optional(), isActive: z.boolean().optional(),
       }))
       .mutation(async ({ input }) => {
         const drizzle = await getDb();
-        const { id, ...data } = input;
+        const { id, photoBase64, ...data } = input;
         const updateData: any = {};
         if (data.name !== undefined) updateData.name = data.name;
         if (data.category !== undefined) updateData.category = data.category;
@@ -1934,7 +1949,19 @@ export const appRouter = router({
         if (data.supplier !== undefined) updateData.supplier = data.supplier || null;
         if (data.supplierContact !== undefined) updateData.supplierContact = data.supplierContact || null;
         if (data.lotNumber !== undefined) updateData.lotNumber = data.lotNumber || null;
-        if (data.photoUrl !== undefined) updateData.photoUrl = data.photoUrl || null;
+        if (photoBase64) {
+          const fs = await import("fs");
+          const path = await import("path");
+          const dir = `/app/photos/warehouse/products`;
+          fs.mkdirSync(dir, { recursive: true });
+          const fileName = `product-${id}-${Date.now()}.jpg`;
+          const filePath = path.join(dir, fileName);
+          const buffer = Buffer.from(photoBase64, "base64");
+          fs.writeFileSync(filePath, buffer);
+          updateData.photoUrl = `/app/photos/warehouse/products/${fileName}`;
+        } else if (data.photoUrl !== undefined) {
+          updateData.photoUrl = data.photoUrl || null;
+        }
         if (data.description !== undefined) updateData.description = data.description || null;
         if (data.storageLocation !== undefined) updateData.storageLocation = data.storageLocation || null;
         if (data.expirationDate !== undefined) updateData.expirationDate = data.expirationDate || null;

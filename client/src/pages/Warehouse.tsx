@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { GlassCard } from "@/components/GlassCard";
 import { ProtectedPage } from "@/components/ProtectedPage";
@@ -8,8 +8,18 @@ import {
   Package, Wrench, Plus, Search, Edit2, Trash2, X, Save,
   AlertTriangle, ArrowDownCircle, ArrowUpCircle, ChevronDown, ChevronUp,
   Box, TrendingUp, History, RefreshCw, Warehouse as WarehouseIcon,
-  Users, Phone, Mail, MapPin, Globe, Star, Building2, Copy, ExternalLink
+  Users, Phone, Mail, MapPin, Globe, Star, Building2, Copy, ExternalLink,
+  Camera, Image as ImageIcon,
 } from "lucide-react";
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => { const r = reader.result as string; resolve(r.split(",")[1]); };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 // ===== HELPERS =====
 
@@ -211,6 +221,9 @@ function ProductsTab() {
     costPerUnit: "", supplierId: "", lotNumber: "", expirationDate: "",
     storageLocation: "", photoUrl: "",
   });
+  const [photoBase64, setPhotoBase64] = useState<string | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   const [movementForm, setMovementForm] = useState({
     type: "entrada", quantity: "", reason: "",
@@ -225,6 +238,8 @@ function ProductsTab() {
       costPerUnit: "", supplierId: "", lotNumber: "", expirationDate: "",
       storageLocation: "", photoUrl: "",
     });
+    setPhotoBase64(null);
+    setPhotoPreview(null);
   }, []);
 
   const filtered = useMemo(() => {
@@ -256,7 +271,9 @@ function ProductsTab() {
         costPerUnit: form.costPerUnit ? Number(form.costPerUnit) : undefined,
         supplierId: form.supplierId ? Number(form.supplierId) : undefined,
         lotNumber: form.lotNumber || undefined, expirationDate: form.expirationDate || undefined,
-        storageLocation: form.storageLocation || undefined, photoUrl: form.photoUrl || undefined,
+        storageLocation: form.storageLocation || undefined,
+        photoUrl: form.photoUrl || undefined,
+        photoBase64: photoBase64 || undefined,
       });
     } else {
       createMut.mutate({
@@ -269,7 +286,9 @@ function ProductsTab() {
         costPerUnit: form.costPerUnit ? Number(form.costPerUnit) : undefined,
         supplierId: form.supplierId ? Number(form.supplierId) : undefined,
         lotNumber: form.lotNumber || undefined, expirationDate: form.expirationDate || undefined,
-        storageLocation: form.storageLocation || undefined, photoUrl: form.photoUrl || undefined,
+        storageLocation: form.storageLocation || undefined,
+        photoUrl: form.photoUrl || undefined,
+        photoBase64: photoBase64 || undefined,
       });
     }
   };
@@ -285,6 +304,8 @@ function ProductsTab() {
       lotNumber: p.lotNumber || "", expirationDate: toDateStr(p.expirationDate),
       storageLocation: p.storageLocation || "", photoUrl: p.photoUrl || "",
     });
+    setPhotoBase64(null);
+    setPhotoPreview(p.photoUrl || null);
     setEditingId(p.id);
     setShowForm(true);
   };
@@ -445,9 +466,27 @@ function ProductsTab() {
                 className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
             </div>
             <div>
-              <label className="text-gray-600 text-xs mb-1 block font-medium">URL Foto</label>
-              <input type="text" value={form.photoUrl} onChange={(e) => setForm({ ...form, photoUrl: e.target.value })}
-                placeholder="https://..." className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
+              <label className="text-gray-600 text-xs mb-1 block font-medium">Foto del Producto</label>
+              <input ref={photoInputRef} type="file" accept="image/*" capture="environment" className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  if (file.size > 10 * 1024 * 1024) { toast.error("La imagen no debe superar 10MB"); return; }
+                  setPhotoPreview(URL.createObjectURL(file));
+                  setPhotoBase64(await fileToBase64(file));
+                }} />
+              {photoPreview ? (
+                <div className="relative">
+                  <img src={photoPreview} alt="Preview" className="w-full h-24 object-cover rounded-lg border border-gray-200" />
+                  <button type="button" onClick={() => { setPhotoPreview(null); setPhotoBase64(null); setForm({ ...form, photoUrl: "" }); if (photoInputRef.current) photoInputRef.current.value = ""; }}
+                    className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full shadow hover:bg-red-600"><X className="w-3 h-3" /></button>
+                </div>
+              ) : (
+                <button type="button" onClick={() => photoInputRef.current?.click()}
+                  className="w-full flex items-center justify-center gap-2 py-4 rounded-lg border-2 border-dashed border-emerald-300 text-emerald-600 hover:bg-emerald-50 transition-all text-sm">
+                  <Camera className="w-5 h-5" /> Subir foto
+                </button>
+              )}
             </div>
             <div className="sm:col-span-2 lg:col-span-3">
               <label className="text-gray-600 text-xs mb-1 block font-medium">Descripción</label>
