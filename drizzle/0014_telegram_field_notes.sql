@@ -32,6 +32,11 @@ CREATE TABLE IF NOT EXISTS telegramLinkCodes (
   createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Índice para buscar códigos rápidamente
-CREATE INDEX IF NOT EXISTS idx_link_code ON telegramLinkCodes(code);
-CREATE INDEX IF NOT EXISTS idx_link_expires ON telegramLinkCodes(expiresAt);
+-- Índices (se ignora error si ya existen)
+SET @idx1 = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = 'telegramLinkCodes' AND INDEX_NAME = 'idx_link_code');
+SET @sql = IF(@idx1 = 0, 'CREATE INDEX idx_link_code ON telegramLinkCodes(code)', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @idx2 = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = 'telegramLinkCodes' AND INDEX_NAME = 'idx_link_expires');
+SET @sql = IF(@idx2 = 0, 'CREATE INDEX idx_link_expires ON telegramLinkCodes(expiresAt)', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
