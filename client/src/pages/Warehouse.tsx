@@ -11,6 +11,16 @@ import {
   Users, Phone, Mail, MapPin, Globe, Star, Building2, Copy, ExternalLink
 } from "lucide-react";
 
+// ===== HELPERS =====
+
+/** Convierte un Date o string a formato YYYY-MM-DD para inputs type="date" */
+function toDateStr(val: any): string {
+  if (!val) return "";
+  if (val instanceof Date) return val.toISOString().split("T")[0];
+  if (typeof val === "string") return val.split("T")[0];
+  return "";
+}
+
 // ===== CONSTANTES =====
 
 const PRODUCT_CATEGORIES: Record<string, { label: string; color: string }> = {
@@ -272,7 +282,7 @@ function ProductsTab() {
       unit: p.unit || "kg", currentStock: String(p.currentStock || 0),
       minimumStock: String(p.minimumStock || 0), costPerUnit: String(p.costPerUnit || ""),
       supplierId: String(p.supplierId || ""),
-      lotNumber: p.lotNumber || "", expirationDate: p.expirationDate || "",
+      lotNumber: p.lotNumber || "", expirationDate: toDateStr(p.expirationDate),
       storageLocation: p.storageLocation || "", photoUrl: p.photoUrl || "",
     });
     setEditingId(p.id);
@@ -523,7 +533,7 @@ function ProductsTab() {
                     {p.supplierId && <div><span className="text-gray-400">Proveedor:</span> <span className="text-gray-700">{(suppliers as any[]).find((s: any) => s.id === p.supplierId)?.companyName || p.supplier || "—"}</span></div>}
                     {!p.supplierId && p.supplier && <div><span className="text-gray-400">Proveedor:</span> <span className="text-gray-700">{p.supplier}</span></div>}
                     {p.lotNumber && <div><span className="text-gray-400">Lote:</span> <span className="text-gray-700">{p.lotNumber}</span></div>}
-                    {p.expirationDate && <div><span className="text-gray-400">Caducidad:</span> <span className="text-gray-700">{p.expirationDate}</span></div>}
+                    {p.expirationDate && <div><span className="text-gray-400">Caducidad:</span> <span className="text-gray-700">{p.expirationDate instanceof Date ? p.expirationDate.toLocaleDateString("es-MX") : p.expirationDate}</span></div>}
                     {p.storageLocation && <div><span className="text-gray-400">Ubicación:</span> <span className="text-gray-700">{p.storageLocation}</span></div>}
                     {p.concentration && <div><span className="text-gray-400">Concentración:</span> <span className="text-gray-700">{p.concentration}</span></div>}
                   </div>
@@ -577,7 +587,7 @@ function ProductsTab() {
                               <span className={m.movementType === "entrada" || m.movementType === "devolucion" ? "text-emerald-600 font-medium" : "text-red-600 font-medium"}>
                                 {m.movementType === "entrada" || m.movementType === "devolucion" ? "+" : "-"}{Number(m.quantity).toLocaleString("es-MX")}
                               </span>
-                              <span className="text-gray-400">{new Date(m.createdAt).toLocaleDateString("es-MX")}</span>
+                              <span className="text-gray-400">{m.createdAt instanceof Date ? m.createdAt.toLocaleDateString("es-MX") : new Date(m.createdAt).toLocaleDateString("es-MX")}</span>
                             </div>
                           </div>
                         ))}
@@ -698,10 +708,10 @@ function ToolsTab() {
       name: t.name || "", category: t.category || "otro", brand: t.brand || "",
       model: t.model || "", serialNumber: t.serialNumber || "",
       description: t.description || "", status: t.status || "disponible",
-      conditionState: t.conditionState || "bueno", acquisitionDate: t.acquisitionDate || "",
+      conditionState: t.conditionState || "bueno", acquisitionDate: toDateStr(t.acquisitionDate),
       acquisitionCost: String(t.acquisitionCost || ""), currentValue: String(t.currentValue || ""),
       storageLocation: t.storageLocation || "",
-      lastMaintenanceDate: t.lastMaintenanceDate || "", nextMaintenanceDate: t.nextMaintenanceDate || "",
+      lastMaintenanceDate: toDateStr(t.lastMaintenanceDate), nextMaintenanceDate: toDateStr(t.nextMaintenanceDate),
       maintenanceNotes: t.maintenanceNotes || "", photoUrl: t.photoUrl || "",
       quantity: String(t.quantity || 1),
     });
@@ -945,12 +955,12 @@ function ToolsTab() {
               {isExpanded && (
                 <div className="border-t border-gray-200/60 p-4 space-y-4 bg-gray-50/30">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-                    {t.acquisitionDate && <div><span className="text-gray-400">Adquisición:</span> <span className="text-gray-700">{t.acquisitionDate}</span></div>}
+                    {t.acquisitionDate && <div><span className="text-gray-400">Adquisición:</span> <span className="text-gray-700">{t.acquisitionDate instanceof Date ? t.acquisitionDate.toLocaleDateString("es-MX") : t.acquisitionDate}</span></div>}
                     {t.acquisitionCost && <div><span className="text-gray-400">Costo:</span> <span className="text-gray-700 font-medium">${Number(t.acquisitionCost).toLocaleString("es-MX")}</span></div>}
                     {t.currentValue && <div><span className="text-gray-400">Valor Actual:</span> <span className="text-gray-700 font-medium">${Number(t.currentValue).toLocaleString("es-MX")}</span></div>}
                     {t.storageLocation && <div><span className="text-gray-400">Ubicación:</span> <span className="text-gray-700">{t.storageLocation}</span></div>}
-                    {t.lastMaintenanceDate && <div><span className="text-gray-400">Último Mtto:</span> <span className="text-gray-700">{t.lastMaintenanceDate}</span></div>}
-                    {t.nextMaintenanceDate && <div><span className="text-gray-400">Próximo Mtto:</span> <span className="text-gray-700">{t.nextMaintenanceDate}</span></div>}
+                    {t.lastMaintenanceDate && <div><span className="text-gray-400">Último Mtto:</span> <span className="text-gray-700">{t.lastMaintenanceDate instanceof Date ? t.lastMaintenanceDate.toLocaleDateString("es-MX") : t.lastMaintenanceDate}</span></div>}
+                    {t.nextMaintenanceDate && <div><span className="text-gray-400">Próximo Mtto:</span> <span className="text-gray-700">{t.nextMaintenanceDate instanceof Date ? t.nextMaintenanceDate.toLocaleDateString("es-MX") : t.nextMaintenanceDate}</span></div>}
                   </div>
                   {t.description && <p className="text-sm text-gray-500">{t.description}</p>}
                   {t.maintenanceNotes && <p className="text-sm text-gray-500 italic">Notas: {t.maintenanceNotes}</p>}
