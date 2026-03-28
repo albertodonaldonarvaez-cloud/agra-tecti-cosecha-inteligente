@@ -463,13 +463,15 @@ function OverviewView({ parcels, odmMappings, allDetails, onSelectParcel }: {
 function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: any; isAdmin: boolean }) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<Map | null>(null);
-  const tileLayerRef = useRef<TileLayer<XYZ> | null>(null);
+  const orthoLayerRef = useRef<TileLayer<XYZ> | null>(null);
+  const indexLayerRef = useRef<TileLayer<XYZ> | null>(null);
   const [selectedTaskUuid, setSelectedTaskUuid] = useState<string | null>(null);
   const [selectedLayerType, setSelectedLayerType] = useState<LayerType>("orthophoto");
   const [expandedTask, setExpandedTask] = useState<number | null>(null);
   const [tileStatus, setTileStatus] = useState<string>("");
   const [currentZoom, setCurrentZoom] = useState<number>(5);
   const [tileMinZoom, setTileMinZoom] = useState<number>(14);
+  const [orthoLoaded, setOrthoLoaded] = useState(false);
 
   // Cargar tareas del proyecto ODM
   const { data: tasks, isLoading: tasksLoading } = trpc.webodm.getProjectTasks.useQuery(
@@ -496,68 +498,68 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     }
   }, [tasks]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Función para cargar tiles en el mapa
-  const loadTilesOnMap = useCallback((taskUuid: string, layerType: string) => {
-    if (!tileLayerRef.current || !mapInstanceRef.current || !mapping?.odmProjectId) {
-      console.warn("[ParcelAnalysis] loadTilesOnMap: mapa no listo");
+  // Helper: crear un XYZ tile source con eventos de carga
+  const createTileSource = useCallback((proxyUrl: string, maxZoom: number, onFirstLoad?: () => void, onError?: () => void) => {
+    const tileSource = new XYZ({
+      url: proxyUrl,
+      minZoom: 0,
+      maxZoom,
+      tileSize: 256,
+      crossOrigin: "anonymous",
+    });
+    let loadedCount = 0;
+    let errorCount = 0;
+    tileSource.on("tileloadend", () => {
+      loadedCount++;
+      if (loadedCount === 1) {
+        console.log("[ParcelAnalysis] First tile loaded for:", proxyUrl.split("/").slice(-4, -3)[0]);
+        onFirstLoad?.();
+      }
+    });
+    tileSource.on("tileloaderror", (evt: any) => {
+      errorCount++;
+      if (errorCount <= 3) console.warn(`[ParcelAnalysis] Tile error #${errorCount}:`, evt.tile?.getTileCoord());
+      if (errorCount === 1) onError?.();
+    });
+    return tileSource;
+  }, []);
+
+  // Función para cargar la ortofoto base (siempre se carga al seleccionar un vuelo)
+  const loadOrthophoto = useCallback((taskUuid: string) => {
+    if (!orthoLayerRef.current || !mapInstanceRef.current || !mapping?.odmProjectId) {
+      console.warn("[ParcelAnalysis] loadOrthophoto: mapa no listo");
       return;
     }
 
-    const proxyUrl = `/api/odm-tiles/${mapping.odmProjectId}/${taskUuid}/${layerType}/{z}/{x}/{y}.png`;
-    console.log("[ParcelAnalysis] Loading tiles:", proxyUrl);
-    setTileStatus("Cargando ortomosaico...");
+    const proxyUrl = `/api/odm-tiles/${mapping.odmProjectId}/${taskUuid}/orthophoto/{z}/{x}/{y}.png`;
+    console.log("[ParcelAnalysis] Loading orthophoto:", proxyUrl);
+    setTileStatus("Cargando ortofoto...");
+    setOrthoLoaded(false);
 
-    // Primero obtener bounds y minzoom del tilejson para configurar correctamente la capa
     fetch(`/api/odm-bounds/${mapping.odmProjectId}/${taskUuid}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         console.log("[ParcelAnalysis] Bounds data:", data);
-        
-        // Usar minZoom del tilejson, o 0 para que OpenLayers siempre intente cargar
-        // El proxy devuelve tiles transparentes para zooms fuera de rango
         const serverMinZoom = data?.minzoom || 14;
         const serverMaxZoom = data?.maxzoom || 24;
         setTileMinZoom(serverMinZoom);
-        console.log(`[ParcelAnalysis] Server zoom range: ${serverMinZoom}-${serverMaxZoom}`);
 
-        const tileSource = new XYZ({
-          url: proxyUrl,
-          minZoom: 0,  // Permitir que OpenLayers solicite desde zoom 0
-          maxZoom: serverMaxZoom,
-          tileSize: 256,
-          crossOrigin: "anonymous",
-        });
+        const tileSource = createTileSource(
+          proxyUrl,
+          serverMaxZoom,
+          () => { setTileStatus(""); setOrthoLoaded(true); },
+          () => { setTileStatus("Error cargando ortofoto - verificar conexión con WebODM"); }
+        );
 
-        let loadedCount = 0;
-        let errorCount = 0;
-        tileSource.on("tileloadstart", () => {
-          if (loadedCount === 0) console.log("[ParcelAnalysis] First tile loading...");
-        });
-        tileSource.on("tileloadend", () => {
-          loadedCount++;
-          if (loadedCount === 1) {
-            console.log("[ParcelAnalysis] First tile loaded!");
-            setTileStatus("");
-          }
-        });
-        tileSource.on("tileloaderror", (evt: any) => {
-          errorCount++;
-          if (errorCount <= 3) console.warn(`[ParcelAnalysis] Tile error #${errorCount}:`, evt.tile?.getTileCoord());
-          if (errorCount === 1) setTileStatus("Error cargando tiles - verificar conexión con WebODM");
-        });
-
-        if (tileLayerRef.current && mapInstanceRef.current) {
-          tileLayerRef.current.setSource(tileSource);
-          tileLayerRef.current.setVisible(true);
+        if (orthoLayerRef.current && mapInstanceRef.current) {
+          orthoLayerRef.current.setSource(tileSource);
+          orthoLayerRef.current.setVisible(true);
           mapInstanceRef.current.updateSize();
           mapInstanceRef.current.render();
 
-          // Hacer zoom al extent del ortomosaico para que se ajuste al recuadro del mapa
           if (data?.bounds) {
             const [minLon, minLat, maxLon, maxLat] = data.bounds;
             const extent = transformExtent([minLon, minLat, maxLon, maxLat], "EPSG:4326", "EPSG:3857");
-            // fit() ajusta el zoom para que el extent ocupe todo el viewport del mapa
-            // padding agrega margen visual, maxZoom limita que no haga zoom excesivo
             mapInstanceRef.current.getView().fit(extent, {
               padding: [30, 30, 30, 30],
               maxZoom: 22,
@@ -567,41 +569,85 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
         }
       })
       .catch(err => {
-        console.warn("[ParcelAnalysis] Bounds error, loading tiles without zoom info:", err);
-        // Fallback: cargar tiles sin info de bounds
-        const tileSource = new XYZ({
-          url: proxyUrl,
-          minZoom: 0,
-          maxZoom: 24,
-          tileSize: 256,
-          crossOrigin: "anonymous",
-        });
-        if (tileLayerRef.current && mapInstanceRef.current) {
-          tileLayerRef.current.setSource(tileSource);
-          tileLayerRef.current.setVisible(true);
+        console.warn("[ParcelAnalysis] Bounds error, loading orthophoto without zoom info:", err);
+        const tileSource = createTileSource(
+          proxyUrl, 24,
+          () => { setTileStatus(""); setOrthoLoaded(true); },
+          () => { setTileStatus("Error cargando ortofoto"); }
+        );
+        if (orthoLayerRef.current && mapInstanceRef.current) {
+          orthoLayerRef.current.setSource(tileSource);
+          orthoLayerRef.current.setVisible(true);
           mapInstanceRef.current.updateSize();
           mapInstanceRef.current.render();
         }
       });
-  }, [mapping?.odmProjectId]);
+  }, [mapping?.odmProjectId, createTileSource]);
 
-  // Función para ocultar tiles
-  const hideTiles = useCallback(() => {
-    if (tileLayerRef.current) {
-      tileLayerRef.current.setVisible(false);
-      setTileStatus("");
+  // Función para cargar una capa de índice de vegetación (NDVI, VARI, etc.)
+  const loadIndexLayer = useCallback((taskUuid: string, layerType: string) => {
+    if (!indexLayerRef.current || !mapInstanceRef.current || !mapping?.odmProjectId) return;
+    if (layerType === "orthophoto") {
+      // Si es ortofoto, ocultar capa de índice y mostrar ortofoto
+      indexLayerRef.current.setVisible(false);
+      if (orthoLayerRef.current) orthoLayerRef.current.setVisible(true);
+      return;
     }
+
+    // Ocultar ortofoto cuando se muestra un índice
+    if (orthoLayerRef.current) orthoLayerRef.current.setVisible(false);
+
+    const proxyUrl = `/api/odm-tiles/${mapping.odmProjectId}/${taskUuid}/${layerType}/{z}/{x}/{y}.png`;
+    console.log("[ParcelAnalysis] Loading index layer:", layerType, proxyUrl);
+    setTileStatus(`Cargando ${layerType.toUpperCase()}...`);
+
+    fetch(`/api/odm-bounds/${mapping.odmProjectId}/${taskUuid}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        const serverMaxZoom = data?.maxzoom || 24;
+        const tileSource = createTileSource(
+          proxyUrl,
+          serverMaxZoom,
+          () => { setTileStatus(""); },
+          () => { setTileStatus(`Error cargando ${layerType.toUpperCase()} - verificar conexión con WebODM`); }
+        );
+
+        if (indexLayerRef.current && mapInstanceRef.current) {
+          indexLayerRef.current.setSource(tileSource);
+          indexLayerRef.current.setVisible(true);
+          mapInstanceRef.current.updateSize();
+          mapInstanceRef.current.render();
+        }
+      })
+      .catch(() => {
+        const tileSource = createTileSource(proxyUrl, 24, () => setTileStatus(""), () => setTileStatus(`Error cargando ${layerType.toUpperCase()}`));
+        if (indexLayerRef.current && mapInstanceRef.current) {
+          indexLayerRef.current.setSource(tileSource);
+          indexLayerRef.current.setVisible(true);
+          mapInstanceRef.current.updateSize();
+          mapInstanceRef.current.render();
+        }
+      });
+  }, [mapping?.odmProjectId, createTileSource]);
+
+  // Función para ocultar todas las capas de tiles
+  const hideTiles = useCallback(() => {
+    if (orthoLayerRef.current) orthoLayerRef.current.setVisible(false);
+    if (indexLayerRef.current) indexLayerRef.current.setVisible(false);
+    setTileStatus("");
+    setOrthoLoaded(false);
   }, []);
 
   // Handler para seleccionar tarea manualmente
   const handleSelectTask = useCallback((taskUuid: string) => {
     console.log("[ParcelAnalysis] Manual select task:", taskUuid);
     setSelectedTaskUuid(taskUuid);
-    // Cargar tiles inmediatamente si el mapa está listo
-    if (mapInstanceRef.current && tileLayerRef.current && mapping?.odmProjectId) {
-      setTimeout(() => loadTilesOnMap(taskUuid, selectedLayerType), 100);
+    setSelectedLayerType("orthophoto"); // Siempre empezar con ortofoto
+    // Cargar ortofoto inmediatamente
+    if (mapInstanceRef.current && orthoLayerRef.current && mapping?.odmProjectId) {
+      setTimeout(() => loadOrthophoto(taskUuid), 100);
     }
-  }, [loadTilesOnMap, selectedLayerType, mapping?.odmProjectId]);
+  }, [loadOrthophoto, mapping?.odmProjectId]);
 
   // Inicializar mapa OpenLayers
   useEffect(() => {
@@ -611,7 +657,8 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     if (mapInstanceRef.current) {
       mapInstanceRef.current.setTarget(undefined);
       mapInstanceRef.current = null;
-      tileLayerRef.current = null;
+      orthoLayerRef.current = null;
+      indexLayerRef.current = null;
     }
 
     let center = fromLonLat([-105.0, 23.0]);
@@ -631,8 +678,10 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     }
 
     const baseLayer = new TileLayer({ source: new OSM() });
-    const odmTileLayer = new TileLayer({ visible: false, opacity: 0.9, zIndex: 10 });
-    tileLayerRef.current = odmTileLayer;
+    const orthoTileLayer = new TileLayer({ visible: false, opacity: 0.9, zIndex: 10 });
+    const indexTileLayer = new TileLayer({ visible: false, opacity: 0.9, zIndex: 15 });
+    orthoLayerRef.current = orthoTileLayer;
+    indexLayerRef.current = indexTileLayer;
 
     const features: Feature[] = [];
     if (parcel?.polygon) {
@@ -655,7 +704,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     const mapView = new View({ center, zoom, maxZoom: 24 });
     const map = new Map({
       target: mapRef.current,
-      layers: [baseLayer, odmTileLayer, vectorLayer],
+      layers: [baseLayer, orthoTileLayer, indexTileLayer, vectorLayer],
       view: mapView,
     });
 
@@ -668,30 +717,53 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     mapInstanceRef.current = map;
     console.log("[ParcelAnalysis] Map initialized for parcel:", parcel?.id);
 
-    // Si ya hay una tarea seleccionada, cargar tiles después de que el mapa esté listo
+    // Si ya hay una tarea seleccionada, cargar ortofoto después de que el mapa esté listo
     if (selectedTaskUuid && mapping?.odmProjectId) {
       setTimeout(() => {
-        console.log("[ParcelAnalysis] Map ready, loading tiles for pre-selected task:", selectedTaskUuid);
-        loadTilesOnMap(selectedTaskUuid, selectedLayerType);
+        console.log("[ParcelAnalysis] Map ready, loading orthophoto for pre-selected task:", selectedTaskUuid);
+        loadOrthophoto(selectedTaskUuid);
+        // Si había un índice seleccionado, cargarlo también
+        if (selectedLayerType !== "orthophoto") {
+          setTimeout(() => loadIndexLayer(selectedTaskUuid, selectedLayerType), 500);
+        }
       }, 300);
     }
 
     return () => {
       map.setTarget(undefined);
       mapInstanceRef.current = null;
-      tileLayerRef.current = null;
+      orthoLayerRef.current = null;
+      indexLayerRef.current = null;
     };
   }, [parcel?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Cuando cambia selectedTaskUuid o selectedLayerType, actualizar tiles
+  // Cuando cambia selectedTaskUuid, cargar ortofoto base
   useEffect(() => {
-    if (!mapInstanceRef.current || !tileLayerRef.current) return;
+    if (!mapInstanceRef.current || !orthoLayerRef.current) return;
     if (selectedTaskUuid && mapping?.odmProjectId) {
-      loadTilesOnMap(selectedTaskUuid, selectedLayerType);
+      loadOrthophoto(selectedTaskUuid);
+      // Si hay un índice seleccionado, cargarlo después de un breve delay
+      if (selectedLayerType !== "orthophoto") {
+        setTimeout(() => loadIndexLayer(selectedTaskUuid, selectedLayerType), 300);
+      }
     } else {
       hideTiles();
     }
-  }, [selectedTaskUuid, selectedLayerType]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedTaskUuid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cuando cambia el tipo de capa, alternar entre ortofoto e índice
+  useEffect(() => {
+    if (!mapInstanceRef.current || !selectedTaskUuid || !mapping?.odmProjectId) return;
+    if (selectedLayerType === "orthophoto") {
+      // Mostrar ortofoto, ocultar índice
+      if (orthoLayerRef.current) orthoLayerRef.current.setVisible(true);
+      if (indexLayerRef.current) indexLayerRef.current.setVisible(false);
+      setTileStatus("");
+    } else {
+      // Ocultar ortofoto, cargar y mostrar índice
+      loadIndexLayer(selectedTaskUuid, selectedLayerType);
+    }
+  }, [selectedLayerType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tareas ordenadas
   const sortedTasks = useMemo(() => {
@@ -765,8 +837,8 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
               </div>
             </div>
           )}
-          {/* Indicador de zoom bajo - ortomosaico no visible */}
-          {selectedTaskUuid && currentZoom < tileMinZoom && !tileStatus && (
+          {/* Indicador de zoom bajo - ortomosaico no visible (solo en modo ortofoto) */}
+          {selectedTaskUuid && selectedLayerType === "orthophoto" && currentZoom < tileMinZoom && !tileStatus && (
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-amber-50/95 backdrop-blur-sm px-4 py-2.5 rounded-xl shadow-lg border border-amber-300/60 z-20 max-w-xs text-center">
               <div className="flex items-center gap-2 text-sm text-amber-700 font-medium">
                 <Eye className="h-4 w-4 flex-shrink-0" />

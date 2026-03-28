@@ -208,16 +208,24 @@ export async function proxyOdmTile(req: Request, res: Response) {
     const cacheDir = ensureCacheDir(cacheKey);
     const cachePath = path.join(cacheDir, `${yNum}.png`);
 
+    // Cache: 7 días para ortofoto/dsm/dtm, 1 día para índices de vegetación
+    const isIndex = !!layerConfig.params;
+    const cacheTTL = isIndex ? 1 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+    const browserMaxAge = isIndex ? 86400 : 604800;
+
     if (fs.existsSync(cachePath)) {
       const stat = fs.statSync(cachePath);
-      // Cache válido por 7 días
-      if (Date.now() - stat.mtimeMs < 7 * 24 * 60 * 60 * 1000) {
+      // Verificar que el tile cacheado no sea corrupto (muy pequeño = posible tile negro/vacío)
+      const minValidSize = isIndex ? 200 : 100; // índices deben ser más grandes que un tile transparente
+      if (Date.now() - stat.mtimeMs < cacheTTL && stat.size > minValidSize) {
         res.setHeader("Content-Type", "image/png");
-        res.setHeader("Cache-Control", "public, max-age=604800");
+        res.setHeader("Cache-Control", `public, max-age=${browserMaxAge}`);
         res.setHeader("X-Tile-Cache", "HIT");
         res.setHeader("Access-Control-Allow-Origin", "*");
         return res.sendFile(cachePath);
       }
+      // Cache expirado o corrupto, eliminar
+      try { fs.unlinkSync(cachePath); } catch { /* ignore */ }
     }
 
     // Construir URL del tile - usar XYZ Y directamente (WebODM usa scheme: "xyz")
@@ -277,15 +285,18 @@ export async function proxyOdmTile(req: Request, res: Response) {
     const contentType = response.headers.get("content-type") || "image/png";
     const buffer = Buffer.from(await response.arrayBuffer());
 
-    // Guardar en cache
-    try {
-      fs.writeFileSync(cachePath, buffer);
-    } catch (e) {
-      console.warn("[ODM Tile Proxy] Cache write failed:", e);
+    // Solo cachear tiles que parecen válidos (no muy pequeños)
+    const minCacheSize = isIndex ? 200 : 100;
+    if (buffer.length > minCacheSize) {
+      try {
+        fs.writeFileSync(cachePath, buffer);
+      } catch (e) {
+        console.warn("[ODM Tile Proxy] Cache write failed:", e);
+      }
     }
 
     res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "public, max-age=604800");
+    res.setHeader("Cache-Control", `public, max-age=${browserMaxAge}`);
     res.setHeader("X-Tile-Cache", "MISS");
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.send(buffer);
