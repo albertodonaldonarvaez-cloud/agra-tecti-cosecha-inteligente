@@ -31,6 +31,9 @@ export const users = mysqlTable("users", {
   avatarEmoji: varchar("avatarEmoji", { length: 16 }).default("🌿"),
   bio: varchar("bio", { length: 255 }),
   phone: varchar("phone", { length: 32 }),
+  telegramChatId: varchar("telegramChatId", { length: 64 }),
+  telegramUsername: varchar("telegramUsername", { length: 128 }),
+  telegramLinkedAt: timestamp("telegramLinkedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -38,6 +41,16 @@ export const users = mysqlTable("users", {
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
+
+// Tabla de códigos de vinculación de Telegram
+export const telegramLinkCodes = mysqlTable("telegramLinkCodes", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  code: varchar("code", { length: 8 }).notNull().unique(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  used: boolean("used").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
 
 // Tabla de logs de actividad de usuarios
 export const userActivityLogs = mysqlTable("userActivityLogs", {

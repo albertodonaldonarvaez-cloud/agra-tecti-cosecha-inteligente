@@ -138,6 +138,14 @@ async function startServer() {
     }).catch((err) => {
       console.error("Error al iniciar HarvestNotifier:", err);
     });
+
+    // Iniciar bot de Telegram para Notas de Campo
+    // Escucha mensajes privados para crear notas y enviar notificaciones
+    import("../telegramFieldNotesBot").then(({ startFieldNotesBot }) => {
+      startFieldNotesBot();
+    }).catch((err) => {
+      console.error("Error al iniciar TelegramFieldNotesBot:", err);
+    });
   });
 }
 

@@ -9,7 +9,7 @@ import {
   Search, Filter, ChevronDown, ChevronUp, X, Save, Loader2,
   TreePine, Bug, Droplets, Wrench, Leaf, FlaskConical, Mountain,
   Building2, PawPrint, HelpCircle, Navigation, Trash2, MessageSquare,
-  Camera, Image as ImageIcon, Hash,
+  Camera, Image as ImageIcon, Hash, Send, Link2, Unlink, Copy, Check,
 } from "lucide-react";
 
 // ===== CONSTANTES =====
@@ -106,6 +106,20 @@ function FieldNotesContent() {
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsError, setGpsError] = useState("");
   const formFileRef = useRef<HTMLInputElement>(null);
+
+  // Telegram linking
+  const [showTelegramModal, setShowTelegramModal] = useState(false);
+  const [linkCode, setLinkCode] = useState<string | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const { data: telegramStatus } = trpc.telegramLink.getStatus.useQuery();
+  const generateCode = trpc.telegramLink.generateCode.useMutation({
+    onSuccess: (data) => { setLinkCode(data.code); setCodeCopied(false); },
+    onError: (err) => toast.error("Error: " + err.message),
+  });
+  const unlinkTelegram = trpc.telegramLink.unlink.useMutation({
+    onSuccess: () => { toast.success("Telegram desvinculado"); utils.telegramLink.getStatus.invalidate(); setShowTelegramModal(false); },
+    onError: (err) => toast.error("Error: " + err.message),
+  });
 
   // Queries
   const { data: notes, isLoading } = trpc.fieldNotes.list.useQuery({
@@ -275,10 +289,21 @@ function FieldNotesContent() {
             </h1>
             <p className="text-sm text-gray-500 mt-1">Reporta observaciones durante tus recorridos</p>
           </div>
-          <button onClick={() => setShowForm(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl shadow-lg hover:shadow-xl transition-all text-sm font-semibold">
-            <Plus className="w-4 h-4" /> Nueva Nota
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowTelegramModal(true)}
+              className={`flex items-center gap-2 px-3 py-2.5 rounded-xl shadow-md hover:shadow-lg transition-all text-sm font-semibold ${
+                (telegramStatus as any)?.linked
+                  ? "bg-gradient-to-r from-blue-400 to-blue-500 text-white"
+                  : "bg-white/70 text-gray-600 border border-gray-200 hover:border-blue-300"
+              }`}>
+              <Send className="w-4 h-4" />
+              <span className="hidden sm:inline">{(telegramStatus as any)?.linked ? "Telegram" : "Vincular Telegram"}</span>
+            </button>
+            <button onClick={() => setShowForm(true)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl shadow-lg hover:shadow-xl transition-all text-sm font-semibold">
+              <Plus className="w-4 h-4" /> Nueva Nota
+            </button>
+          </div>
         </div>
 
         {/* Estadisticas */}
@@ -707,6 +732,97 @@ function FieldNotesContent() {
                   {updateStatus.isPending ? "Guardando..." : "Confirmar"}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Telegram */}
+      {showTelegramModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl max-w-md w-full overflow-hidden">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                  <Send className="w-5 h-5 text-blue-500" /> Telegram
+                </h3>
+                <button onClick={() => { setShowTelegramModal(false); setLinkCode(null); }}
+                  className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"><X className="w-5 h-5" /></button>
+              </div>
+
+              {(telegramStatus as any)?.linked ? (
+                <div className="space-y-4">
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
+                        <Send className="w-6 h-6 text-blue-500" />
+                      </div>
+                      <div>
+                        <p className="font-semibold text-gray-800">Cuenta vinculada</p>
+                        {(telegramStatus as any)?.username && (
+                          <p className="text-sm text-blue-600">@{(telegramStatus as any).username}</p>
+                        )}
+                        <p className="text-xs text-gray-500 mt-0.5">Vinculado {toDateStr((telegramStatus as any)?.linkedAt)}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                    <p className="text-sm text-green-800 font-medium mb-2">Puedes hacer desde Telegram:</p>
+                    <ul className="text-sm text-green-700 space-y-1">
+                      <li>\u2022 Enviar /nota para crear una nota de campo</li>
+                      <li>\u2022 Enviar una foto directamente para reportar</li>
+                      <li>\u2022 Recibir notificaciones cuando tus notas se actualicen</li>
+                      <li>\u2022 Ver tus notas con /misnotas</li>
+                    </ul>
+                  </div>
+                  <button onClick={() => unlinkTelegram.mutate()}
+                    disabled={unlinkTelegram.isPending}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-red-200 text-red-600 font-medium hover:bg-red-50 text-sm transition-all">
+                    <Unlink className="w-4 h-4" /> Desvincular Telegram
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-600">
+                    Vincula tu cuenta de Telegram para crear notas de campo directamente desde el chat y recibir notificaciones.
+                  </p>
+
+                  {!linkCode ? (
+                    <button onClick={() => generateCode.mutate()}
+                      disabled={generateCode.isPending}
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-blue-400 to-blue-500 text-white font-semibold shadow-lg hover:shadow-xl transition-all text-sm">
+                      {generateCode.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
+                      Generar codigo de vinculacion
+                    </button>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
+                        <p className="text-xs text-gray-500 mb-2">Tu codigo de vinculacion (expira en 10 min):</p>
+                        <div className="flex items-center justify-center gap-2">
+                          <span className="text-3xl font-mono font-bold tracking-widest text-blue-700">{linkCode}</span>
+                          <button onClick={() => { navigator.clipboard.writeText(`/vincular ${linkCode}`); setCodeCopied(true); toast.success("Copiado"); }}
+                            className="p-2 rounded-lg hover:bg-blue-100 text-blue-500 transition-all">
+                            {codeCopied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+                        <p className="text-sm font-medium text-gray-700 mb-2">Instrucciones:</p>
+                        <ol className="text-sm text-gray-600 space-y-1.5">
+                          <li>1. Abre Telegram y busca el bot de AGRA-TECTI</li>
+                          <li>2. Envia <code className="bg-gray-200 px-1.5 py-0.5 rounded text-xs font-mono">/start</code></li>
+                          <li>3. Envia <code className="bg-gray-200 px-1.5 py-0.5 rounded text-xs font-mono">/vincular {linkCode}</code></li>
+                          <li>4. Listo! Ya puedes crear notas desde Telegram</li>
+                        </ol>
+                      </div>
+                      <button onClick={() => { generateCode.mutate(); }}
+                        className="w-full text-center text-sm text-blue-600 hover:text-blue-700 font-medium">
+                        Generar nuevo codigo
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>

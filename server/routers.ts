@@ -7,7 +7,7 @@ import * as db from "./db";
 import * as dbExt from "./db_extended";
 import * as webodm from "./webodmService";
 import { getDb } from "./db";
-import { boxes, harvesters, parcels, parcelDetails, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos } from "../drizzle/schema";
+import { boxes, harvesters, parcels, parcelDetails, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos, telegramLinkCodes } from "../drizzle/schema";
 import { eq, desc, and, gte, lte, inArray, sql } from "drizzle-orm";
 
 export const appRouter = router({
@@ -2387,6 +2387,15 @@ export const appRouter = router({
           });
         }
 
+        // Enviar notificación por Telegram al usuario que reportó
+        try {
+          const { notifyNoteStatusChange } = await import("./telegramFieldNotesBot");
+          const resolverName = (ctx as any).user?.name || "Sistema";
+          await notifyNoteStatusChange(input.id, input.status, resolverName);
+        } catch (telegramError) {
+          console.error("[FieldNotes] Error al enviar notificación Telegram:", telegramError);
+        }
+
         return { success: true };
       }),
 
@@ -2455,6 +2464,73 @@ export const appRouter = router({
       const resolved = allNotes.filter(n => n.status === "resuelta").length;
       const critical = allNotes.filter(n => n.severity === "critica" && n.status !== "resuelta" && n.status !== "descartada").length;
       return { total: allNotes.length, open, inReview, inProgress, resolved, critical };
+    }),
+  }),
+
+  // ============================================================
+  // Telegram Linking
+  // ============================================================
+  telegramLink: router({
+    // Obtener estado de vinculación del usuario actual
+    getStatus: protectedProcedure.query(async ({ ctx }) => {
+      const drizzle = await getDb();
+      const userId = (ctx as any).user?.id;
+      if (!userId) return { linked: false };
+      const [user] = await drizzle.select({
+        telegramChatId: users.telegramChatId,
+        telegramUsername: users.telegramUsername,
+        telegramLinkedAt: users.telegramLinkedAt,
+      }).from(users).where(eq(users.id, userId));
+      if (!user?.telegramChatId) return { linked: false };
+      return {
+        linked: true,
+        username: user.telegramUsername,
+        linkedAt: user.telegramLinkedAt,
+      };
+    }),
+
+    // Generar código de vinculación temporal
+    generateCode: protectedProcedure.mutation(async ({ ctx }) => {
+      const drizzle = await getDb();
+      const userId = (ctx as any).user?.id;
+      if (!userId) throw new Error("No autenticado");
+
+      // Generar código aleatorio de 6 caracteres
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      let code = "";
+      for (let i = 0; i < 6; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+
+      // Expira en 10 minutos
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+      // Invalidar códigos anteriores del usuario
+      await drizzle.update(telegramLinkCodes)
+        .set({ used: true })
+        .where(eq(telegramLinkCodes.userId, userId));
+
+      // Crear nuevo código
+      await drizzle.insert(telegramLinkCodes).values({
+        userId,
+        code,
+        expiresAt,
+      });
+
+      return { code, expiresAt: expiresAt.toISOString() };
+    }),
+
+    // Desvincular Telegram
+    unlink: protectedProcedure.mutation(async ({ ctx }) => {
+      const drizzle = await getDb();
+      const userId = (ctx as any).user?.id;
+      if (!userId) throw new Error("No autenticado");
+      await drizzle.update(users).set({
+        telegramChatId: null,
+        telegramUsername: null,
+        telegramLinkedAt: null,
+      }).where(eq(users.id, userId));
+      return { success: true };
     }),
   }),
 });
