@@ -25,6 +25,7 @@ export const users = mysqlTable("users", {
   canViewEditor: boolean("canViewEditor").default(false).notNull(),
   canViewErrors: boolean("canViewErrors").default(false).notNull(),
   canViewCrops: boolean("canViewCrops").default(false).notNull(),
+  canViewFieldNotes: boolean("canViewFieldNotes").default(true).notNull(),
   // Campos de personalización de perfil
   avatarColor: varchar("avatarColor", { length: 32 }).default("#16a34a"),
   avatarEmoji: varchar("avatarEmoji", { length: 16 }).default("🌿"),
@@ -499,3 +500,49 @@ export const warehouseToolAssignments = mysqlTable("warehouseToolAssignments", {
 });
 
 export type WarehouseToolAssignment = typeof warehouseToolAssignments.$inferSelect;
+
+// ============ NOTAS DE CAMPO ============
+// Reportes rápidos de observaciones durante recorridos de parcelas
+export const fieldNotes = mysqlTable("fieldNotes", {
+  id: int("id").autoincrement().primaryKey(),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  category: mysqlEnum("category", [
+    "arboles_mal_plantados",
+    "plaga_enfermedad",
+    "riego_drenaje",
+    "dano_mecanico",
+    "maleza",
+    "fertilizacion",
+    "suelo",
+    "infraestructura",
+    "fauna",
+    "otro"
+  ]).notNull(),
+  severity: mysqlEnum("severity", ["baja", "media", "alta", "critica"]).default("media").notNull(),
+  status: mysqlEnum("status", ["abierta", "en_revision", "en_progreso", "resuelta", "descartada"]).default("abierta").notNull(),
+  parcelId: int("parcelId"),
+  // Ubicación GPS (capturada desde el celular)
+  latitude: decimal("latitude", { precision: 10, scale: 7 }),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }),
+  // Quién reportó y quién resolvió
+  reportedByUserId: int("reportedByUserId").notNull(),
+  resolvedByUserId: int("resolvedByUserId"),
+  resolutionNotes: text("resolutionNotes"),
+  resolvedAt: timestamp("resolvedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type FieldNote = typeof fieldNotes.$inferSelect;
+export type InsertFieldNote = typeof fieldNotes.$inferInsert;
+
+// Fotos asociadas a notas de campo
+export const fieldNotePhotos = mysqlTable("fieldNotePhotos", {
+  id: int("id").autoincrement().primaryKey(),
+  fieldNoteId: int("fieldNoteId").notNull(),
+  photoPath: varchar("photoPath", { length: 512 }).notNull(),
+  caption: varchar("caption", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type FieldNotePhoto = typeof fieldNotePhotos.$inferSelect;
+export type InsertFieldNotePhoto = typeof fieldNotePhotos.$inferInsert;

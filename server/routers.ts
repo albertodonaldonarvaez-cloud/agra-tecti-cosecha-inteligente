@@ -7,7 +7,7 @@ import * as db from "./db";
 import * as dbExt from "./db_extended";
 import * as webodm from "./webodmService";
 import { getDb } from "./db";
-import { boxes, harvesters, parcels, parcelDetails, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments } from "../drizzle/schema";
+import { boxes, harvesters, parcels, parcelDetails, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos } from "../drizzle/schema";
 import { eq, desc, and, gte, lte, inArray, sql } from "drizzle-orm";
 
 export const appRouter = router({
@@ -2202,6 +2202,149 @@ export const appRouter = router({
         toolsByStatus: { disponible: tools.filter(t => t.status === 'disponible').length, en_uso: tools.filter(t => t.status === 'en_uso').length, mantenimiento: tools.filter(t => t.status === 'mantenimiento').length, dañado: tools.filter(t => t.status === 'dañado').length, baja: tools.filter(t => t.status === 'baja').length },
         totalInventoryValue: products.reduce((sum, p) => sum + (Number(p.costPerUnit) || 0) * (Number(p.currentStock) || 0), 0),
       };
+    }),
+  }),
+
+  // ============ NOTAS DE CAMPO ============
+  fieldNotes: router({
+    list: protectedProcedure
+      .input(z.object({
+        status: z.string().optional(),
+        category: z.string().optional(),
+        severity: z.string().optional(),
+        parcelId: z.number().optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        let conditions: any[] = [];
+        if (input?.status) conditions.push(eq(fieldNotes.status, input.status as any));
+        if (input?.category) conditions.push(eq(fieldNotes.category, input.category as any));
+        if (input?.severity) conditions.push(eq(fieldNotes.severity, input.severity as any));
+        if (input?.parcelId) conditions.push(eq(fieldNotes.parcelId, input.parcelId));
+        const notes = conditions.length > 0
+          ? await drizzle.select().from(fieldNotes).where(and(...conditions)).orderBy(desc(fieldNotes.createdAt))
+          : await drizzle.select().from(fieldNotes).orderBy(desc(fieldNotes.createdAt));
+        return notes;
+      }),
+
+    getById: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        const [note] = await drizzle.select().from(fieldNotes).where(eq(fieldNotes.id, input.id));
+        if (!note) throw new TRPCError({ code: "NOT_FOUND", message: "Nota no encontrada" });
+        const photos = await drizzle.select().from(fieldNotePhotos).where(eq(fieldNotePhotos.fieldNoteId, input.id));
+        return { ...note, photos };
+      }),
+
+    create: protectedProcedure
+      .input(z.object({
+        title: z.string().min(1),
+        description: z.string().optional(),
+        category: z.string(),
+        severity: z.string().optional(),
+        parcelId: z.number().optional(),
+        latitude: z.number().optional(),
+        longitude: z.number().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const drizzle = await getDb();
+        const [result] = await drizzle.insert(fieldNotes).values({
+          title: input.title,
+          description: input.description || null,
+          category: input.category as any,
+          severity: (input.severity || "media") as any,
+          parcelId: input.parcelId || null,
+          latitude: input.latitude ? String(input.latitude) : null,
+          longitude: input.longitude ? String(input.longitude) : null,
+          reportedByUserId: (ctx as any).user?.id || 0,
+        });
+        return { id: result.insertId };
+      }),
+
+    update: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        title: z.string().optional(),
+        description: z.string().optional(),
+        category: z.string().optional(),
+        severity: z.string().optional(),
+        parcelId: z.number().nullable().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const drizzle = await getDb();
+        const { id, ...data } = input;
+        await drizzle.update(fieldNotes).set(data as any).where(eq(fieldNotes.id, id));
+        return { success: true };
+      }),
+
+    updateStatus: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        status: z.string(),
+        resolutionNotes: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const drizzle = await getDb();
+        const updateData: any = { status: input.status };
+        if (input.status === "resuelta" || input.status === "descartada") {
+          updateData.resolvedByUserId = (ctx as any).user?.id || 0;
+          updateData.resolvedAt = new Date();
+          if (input.resolutionNotes) updateData.resolutionNotes = input.resolutionNotes;
+        }
+        await drizzle.update(fieldNotes).set(updateData).where(eq(fieldNotes.id, input.id));
+        return { success: true };
+      }),
+
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const drizzle = await getDb();
+        await drizzle.delete(fieldNotePhotos).where(eq(fieldNotePhotos.fieldNoteId, input.id));
+        await drizzle.delete(fieldNotes).where(eq(fieldNotes.id, input.id));
+        return { success: true };
+      }),
+
+    addPhoto: protectedProcedure
+      .input(z.object({
+        fieldNoteId: z.number(),
+        photoPath: z.string(),
+        caption: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const drizzle = await getDb();
+        const [result] = await drizzle.insert(fieldNotePhotos).values({
+          fieldNoteId: input.fieldNoteId,
+          photoPath: input.photoPath,
+          caption: input.caption || null,
+        });
+        return { id: result.insertId };
+      }),
+
+    deletePhoto: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const drizzle = await getDb();
+        await drizzle.delete(fieldNotePhotos).where(eq(fieldNotePhotos.id, input.id));
+        return { success: true };
+      }),
+
+    getPhotos: protectedProcedure
+      .input(z.object({ fieldNoteId: z.number() }))
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        return drizzle.select().from(fieldNotePhotos).where(eq(fieldNotePhotos.fieldNoteId, input.fieldNoteId));
+      }),
+
+    summary: protectedProcedure.query(async () => {
+      const drizzle = await getDb();
+      const allNotes = await drizzle.select().from(fieldNotes);
+      const open = allNotes.filter(n => n.status === "abierta").length;
+      const inReview = allNotes.filter(n => n.status === "en_revision").length;
+      const inProgress = allNotes.filter(n => n.status === "en_progreso").length;
+      const resolved = allNotes.filter(n => n.status === "resuelta").length;
+      const critical = allNotes.filter(n => n.severity === "critica" && n.status !== "resuelta" && n.status !== "descartada").length;
+      return { total: allNotes.length, open, inReview, inProgress, resolved, critical };
     }),
   }),
 });

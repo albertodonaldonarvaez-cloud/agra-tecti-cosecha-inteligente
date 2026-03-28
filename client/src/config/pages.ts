@@ -26,6 +26,7 @@ import {
   Sprout,
   BookOpen,
   Warehouse as WarehouseIcon,
+  ClipboardList,
   type LucideIcon
 } from "lucide-react";
 
@@ -202,6 +203,18 @@ export const PAGES_CONFIG: PageConfig[] = [
     showInNav: true,
   },
   {
+    permissionKey: "canViewFieldNotes",
+    path: "/field-notes",
+    icon: ClipboardList,
+    label: "Notas",
+    fullName: "Notas de Campo",
+    description: "Reportar observaciones durante recorridos de parcelas",
+    adminOnly: false,
+    defaultValue: true,
+    order: 13,
+    showInNav: true,
+  },
+  {
     permissionKey: "canViewCrops",
     path: "/crops",
     icon: Sprout,
@@ -210,7 +223,7 @@ export const PAGES_CONFIG: PageConfig[] = [
     description: "Gestionar cultivos y sus variedades",
     adminOnly: true,
     defaultValue: false,
-    order: 13,
+    order: 14,
     showInNav: true,
   },
   {
@@ -222,7 +235,7 @@ export const PAGES_CONFIG: PageConfig[] = [
     description: "Ver y resolver errores de sincronización",
     adminOnly: true,
     defaultValue: false,
-    order: 14,
+    order: 15,
     showInNav: false, // No mostrar en nav por ahora
   },
 ];
