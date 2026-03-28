@@ -2490,48 +2490,71 @@ export const appRouter = router({
     }),
 
     // Generar código de vinculación temporal
-    generateCode: protectedProcedure.mutation(async ({ ctx }) => {
-      const drizzle = await getDb();
-      const userId = (ctx as any).user?.id;
-      if (!userId) throw new Error("No autenticado");
+    // Si se pasa userId, genera código para ese usuario (admin)
+    // Si no, genera para el usuario actual
+    generateCode: protectedProcedure
+      .input(z.object({ userId: z.number().optional() }).optional())
+      .mutation(async ({ ctx, input }) => {
+        const drizzle = await getDb();
+        const currentUserId = (ctx as any).user?.id;
+        if (!currentUserId) throw new Error("No autenticado");
 
-      // Generar código aleatorio de 6 caracteres
-      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-      let code = "";
-      for (let i = 0; i < 6; i++) {
-        code += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
+        // Si se pasa userId, verificar que el usuario actual sea admin
+        let targetUserId = currentUserId;
+        if (input?.userId && input.userId !== currentUserId) {
+          const [currentUser] = await drizzle.select({ role: users.role }).from(users).where(eq(users.id, currentUserId));
+          if (currentUser?.role !== "admin") throw new Error("Solo administradores pueden vincular otros usuarios");
+          targetUserId = input.userId;
+        }
 
-      // Expira en 10 minutos
-      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+        // Generar código aleatorio de 6 caracteres
+        const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        let code = "";
+        for (let i = 0; i < 6; i++) {
+          code += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
 
-      // Invalidar códigos anteriores del usuario
-      await drizzle.update(telegramLinkCodes)
-        .set({ used: true })
-        .where(eq(telegramLinkCodes.userId, userId));
+        // Expira en 10 minutos
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-      // Crear nuevo código
-      await drizzle.insert(telegramLinkCodes).values({
-        userId,
-        code,
-        expiresAt,
-      });
+        // Invalidar códigos anteriores del usuario
+        await drizzle.update(telegramLinkCodes)
+          .set({ used: true })
+          .where(eq(telegramLinkCodes.userId, targetUserId));
 
-      return { code, expiresAt: expiresAt.toISOString() };
-    }),
+        // Crear nuevo código
+        await drizzle.insert(telegramLinkCodes).values({
+          userId: targetUserId,
+          code,
+          expiresAt,
+        });
+
+        return { code, expiresAt: expiresAt.toISOString() };
+      }),
 
     // Desvincular Telegram
-    unlink: protectedProcedure.mutation(async ({ ctx }) => {
-      const drizzle = await getDb();
-      const userId = (ctx as any).user?.id;
-      if (!userId) throw new Error("No autenticado");
-      await drizzle.update(users).set({
-        telegramChatId: null,
-        telegramUsername: null,
-        telegramLinkedAt: null,
-      }).where(eq(users.id, userId));
-      return { success: true };
-    }),
+    // Si se pasa userId, desvincula ese usuario (admin)
+    unlink: protectedProcedure
+      .input(z.object({ userId: z.number().optional() }).optional())
+      .mutation(async ({ ctx, input }) => {
+        const drizzle = await getDb();
+        const currentUserId = (ctx as any).user?.id;
+        if (!currentUserId) throw new Error("No autenticado");
+
+        let targetUserId = currentUserId;
+        if (input?.userId && input.userId !== currentUserId) {
+          const [currentUser] = await drizzle.select({ role: users.role }).from(users).where(eq(users.id, currentUserId));
+          if (currentUser?.role !== "admin") throw new Error("Solo administradores pueden desvincular otros usuarios");
+          targetUserId = input.userId;
+        }
+
+        await drizzle.update(users).set({
+          telegramChatId: null,
+          telegramUsername: null,
+          telegramLinkedAt: null,
+        }).where(eq(users.id, targetUserId));
+        return { success: true };
+      }),
   }),
 });
 export type AppRouter = typeof appRouter;

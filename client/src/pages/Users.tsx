@@ -36,8 +36,13 @@ import {
   ChevronUp,
   BarChart3,
   AlertTriangle,
+  Send,
+  Link2,
+  Unlink,
+  Copy,
+  Check,
 } from "lucide-react";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { toast } from "sonner";
 import { getPermissionPages, getDefaultPermissions } from "@/config/pages";
 
@@ -101,6 +106,9 @@ export default function Users() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [expandedUser, setExpandedUser] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<"users" | "activity">("users");
+  const [showTelegramDialog, setShowTelegramDialog] = useState(false);
+  const [telegramCode, setTelegramCode] = useState<string | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
 
   const permissionPages = useMemo(() => getPermissionPages(), []);
   const [permissions, setPermissions] = useState<Record<string, boolean>>(() => getDefaultPermissions());
@@ -164,6 +172,48 @@ export default function Users() {
     },
     onError: (e) => toast.error(e.message),
   });
+
+  const generateTelegramCode = trpc.telegramLink.generateCode.useMutation({
+    onSuccess: (data) => {
+      setTelegramCode(data.code);
+      setCodeCopied(false);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const unlinkTelegram = trpc.telegramLink.unlink.useMutation({
+    onSuccess: () => {
+      toast.success("Telegram desvinculado");
+      setShowTelegramDialog(false);
+      refetch();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const handleOpenTelegram = (u: any) => {
+    setSelectedUser(u);
+    setTelegramCode(null);
+    setCodeCopied(false);
+    setShowTelegramDialog(true);
+  };
+
+  const handleGenerateCode = () => {
+    if (!selectedUser) return;
+    generateTelegramCode.mutate({ userId: selectedUser.id });
+  };
+
+  const handleCopyCode = () => {
+    if (!telegramCode) return;
+    navigator.clipboard.writeText(telegramCode);
+    setCodeCopied(true);
+    toast.success("Código copiado");
+    setTimeout(() => setCodeCopied(false), 3000);
+  };
+
+  const handleUnlinkTelegram = () => {
+    if (!selectedUser) return;
+    unlinkTelegram.mutate({ userId: selectedUser.id });
+  };
 
   useEffect(() => {
     if (!loading && !user) window.location.href = getLoginUrl();
@@ -286,6 +336,11 @@ export default function Users() {
                                 <span className={`text-xs px-2 py-0.5 rounded-full ${u.role === "admin" ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"}`}>
                                   {u.role === "admin" ? "Admin" : "Usuario"}
                                 </span>
+                                {(u as any).telegramChatId ? (
+                                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                    <Send className="h-2.5 w-2.5" /> Telegram
+                                  </span>
+                                ) : null}
                               </div>
                               <p className="text-sm text-green-600 truncate">{u.email}</p>
                               <div className="flex items-center gap-4 mt-1 flex-wrap">
@@ -365,6 +420,24 @@ export default function Users() {
                                 >
                                   <Key className="h-3.5 w-3.5" />
                                   Cambiar
+                                </Button>
+                              </div>
+
+                              {/* Telegram */}
+                              <div className="space-y-1">
+                                <Label className="text-xs text-gray-500">Telegram</Label>
+                                <Button
+                                  onClick={() => handleOpenTelegram(u)}
+                                  variant="outline"
+                                  size="sm"
+                                  className={`w-full h-9 flex items-center gap-1 ${
+                                    (u as any).telegramChatId
+                                      ? "border-blue-300 text-blue-700 hover:bg-blue-50"
+                                      : "border-gray-300 text-gray-600 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  <Send className="h-3.5 w-3.5" />
+                                  {(u as any).telegramChatId ? "Vinculado" : "Vincular"}
                                 </Button>
                               </div>
 
@@ -650,6 +723,104 @@ export default function Users() {
                   {changePasswordMut.isPending ? "Cambiando..." : "Cambiar Contraseña"}
                 </Button>
               </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Dialog: Vincular Telegram */}
+        <Dialog open={showTelegramDialog} onOpenChange={setShowTelegramDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Send className="h-5 w-5 text-blue-600" />
+                Telegram — {selectedUser?.name}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              {(selectedUser as any)?.telegramChatId ? (
+                <>
+                  <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Send className="h-4 w-4 text-blue-600" />
+                      <span className="text-sm font-medium text-blue-800">Cuenta vinculada</span>
+                    </div>
+                    <p className="text-sm text-blue-700">
+                      Usuario: <strong>@{(selectedUser as any).telegramUsername || "sin username"}</strong>
+                    </p>
+                    <p className="text-xs text-blue-600 mt-1">
+                      Vinculado: {formatDate((selectedUser as any).telegramLinkedAt)}
+                    </p>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={() => setShowTelegramDialog(false)}>Cerrar</Button>
+                    <Button
+                      variant="outline"
+                      onClick={handleUnlinkTelegram}
+                      disabled={unlinkTelegram.isPending}
+                      className="border-red-300 text-red-700 hover:bg-red-50"
+                    >
+                      <Unlink className="mr-2 h-4 w-4" />
+                      {unlinkTelegram.isPending ? "Desvinculando..." : "Desvincular"}
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-gray-600">
+                    Para vincular la cuenta de <strong>{selectedUser?.name}</strong> con Telegram:
+                  </p>
+                  {!telegramCode ? (
+                    <div className="space-y-3">
+                      <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                        <p className="text-sm text-gray-700 mb-2">1. Genera un código de vinculación</p>
+                        <p className="text-sm text-gray-700">2. El usuario abre el bot de AGRA-TECTI en Telegram</p>
+                        <p className="text-sm text-gray-700">3. Envía: <code>/vincular CÓDIGO</code></p>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" onClick={() => setShowTelegramDialog(false)}>Cancelar</Button>
+                        <Button
+                          onClick={handleGenerateCode}
+                          disabled={generateTelegramCode.isPending}
+                          className="bg-blue-600 hover:bg-blue-700"
+                        >
+                          <Link2 className="mr-2 h-4 w-4" />
+                          {generateTelegramCode.isPending ? "Generando..." : "Generar Código"}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="p-4 bg-green-50 rounded-lg border border-green-200 text-center">
+                        <p className="text-xs text-green-600 mb-2">Código de vinculación (expira en 10 min):</p>
+                        <div className="flex items-center justify-center gap-2">
+                          <span className="text-3xl font-mono font-bold text-green-800 tracking-widest">{telegramCode}</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleCopyCode}
+                            className="text-green-700"
+                          >
+                            {codeCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+                        <p className="text-xs text-blue-700">
+                          <strong>Instrucciones para el usuario:</strong><br />
+                          1. Abre Telegram y busca el bot de AGRA-TECTI<br />
+                          2. Envía: <code>/vincular {telegramCode}</code>
+                        </p>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" onClick={() => setShowTelegramDialog(false)}>Cerrar</Button>
+                        <Button variant="outline" onClick={handleGenerateCode} disabled={generateTelegramCode.isPending}>
+                          Nuevo Código
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </DialogContent>
         </Dialog>

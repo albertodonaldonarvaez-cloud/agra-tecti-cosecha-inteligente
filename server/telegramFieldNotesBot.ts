@@ -1,6 +1,6 @@
 import { getDb } from "./db";
 import { users, telegramLinkCodes, fieldNotes, fieldNotePhotos, parcels } from "../drizzle/schema";
-import { eq, and, gt, sql, isNull, isNotNull } from "drizzle-orm";
+import { eq, and, gt, sql, isNotNull } from "drizzle-orm";
 import { getTelegramConfig } from "./telegramBot";
 import * as fs from "fs";
 import * as path from "path";
@@ -11,8 +11,6 @@ import * as path from "path";
 // directamente desde Telegram con foto, texto y ubicación.
 // También envía notificaciones cuando las notas cambian de estado.
 // ============================================================
-
-const TIMEZONE = "America/Mexico_City";
 
 // Estado de conversación por chatId
 interface ConversationState {
@@ -85,12 +83,13 @@ async function sendMessage(botToken: string, chatId: string, text: string, reply
   });
 }
 
-async function sendPhoto(botToken: string, chatId: string, photoUrl: string, caption?: string): Promise<any> {
-  return callTelegram(botToken, "sendPhoto", {
+async function editMessageText(botToken: string, chatId: string, messageId: number, text: string, replyMarkup?: any): Promise<any> {
+  return callTelegram(botToken, "editMessageText", {
     chat_id: chatId,
-    photo: photoUrl,
-    caption: caption || undefined,
+    message_id: messageId,
+    text,
     parse_mode: "HTML",
+    reply_markup: replyMarkup,
   });
 }
 
@@ -183,20 +182,41 @@ async function createFieldNote(state: ConversationState): Promise<{ folio: strin
 }
 
 // ============================================================
+// Menú principal con botones
+// ============================================================
+
+function getMainMenuKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: "📝 Nueva Nota de Campo", callback_data: "menu_nueva_nota" }],
+      [{ text: "📋 Mis Notas Recientes", callback_data: "menu_mis_notas" }],
+      [{ text: "❓ Ayuda", callback_data: "menu_ayuda" }],
+    ],
+  };
+}
+
+function getCancelKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: "❌ Cancelar", callback_data: "cancel_note" }],
+    ],
+  };
+}
+
+// ============================================================
 // Flujo de conversación
 // ============================================================
 
 function cleanExpiredConversations() {
   const now = Date.now();
   for (const [chatId, state] of conversations) {
-    if (now - state.lastActivity > 30 * 60 * 1000) { // 30 min timeout
+    if (now - state.lastActivity > 30 * 60 * 1000) {
       conversations.delete(chatId);
     }
   }
 }
 
 async function handleUpdate(botToken: string, update: any) {
-  // Solo manejar mensajes privados (no grupos)
   const message = update.message || update.callback_query?.message;
   if (!message) return;
 
@@ -218,39 +238,27 @@ async function handleUpdate(botToken: string, update: any) {
 
   // Comando /start
   if (text === "/start") {
-    await sendMessage(botToken, chatId, 
-      `🌿 <b>AGRA-TECTI - Notas de Campo</b>\n\n` +
-      `Bienvenido al bot de Notas de Campo.\n\n` +
-      `<b>Comandos disponibles:</b>\n` +
-      `/vincular [CÓDIGO] - Vincular tu cuenta\n` +
-      `/nota - Crear una nueva nota de campo\n` +
-      `/misnotas - Ver tus notas recientes\n` +
-      `/ayuda - Ver esta ayuda\n\n` +
-      `Para empezar, vincula tu cuenta con el código que te da la plataforma web.`
-    );
-    return;
-  }
-
-  // Comando /ayuda
-  if (text === "/ayuda" || text === "/help") {
-    await sendMessage(botToken, chatId,
-      `🌿 <b>AGRA-TECTI - Ayuda</b>\n\n` +
-      `<b>¿Cómo vincular mi cuenta?</b>\n` +
-      `1. Entra a la plataforma web\n` +
-      `2. Ve a tu perfil o configuración\n` +
-      `3. Haz clic en "Vincular Telegram"\n` +
-      `4. Copia el código y envíalo aquí con /vincular CÓDIGO\n\n` +
-      `<b>¿Cómo crear una nota?</b>\n` +
-      `1. Envía /nota\n` +
-      `2. Selecciona la categoría\n` +
-      `3. Escribe la descripción\n` +
-      `4. Envía una foto\n` +
-      `5. Envía tu ubicación\n` +
-      `6. Selecciona la severidad\n\n` +
-      `<b>Atajo rápido:</b>\n` +
-      `También puedes enviar directamente una foto con descripción y el bot te guiará para completar la nota.\n\n` +
-      `🤖 AGRA-TECTI Cosecha Inteligente`
-    );
+    const user = await getUserByChatId(chatId);
+    if (user) {
+      await sendMessage(botToken, chatId,
+        `🌿 <b>AGRA-TECTI - Notas de Campo</b>\n\n` +
+        `¡Hola <b>${user.name}</b>! 👋\n\n` +
+        `¿Qué deseas hacer?`,
+        getMainMenuKeyboard()
+      );
+    } else {
+      await sendMessage(botToken, chatId,
+        `🌿 <b>AGRA-TECTI - Notas de Campo</b>\n\n` +
+        `Bienvenido. Tu cuenta aún no está vinculada.\n\n` +
+        `Para vincularla, pide a tu administrador que te vincule desde la plataforma web, o envía:\n` +
+        `<code>/vincular TU-CÓDIGO</code>`,
+        {
+          inline_keyboard: [
+            [{ text: "❓ ¿Cómo me vinculo?", callback_data: "menu_ayuda_vincular" }],
+          ],
+        }
+      );
+    }
     return;
   }
 
@@ -258,7 +266,10 @@ async function handleUpdate(botToken: string, update: any) {
   if (text.startsWith("/vincular")) {
     const code = text.replace("/vincular", "").trim();
     if (!code) {
-      await sendMessage(botToken, chatId, "⚠️ Envía el comando con tu código:\n<code>/vincular TU-CÓDIGO</code>");
+      await sendMessage(botToken, chatId,
+        `⚠️ Envía el comando con tu código:\n<code>/vincular TU-CÓDIGO</code>`,
+        { inline_keyboard: [[{ text: "❓ ¿Dónde obtengo el código?", callback_data: "menu_ayuda_vincular" }]] }
+      );
       return;
     }
     await handleLink(botToken, chatId, code, message.from);
@@ -269,12 +280,10 @@ async function handleUpdate(botToken: string, update: any) {
   const user = await getUserByChatId(chatId);
   if (!user) {
     await sendMessage(botToken, chatId,
-      `⚠️ Tu cuenta de Telegram no está vinculada.\n\n` +
-      `Para vincularla:\n` +
-      `1. Entra a la plataforma web\n` +
-      `2. Ve a tu perfil\n` +
-      `3. Genera un código de vinculación\n` +
-      `4. Envíalo aquí: /vincular TU-CÓDIGO`
+      `⚠️ Tu cuenta no está vinculada.\n\n` +
+      `Pide a tu administrador que te vincule, o envía:\n` +
+      `<code>/vincular TU-CÓDIGO</code>`,
+      { inline_keyboard: [[{ text: "❓ ¿Cómo me vinculo?", callback_data: "menu_ayuda_vincular" }]] }
     );
     return;
   }
@@ -291,15 +300,43 @@ async function handleUpdate(botToken: string, update: any) {
     return;
   }
 
+  // Comando /ayuda
+  if (text === "/ayuda" || text === "/help") {
+    await sendHelpMessage(botToken, chatId);
+    return;
+  }
+
+  // Comando /cancelar
+  if (text === "/cancelar") {
+    if (conversations.has(chatId)) {
+      conversations.delete(chatId);
+      await sendMessage(botToken, chatId,
+        `❌ Nota cancelada.\n\n¿Qué deseas hacer?`,
+        getMainMenuKeyboard()
+      );
+    } else {
+      await sendMessage(botToken, chatId, `No hay ninguna nota en proceso.`, getMainMenuKeyboard());
+    }
+    return;
+  }
+
   // Si el usuario envía una foto directamente (atajo rápido)
   if (photo && !conversations.has(chatId)) {
     await startNewNote(botToken, chatId, user.id);
-    // Procesar la foto inmediatamente
     const state = conversations.get(chatId);
     if (state) {
       state.step = "waiting_photo";
       await handlePhotoStep(botToken, chatId, state, photo, message.caption);
     }
+    return;
+  }
+
+  // Si envía ubicación directamente sin conversación activa
+  if (location && !conversations.has(chatId)) {
+    await sendMessage(botToken, chatId,
+      `📍 Ubicación recibida, pero no hay una nota en proceso.\n\n¿Qué deseas hacer?`,
+      getMainMenuKeyboard()
+    );
     return;
   }
 
@@ -311,12 +348,10 @@ async function handleUpdate(botToken: string, update: any) {
     return;
   }
 
-  // Mensaje no reconocido
+  // Mensaje no reconocido - mostrar menú
   await sendMessage(botToken, chatId,
-    `No entendí tu mensaje. Usa:\n` +
-    `/nota - Crear nota de campo\n` +
-    `/misnotas - Ver tus notas\n` +
-    `/ayuda - Ver ayuda`
+    `¿Qué deseas hacer?`,
+    getMainMenuKeyboard()
   );
 }
 
@@ -327,7 +362,6 @@ async function handleLink(botToken: string, chatId: string, code: string, from: 
     return;
   }
 
-  // Buscar código válido
   const [linkCode] = await db.select()
     .from(telegramLinkCodes)
     .where(and(
@@ -337,31 +371,29 @@ async function handleLink(botToken: string, chatId: string, code: string, from: 
     ));
 
   if (!linkCode) {
-    await sendMessage(botToken, chatId, "❌ Código inválido o expirado. Genera uno nuevo desde la plataforma web.");
+    await sendMessage(botToken, chatId,
+      `❌ Código inválido o expirado.\n\nPide a tu administrador un nuevo código.`,
+      { inline_keyboard: [[{ text: "❓ Ayuda", callback_data: "menu_ayuda_vincular" }]] }
+    );
     return;
   }
 
-  // Vincular
   await db.update(users).set({
     telegramChatId: chatId,
     telegramUsername: from?.username || from?.first_name || null,
     telegramLinkedAt: new Date(),
   }).where(eq(users.id, linkCode.userId));
 
-  // Marcar código como usado
   await db.update(telegramLinkCodes).set({ used: true }).where(eq(telegramLinkCodes.id, linkCode.id));
 
-  // Obtener nombre del usuario
   const [user] = await db.select({ name: users.name }).from(users).where(eq(users.id, linkCode.userId));
 
   await sendMessage(botToken, chatId,
-    `✅ <b>¡Cuenta vinculada exitosamente!</b>\n\n` +
-    `Hola <b>${user?.name || "usuario"}</b>, tu cuenta de Telegram está vinculada.\n\n` +
-    `Ahora puedes:\n` +
-    `📝 /nota - Crear notas de campo\n` +
-    `📋 /misnotas - Ver tus notas\n` +
-    `🔔 Recibirás notificaciones cuando tus notas cambien de estado.\n\n` +
-    `🌿 AGRA-TECTI Cosecha Inteligente`
+    `✅ <b>¡Cuenta vinculada!</b>\n\n` +
+    `Hola <b>${user?.name || "usuario"}</b>, ya estás conectado.\n\n` +
+    `🔔 Recibirás notificaciones de tus notas de campo.\n\n` +
+    `¿Qué deseas hacer?`,
+    getMainMenuKeyboard()
   );
 }
 
@@ -374,27 +406,90 @@ async function startNewNote(botToken: string, chatId: string, userId: number) {
   };
   conversations.set(chatId, state);
 
-  // Mostrar categorías como botones inline
-  const keyboard = {
-    inline_keyboard: Object.entries(CATEGORIES).map(([key, val]) => ([
-      { text: `${val.emoji} ${val.label}`, callback_data: `cat_${key}` }
-    ])),
-  };
+  // Categorías en filas de 2 botones
+  const catEntries = Object.entries(CATEGORIES);
+  const rows: any[][] = [];
+  for (let i = 0; i < catEntries.length; i += 2) {
+    const row = [];
+    row.push({ text: `${catEntries[i][1].emoji} ${catEntries[i][1].label}`, callback_data: `cat_${catEntries[i][0]}` });
+    if (catEntries[i + 1]) {
+      row.push({ text: `${catEntries[i + 1][1].emoji} ${catEntries[i + 1][1].label}`, callback_data: `cat_${catEntries[i + 1][0]}` });
+    }
+    rows.push(row);
+  }
+  rows.push([{ text: "❌ Cancelar", callback_data: "cancel_note" }]);
 
   await sendMessage(botToken, chatId,
     `📝 <b>Nueva Nota de Campo</b>\n\n` +
-    `Selecciona la categoría del problema:`,
-    keyboard
+    `Paso 1️⃣ de 5️⃣ — Selecciona la <b>categoría</b>:`,
+    { inline_keyboard: rows }
   );
 }
 
 async function handleCallback(botToken: string, chatId: string, callbackQuery: any) {
   const data = callbackQuery.data;
-  const state = conversations.get(chatId);
+  const messageId = callbackQuery.message?.message_id;
 
   // Responder al callback para quitar el "loading"
   await callTelegram(botToken, "answerCallbackQuery", { callback_query_id: callbackQuery.id });
 
+  // Menú principal
+  if (data === "menu_nueva_nota") {
+    const user = await getUserByChatId(chatId);
+    if (!user) return;
+    await startNewNote(botToken, chatId, user.id);
+    return;
+  }
+
+  if (data === "menu_mis_notas") {
+    const user = await getUserByChatId(chatId);
+    if (!user) return;
+    await showMyNotes(botToken, chatId, user.id);
+    return;
+  }
+
+  if (data === "menu_ayuda") {
+    await sendHelpMessage(botToken, chatId);
+    return;
+  }
+
+  if (data === "menu_ayuda_vincular") {
+    await sendMessage(botToken, chatId,
+      `🔗 <b>¿Cómo vincular tu cuenta?</b>\n\n` +
+      `<b>Opción 1 — Tu administrador te vincula:</b>\n` +
+      `Tu admin entra a Usuarios en la web, busca tu nombre y presiona "Vincular Telegram".\n\n` +
+      `<b>Opción 2 — Tú te vinculas:</b>\n` +
+      `1. Entra a la plataforma web\n` +
+      `2. Ve a Notas de Campo\n` +
+      `3. Presiona "Vincular Telegram"\n` +
+      `4. Copia el código y envíalo aquí:\n` +
+      `<code>/vincular TU-CÓDIGO</code>`,
+      { inline_keyboard: [[{ text: "⬅️ Menú principal", callback_data: "menu_back" }]] }
+    );
+    return;
+  }
+
+  if (data === "menu_back") {
+    const user = await getUserByChatId(chatId);
+    if (user) {
+      await sendMessage(botToken, chatId, `¿Qué deseas hacer?`, getMainMenuKeyboard());
+    }
+    return;
+  }
+
+  // Cancelar nota en proceso
+  if (data === "cancel_note") {
+    conversations.delete(chatId);
+    if (messageId) {
+      await editMessageText(botToken, chatId, messageId,
+        `❌ Nota cancelada.`
+      );
+    }
+    await sendMessage(botToken, chatId, `¿Qué deseas hacer?`, getMainMenuKeyboard());
+    return;
+  }
+
+  const state = conversations.get(chatId);
   if (!state) return;
   state.lastActivity = Date.now();
 
@@ -404,9 +499,17 @@ async function handleCallback(botToken: string, chatId: string, callbackQuery: a
     state.data.category = category;
     state.step = "waiting_description";
     const catInfo = CATEGORIES[category] || { label: category, emoji: "📋" };
+
+    // Editar el mensaje anterior para mostrar la selección
+    if (messageId) {
+      await editMessageText(botToken, chatId, messageId,
+        `✅ Categoría: <b>${catInfo.emoji} ${catInfo.label}</b>`
+      );
+    }
+
     await sendMessage(botToken, chatId,
-      `${catInfo.emoji} Categoría: <b>${catInfo.label}</b>\n\n` +
-      `Ahora escribe una <b>descripción</b> del problema que observas:`
+      `Paso 2️⃣ de 5️⃣ — Escribe una <b>descripción</b> del problema:`,
+      getCancelKeyboard()
     );
     return;
   }
@@ -417,25 +520,34 @@ async function handleCallback(botToken: string, chatId: string, callbackQuery: a
     state.data.severity = severity;
     const sevInfo = SEVERITIES[severity] || { label: severity, emoji: "🟡" };
 
-    // Mostrar parcelas para seleccionar
+    if (messageId) {
+      await editMessageText(botToken, chatId, messageId,
+        `✅ Severidad: <b>${sevInfo.emoji} ${sevInfo.label}</b>`
+      );
+    }
+
+    // Mostrar parcelas
     const parcelsList = await getActiveParcels();
     if (parcelsList.length > 0) {
       state.step = "waiting_parcel";
-      const keyboard = {
-        inline_keyboard: [
-          ...parcelsList.slice(0, 20).map((p: any) => ([
-            { text: `🌱 ${p.name}`, callback_data: `parcel_${p.id}` }
-          ])),
-          [{ text: "⏭️ Sin parcela específica", callback_data: "parcel_none" }],
-        ],
-      };
+      const rows: any[][] = [];
+      const sliced = parcelsList.slice(0, 20);
+      for (let i = 0; i < sliced.length; i += 2) {
+        const row = [];
+        row.push({ text: `🌱 ${sliced[i].name}`, callback_data: `parcel_${sliced[i].id}` });
+        if (sliced[i + 1]) {
+          row.push({ text: `🌱 ${sliced[i + 1].name}`, callback_data: `parcel_${sliced[i + 1].id}` });
+        }
+        rows.push(row);
+      }
+      rows.push([{ text: "⏭️ Sin parcela específica", callback_data: "parcel_none" }]);
+      rows.push([{ text: "❌ Cancelar", callback_data: "cancel_note" }]);
+
       await sendMessage(botToken, chatId,
-        `${sevInfo.emoji} Severidad: <b>${sevInfo.label}</b>\n\n` +
-        `Selecciona la <b>parcela</b> donde encontraste el problema:`,
-        keyboard
+        `Paso 5️⃣ de 5️⃣ — Selecciona la <b>parcela</b>:`,
+        { inline_keyboard: rows }
       );
     } else {
-      // No hay parcelas, crear nota directamente
       await finishNote(botToken, chatId, state);
     }
     return;
@@ -446,7 +558,27 @@ async function handleCallback(botToken: string, chatId: string, callbackQuery: a
     if (data !== "parcel_none") {
       state.data.parcelId = parseInt(data.replace("parcel_", ""));
     }
+
+    if (messageId) {
+      const parcelName = data === "parcel_none" ? "Sin parcela" : `Parcela #${state.data.parcelId}`;
+      await editMessageText(botToken, chatId, messageId,
+        `✅ Parcela: <b>${parcelName}</b>`
+      );
+    }
+
     await finishNote(botToken, chatId, state);
+    return;
+  }
+
+  // Omitir ubicación
+  if (data === "skip_location" && state.step === "waiting_location") {
+    if (messageId) {
+      await editMessageText(botToken, chatId, messageId,
+        `⏭️ Ubicación: <b>Omitida</b>`
+      );
+    }
+    state.step = "waiting_severity";
+    await askSeverity(botToken, chatId);
     return;
   }
 }
@@ -459,15 +591,23 @@ async function handleConversationStep(botToken: string, chatId: string, state: C
   switch (state.step) {
     case "waiting_description":
       if (!text && !photo) {
-        await sendMessage(botToken, chatId, "✏️ Por favor escribe una descripción del problema:");
+        await sendMessage(botToken, chatId, "✏️ Escribe una descripción del problema:", getCancelKeyboard());
         return;
       }
-      state.data.description = text || message.caption || "";
+      if (photo) {
+        // Si envían foto en paso de descripción, guardar caption como descripción y procesar foto
+        state.data.description = message.caption || "";
+        state.step = "waiting_photo";
+        await handlePhotoStep(botToken, chatId, state, photo, message.caption);
+        return;
+      }
+      state.data.description = text;
       state.step = "waiting_photo";
       await sendMessage(botToken, chatId,
         `✅ Descripción registrada.\n\n` +
-        `📸 Ahora envía una <b>foto</b> del problema.\n` +
-        `(Puedes tomar una foto o enviar una de tu galería)`
+        `Paso 3️⃣ de 5️⃣ — Envía una <b>foto</b> del problema 📸\n` +
+        `(Toma una foto o envía de tu galería)`,
+        getCancelKeyboard()
       );
       break;
 
@@ -475,7 +615,7 @@ async function handleConversationStep(botToken: string, chatId: string, state: C
       if (photo) {
         await handlePhotoStep(botToken, chatId, state, photo, message.caption);
       } else {
-        await sendMessage(botToken, chatId, "📸 Por favor envía una <b>foto</b> del problema:");
+        await sendMessage(botToken, chatId, "📸 Envía una <b>foto</b> del problema:", getCancelKeyboard());
       }
       break;
 
@@ -483,6 +623,7 @@ async function handleConversationStep(botToken: string, chatId: string, state: C
       if (location) {
         state.data.latitude = location.latitude;
         state.data.longitude = location.longitude;
+        await sendMessage(botToken, chatId, `✅ Ubicación registrada.`);
         state.step = "waiting_severity";
         await askSeverity(botToken, chatId);
       } else if (text.toLowerCase() === "omitir" || text === "/omitir") {
@@ -490,34 +631,37 @@ async function handleConversationStep(botToken: string, chatId: string, state: C
         await askSeverity(botToken, chatId);
       } else {
         await sendMessage(botToken, chatId,
-          `📍 Envía tu <b>ubicación</b> usando el botón de adjuntar > Ubicación.\n\n` +
-          `O escribe /omitir para continuar sin ubicación.`,
+          `📍 Envía tu <b>ubicación</b> usando el clip 📎 > Ubicación`,
           {
-            keyboard: [[{ text: "📍 Enviar ubicación", request_location: true }], [{ text: "⏭️ Omitir" }]],
-            resize_keyboard: true,
-            one_time_keyboard: true,
+            inline_keyboard: [
+              [{ text: "⏭️ Omitir ubicación", callback_data: "skip_location" }],
+              [{ text: "❌ Cancelar", callback_data: "cancel_note" }],
+            ],
           }
         );
       }
       break;
 
     case "waiting_severity":
-      // Si escriben texto en lugar de usar botones
       const sevKey = Object.keys(SEVERITIES).find(k => text.toLowerCase().includes(k));
       if (sevKey) {
         state.data.severity = sevKey;
         const parcelsList = await getActiveParcels();
         if (parcelsList.length > 0) {
           state.step = "waiting_parcel";
-          const keyboard = {
-            inline_keyboard: [
-              ...parcelsList.slice(0, 20).map((p: any) => ([
-                { text: `🌱 ${p.name}`, callback_data: `parcel_${p.id}` }
-              ])),
-              [{ text: "⏭️ Sin parcela específica", callback_data: "parcel_none" }],
-            ],
-          };
-          await sendMessage(botToken, chatId, `Selecciona la <b>parcela</b>:`, keyboard);
+          const rows: any[][] = [];
+          const sliced = parcelsList.slice(0, 20);
+          for (let i = 0; i < sliced.length; i += 2) {
+            const row = [];
+            row.push({ text: `🌱 ${sliced[i].name}`, callback_data: `parcel_${sliced[i].id}` });
+            if (sliced[i + 1]) {
+              row.push({ text: `🌱 ${sliced[i + 1].name}`, callback_data: `parcel_${sliced[i + 1].id}` });
+            }
+            rows.push(row);
+          }
+          rows.push([{ text: "⏭️ Sin parcela", callback_data: "parcel_none" }]);
+          rows.push([{ text: "❌ Cancelar", callback_data: "cancel_note" }]);
+          await sendMessage(botToken, chatId, `Selecciona la <b>parcela</b>:`, { inline_keyboard: rows });
         } else {
           await finishNote(botToken, chatId, state);
         }
@@ -527,13 +671,12 @@ async function handleConversationStep(botToken: string, chatId: string, state: C
       break;
 
     default:
-      await sendMessage(botToken, chatId, "Usa /nota para crear una nueva nota de campo.");
+      await sendMessage(botToken, chatId, `¿Qué deseas hacer?`, getMainMenuKeyboard());
       conversations.delete(chatId);
   }
 }
 
 async function handlePhotoStep(botToken: string, chatId: string, state: ConversationState, photo: any[], caption?: string) {
-  // Tomar la foto de mayor resolución
   const config = await getTelegramConfig();
   if (!config) return;
 
@@ -551,7 +694,30 @@ async function handlePhotoStep(botToken: string, chatId: string, state: Conversa
   if (!state.data.description) {
     state.step = "waiting_description";
     await sendMessage(botToken, chatId,
-      `📸 Foto recibida.\n\n✏️ Ahora escribe una <b>descripción</b> del problema:`
+      `📸 Foto recibida.\n\n✏️ Ahora escribe una <b>descripción</b> del problema:`,
+      getCancelKeyboard()
+    );
+    return;
+  }
+
+  // Si no tiene categoría (atajo rápido: envió foto directamente)
+  if (!state.data.category) {
+    state.step = "waiting_category";
+    const catEntries = Object.entries(CATEGORIES);
+    const rows: any[][] = [];
+    for (let i = 0; i < catEntries.length; i += 2) {
+      const row = [];
+      row.push({ text: `${catEntries[i][1].emoji} ${catEntries[i][1].label}`, callback_data: `cat_${catEntries[i][0]}` });
+      if (catEntries[i + 1]) {
+        row.push({ text: `${catEntries[i + 1][1].emoji} ${catEntries[i + 1][1].label}`, callback_data: `cat_${catEntries[i + 1][0]}` });
+      }
+      rows.push(row);
+    }
+    rows.push([{ text: "❌ Cancelar", callback_data: "cancel_note" }]);
+
+    await sendMessage(botToken, chatId,
+      `📸 Foto recibida.\n\nSelecciona la <b>categoría</b>:`,
+      { inline_keyboard: rows }
     );
     return;
   }
@@ -559,34 +725,41 @@ async function handlePhotoStep(botToken: string, chatId: string, state: Conversa
   state.step = "waiting_location";
   await sendMessage(botToken, chatId,
     `📸 Foto recibida.\n\n` +
-    `📍 Ahora envía tu <b>ubicación</b> para geolocalizar el problema.\n` +
-    `Usa el botón de adjuntar > Ubicación.\n\n` +
-    `Escribe /omitir si no quieres enviar ubicación.`,
+    `Paso 4️⃣ de 5️⃣ — Envía tu <b>ubicación</b> 📍\n` +
+    `Usa el clip 📎 > Ubicación`,
     {
-      keyboard: [[{ text: "📍 Enviar ubicación", request_location: true }], [{ text: "⏭️ Omitir" }]],
-      resize_keyboard: true,
-      one_time_keyboard: true,
+      inline_keyboard: [
+        [{ text: "⏭️ Omitir ubicación", callback_data: "skip_location" }],
+        [{ text: "❌ Cancelar", callback_data: "cancel_note" }],
+      ],
     }
   );
 }
 
 async function askSeverity(botToken: string, chatId: string) {
-  const keyboard = {
-    inline_keyboard: Object.entries(SEVERITIES).map(([key, val]) => ([
-      { text: `${val.emoji} ${val.label}`, callback_data: `sev_${key}` }
-    ])),
-  };
+  const rows: any[][] = [];
+  const sevEntries = Object.entries(SEVERITIES);
+  // Todas en una fila horizontal
+  rows.push(sevEntries.map(([key, val]) => ({
+    text: `${val.emoji} ${val.label}`,
+    callback_data: `sev_${key}`,
+  })));
+  rows.push([{ text: "❌ Cancelar", callback_data: "cancel_note" }]);
+
   await sendMessage(botToken, chatId,
-    `Selecciona la <b>severidad</b> del problema:`,
-    keyboard
+    `Paso 4️⃣ de 5️⃣ — Selecciona la <b>severidad</b>:`,
+    { inline_keyboard: rows }
   );
 }
 
 async function finishNote(botToken: string, chatId: string, state: ConversationState) {
   try {
+    // Mensaje de "creando..."
+    const loadingMsg = await sendMessage(botToken, chatId, `⏳ Creando nota de campo...`);
+
     const result = await createFieldNote(state);
     if (!result) {
-      await sendMessage(botToken, chatId, "❌ Error al crear la nota. Intenta de nuevo.");
+      await sendMessage(botToken, chatId, "❌ Error al crear la nota. Intenta de nuevo.", getMainMenuKeyboard());
       conversations.delete(chatId);
       return;
     }
@@ -596,27 +769,41 @@ async function finishNote(botToken: string, chatId: string, state: ConversationS
 
     let locationText = "No proporcionada";
     if (state.data.latitude && state.data.longitude) {
-      locationText = `<a href="https://maps.google.com/?q=${state.data.latitude},${state.data.longitude}">Ver en mapa</a>`;
+      locationText = `📍 <a href="https://maps.google.com/?q=${state.data.latitude},${state.data.longitude}">Ver en mapa</a>`;
     }
 
-    // Quitar teclado personalizado
-    await sendMessage(botToken, chatId,
-      `✅ <b>Nota de Campo Creada</b>\n\n` +
-      `📋 Folio: <b>${result.folio}</b>\n` +
-      `${catInfo.emoji} Categoría: ${catInfo.label}\n` +
-      `${sevInfo.emoji} Severidad: ${sevInfo.label}\n` +
-      `📝 ${state.data.description}\n` +
-      `📍 Ubicación: ${locationText}\n` +
-      `📸 Foto: ${state.data.photoBase64 ? "Sí" : "No"}\n\n` +
-      `🔔 Te notificaremos cuando haya actualizaciones sobre esta nota.\n\n` +
-      `🌿 AGRA-TECTI`,
-      { remove_keyboard: true }
-    );
+    // Editar el mensaje de "creando..." con el resultado
+    if (loadingMsg?.result?.message_id) {
+      await editMessageText(botToken, chatId, loadingMsg.result.message_id,
+        `✅ <b>¡Nota Creada!</b>\n\n` +
+        `📋 Folio: <b>${result.folio}</b>\n` +
+        `${catInfo.emoji} Categoría: ${catInfo.label}\n` +
+        `${sevInfo.emoji} Severidad: ${sevInfo.label}\n` +
+        `📝 ${state.data.description}\n` +
+        `${locationText}\n` +
+        `📸 Foto: Sí\n\n` +
+        `🔔 Te notificaremos cuando haya novedades.`
+      );
+    } else {
+      await sendMessage(botToken, chatId,
+        `✅ <b>¡Nota Creada!</b>\n\n` +
+        `📋 Folio: <b>${result.folio}</b>\n` +
+        `${catInfo.emoji} Categoría: ${catInfo.label}\n` +
+        `${sevInfo.emoji} Severidad: ${sevInfo.label}\n` +
+        `📝 ${state.data.description}\n` +
+        `${locationText}\n` +
+        `📸 Foto: Sí\n\n` +
+        `🔔 Te notificaremos cuando haya novedades.`
+      );
+    }
+
+    // Mostrar menú principal
+    await sendMessage(botToken, chatId, `¿Qué más deseas hacer?`, getMainMenuKeyboard());
 
     conversations.delete(chatId);
   } catch (error: any) {
     console.error("[TG Bot] Error al crear nota:", error);
-    await sendMessage(botToken, chatId, `❌ Error: ${error.message}`);
+    await sendMessage(botToken, chatId, `❌ Error: ${error.message}`, getMainMenuKeyboard());
     conversations.delete(chatId);
   }
 }
@@ -624,7 +811,7 @@ async function finishNote(botToken: string, chatId: string, state: ConversationS
 async function showMyNotes(botToken: string, chatId: string, userId: number) {
   const db = await getDb();
   if (!db) {
-    await sendMessage(botToken, chatId, "❌ Error de conexión.");
+    await sendMessage(botToken, chatId, "❌ Error de conexión.", getMainMenuKeyboard());
     return;
   }
 
@@ -635,29 +822,65 @@ async function showMyNotes(botToken: string, chatId: string, userId: number) {
     .limit(10);
 
   if (notes.length === 0) {
-    await sendMessage(botToken, chatId, "📋 No tienes notas de campo registradas.\n\nUsa /nota para crear una.");
+    await sendMessage(botToken, chatId,
+      `📋 No tienes notas de campo registradas.`,
+      {
+        inline_keyboard: [
+          [{ text: "📝 Crear una nota", callback_data: "menu_nueva_nota" }],
+          [{ text: "⬅️ Menú principal", callback_data: "menu_back" }],
+        ],
+      }
+    );
     return;
   }
 
   const statusEmoji: Record<string, string> = {
-    abierta: "🟢",
+    abierta: "🔴",
     en_revision: "🔍",
     en_progreso: "🔨",
     resuelta: "✅",
     descartada: "⬜",
   };
 
-  let msg = `📋 <b>Tus últimas notas de campo:</b>\n\n`;
+  let msg = `📋 <b>Tus últimas notas:</b>\n\n`;
   for (const note of notes) {
     const catInfo = CATEGORIES[(note as any).category] || { emoji: "📋", label: (note as any).category };
     const status = (note as any).status || "abierta";
     const emoji = statusEmoji[status] || "⬜";
-    msg += `${emoji} <b>${(note as any).folio}</b> - ${catInfo.emoji} ${catInfo.label}\n`;
-    msg += `   ${((note as any).description || "").substring(0, 60)}${((note as any).description || "").length > 60 ? "..." : ""}\n`;
-    msg += `   Estado: ${status.replace("_", " ")}\n\n`;
+    msg += `${emoji} <b>${(note as any).folio}</b> — ${catInfo.emoji} ${catInfo.label}\n`;
+    msg += `   ${((note as any).description || "").substring(0, 50)}${((note as any).description || "").length > 50 ? "..." : ""}\n\n`;
   }
 
-  await sendMessage(botToken, chatId, msg);
+  await sendMessage(botToken, chatId, msg, {
+    inline_keyboard: [
+      [{ text: "📝 Nueva nota", callback_data: "menu_nueva_nota" }],
+      [{ text: "⬅️ Menú principal", callback_data: "menu_back" }],
+    ],
+  });
+}
+
+async function sendHelpMessage(botToken: string, chatId: string) {
+  await sendMessage(botToken, chatId,
+    `🌿 <b>AGRA-TECTI — Ayuda</b>\n\n` +
+    `<b>📝 Crear nota:</b>\n` +
+    `Presiona "Nueva Nota" o envía una foto directamente.\n\n` +
+    `<b>📋 Ver notas:</b>\n` +
+    `Presiona "Mis Notas" para ver tus reportes.\n\n` +
+    `<b>🔔 Notificaciones:</b>\n` +
+    `Recibirás un mensaje cuando tus notas cambien de estado, incluyendo fotos de resolución.\n\n` +
+    `<b>🔗 Vincular cuenta:</b>\n` +
+    `Tu admin puede vincularte desde la web, o usa /vincular CÓDIGO.\n\n` +
+    `<b>Comandos:</b>\n` +
+    `/nota — Nueva nota\n` +
+    `/misnotas — Ver notas\n` +
+    `/cancelar — Cancelar nota en proceso\n` +
+    `/ayuda — Esta ayuda`,
+    {
+      inline_keyboard: [
+        [{ text: "⬅️ Menú principal", callback_data: "menu_back" }],
+      ],
+    }
+  );
 }
 
 // ============================================================
@@ -671,14 +894,12 @@ export async function notifyNoteStatusChange(noteId: number, newStatus: string, 
   const db = await getDb();
   if (!db) return false;
 
-  // Obtener la nota y el usuario que la reportó
   const [note] = await db.select().from(fieldNotes).where(eq(fieldNotes.id, noteId));
   if (!note) return false;
 
   const reporterId = (note as any).reportedByUserId;
   if (!reporterId) return false;
 
-  // Obtener el chatId del usuario
   const [user] = await db.select({ telegramChatId: users.telegramChatId, name: users.name })
     .from(users)
     .where(eq(users.id, reporterId));
@@ -686,7 +907,7 @@ export async function notifyNoteStatusChange(noteId: number, newStatus: string, 
   if (!user?.telegramChatId) return false;
 
   const statusLabels: Record<string, { label: string; emoji: string }> = {
-    abierta: { label: "Abierta", emoji: "🟢" },
+    abierta: { label: "Abierta", emoji: "🔴" },
     en_revision: { label: "En revisión", emoji: "🔍" },
     en_progreso: { label: "En progreso", emoji: "🔨" },
     resuelta: { label: "Resuelta", emoji: "✅" },
@@ -696,7 +917,7 @@ export async function notifyNoteStatusChange(noteId: number, newStatus: string, 
   const statusInfo = statusLabels[newStatus] || { label: newStatus, emoji: "📋" };
   const catInfo = CATEGORIES[(note as any).category] || { label: (note as any).category, emoji: "📋" };
 
-  let msg = `🔔 <b>Actualización de Nota de Campo</b>\n\n`;
+  let msg = `🔔 <b>Actualización de Nota</b>\n\n`;
   msg += `📋 Folio: <b>${(note as any).folio}</b>\n`;
   msg += `${catInfo.emoji} ${catInfo.label}\n`;
   msg += `📝 ${((note as any).description || "").substring(0, 100)}\n\n`;
@@ -707,12 +928,10 @@ export async function notifyNoteStatusChange(noteId: number, newStatus: string, 
   if ((note as any).resolutionNotes && (newStatus === "resuelta" || newStatus === "descartada")) {
     msg += `💬 Notas: ${(note as any).resolutionNotes}\n`;
   }
-  msg += `\n🌿 AGRA-TECTI`;
 
-  // Enviar mensaje de texto
   await sendMessage(config.botToken, user.telegramChatId, msg);
 
-  // Si es resuelta/descartada, enviar las fotos de resolución
+  // Si es resuelta/descartada, enviar fotos de resolución
   if (newStatus === "resuelta" || newStatus === "descartada") {
     const photos = await db.select()
       .from(fieldNotePhotos)
@@ -724,13 +943,12 @@ export async function notifyNoteStatusChange(noteId: number, newStatus: string, 
     for (const photo of photos) {
       const photoPath = (photo as any).photoPath;
       if (photoPath && fs.existsSync(photoPath)) {
-        // Enviar como archivo local usando sendDocument con multipart
         try {
           const FormData = (await import("form-data")).default;
           const formData = new FormData();
           formData.append("chat_id", user.telegramChatId);
           formData.append("photo", fs.createReadStream(photoPath));
-          formData.append("caption", `📸 Foto de resolución - ${(note as any).folio}`);
+          formData.append("caption", `📸 Foto de resolución — ${(note as any).folio}`);
 
           const response = await fetch(`https://api.telegram.org/bot${config.botToken}/sendPhoto`, {
             method: "POST",
@@ -787,7 +1005,6 @@ async function pollUpdates() {
     }
   }
 
-  // Continuar polling
   if (isPolling) {
     pollTimer = setTimeout(pollUpdates, 1000);
   }
