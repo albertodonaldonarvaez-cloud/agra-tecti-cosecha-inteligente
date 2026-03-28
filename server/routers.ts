@@ -2277,13 +2277,18 @@ export const appRouter = router({
 
         // Guardar foto del reporte si se proporcionó
         if (input.photoBase64) {
-          const { storagePut } = await import("./storage");
+          const fs = await import("fs");
+          const path = await import("path");
+          const dir = `/app/photos/field-notes/${folio}`;
+          fs.mkdirSync(dir, { recursive: true });
+          const fileName = `reporte-${Date.now()}.jpg`;
+          const filePath = path.join(dir, fileName);
           const buffer = Buffer.from(input.photoBase64, "base64");
-          const key = `field-notes/${folio}/reporte-${Date.now()}.jpg`;
-          const { url } = await storagePut(key, buffer, "image/jpeg");
+          fs.writeFileSync(filePath, buffer);
+          const photoUrl = `/app/photos/field-notes/${folio}/${fileName}`;
           await drizzle.insert(fieldNotePhotos).values({
             fieldNoteId: result.insertId,
-            photoPath: url,
+            photoPath: photoUrl,
             caption: "Foto del reporte",
             stage: "reporte" as any,
             uploadedByUserId: userId,
@@ -2334,16 +2339,21 @@ export const appRouter = router({
 
         // Guardar foto de la etapa si se proporcionó
         if (input.photoBase64) {
-          const { storagePut } = await import("./storage");
+          const fs = await import("fs");
+          const path = await import("path");
           const [note] = await drizzle.select({ folio: fieldNotes.folio }).from(fieldNotes).where(eq(fieldNotes.id, input.id));
           const folioStr = note?.folio || `note-${input.id}`;
           const stage = (input.status === "resuelta" || input.status === "descartada") ? "resolucion" : "revision";
+          const dir = `/app/photos/field-notes/${folioStr}`;
+          fs.mkdirSync(dir, { recursive: true });
+          const fileName = `${stage}-${Date.now()}.jpg`;
+          const filePath = path.join(dir, fileName);
           const buffer = Buffer.from(input.photoBase64, "base64");
-          const key = `field-notes/${folioStr}/${stage}-${Date.now()}.jpg`;
-          const { url } = await storagePut(key, buffer, "image/jpeg");
+          fs.writeFileSync(filePath, buffer);
+          const photoUrl = `/app/photos/field-notes/${folioStr}/${fileName}`;
           await drizzle.insert(fieldNotePhotos).values({
             fieldNoteId: input.id,
-            photoPath: url,
+            photoPath: photoUrl,
             caption: stage === "resolucion" ? "Foto de resolución" : "Foto de revisión",
             stage: stage as any,
             uploadedByUserId: userId,
@@ -2375,18 +2385,23 @@ export const appRouter = router({
         const [note] = await drizzle.select({ folio: fieldNotes.folio }).from(fieldNotes).where(eq(fieldNotes.id, input.fieldNoteId));
         const folioStr = note?.folio || `note-${input.fieldNoteId}`;
         const stage = input.stage || "reporte";
-        const { storagePut } = await import("./storage");
+        const fs = await import("fs");
+        const pathMod = await import("path");
+        const dir = `/app/photos/field-notes/${folioStr}`;
+        fs.mkdirSync(dir, { recursive: true });
+        const fileName = `${stage}-${Date.now()}.jpg`;
+        const filePath = pathMod.join(dir, fileName);
         const buffer = Buffer.from(input.photoBase64, "base64");
-        const key = `field-notes/${folioStr}/${stage}-${Date.now()}.jpg`;
-        const { url } = await storagePut(key, buffer, "image/jpeg");
+        fs.writeFileSync(filePath, buffer);
+        const photoUrl = `/app/photos/field-notes/${folioStr}/${fileName}`;
         const [result] = await drizzle.insert(fieldNotePhotos).values({
           fieldNoteId: input.fieldNoteId,
-          photoPath: url,
+          photoPath: photoUrl,
           caption: input.caption || null,
           stage: stage as any,
           uploadedByUserId: userId,
         });
-        return { id: result.insertId, url };
+        return { id: result.insertId, url: photoUrl };
       }),
 
     deletePhoto: protectedProcedure
