@@ -145,6 +145,52 @@ export const appRouter = router({
         const { sendHarvestTestMessage } = await import("./harvestNotifier");
         return await sendHarvestTestMessage(input.botToken, input.chatId);
       }),
+
+    // Configuración del grupo de notificaciones de notas de campo
+    getFieldNotesConfig: adminProcedure.query(async () => {
+      const config = await db.getApiConfig();
+      if (!config) return { chatId: "", enabled: false };
+      return {
+        chatId: (config as any).telegramFieldNotesChatId || "",
+        enabled: Boolean((config as any).telegramFieldNotesEnabled),
+      };
+    }),
+
+    saveFieldNotesConfig: adminProcedure
+      .input(z.object({
+        chatId: z.string(),
+        enabled: z.boolean(),
+      }))
+      .mutation(async ({ input }) => {
+        const { sql } = await import("drizzle-orm");
+        const database = await db.getDb();
+        if (!database) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB not available" });
+        await database.execute(
+          sql`UPDATE apiConfig SET telegramFieldNotesChatId = ${input.chatId}, telegramFieldNotesEnabled = ${input.enabled ? 1 : 0}`
+        );
+        return { success: true };
+      }),
+
+    testFieldNotes: adminProcedure
+      .input(z.object({ botToken: z.string(), chatId: z.string() }))
+      .mutation(async ({ input }) => {
+        try {
+          const response = await fetch(`https://api.telegram.org/bot${input.botToken}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: input.chatId,
+              text: "\u2705 <b>Prueba de Notas de Campo</b>\n\nEste grupo recibirá notificaciones de nuevas notas de campo y actualizaciones de estado.",
+              parse_mode: "HTML",
+            }),
+          });
+          const data = await response.json();
+          if (data.ok) return { success: true };
+          return { success: false, error: data.description || "Error desconocido" };
+        } catch (error: any) {
+          return { success: false, error: error.message };
+        }
+      }),
   }),
 
   boxes: router({

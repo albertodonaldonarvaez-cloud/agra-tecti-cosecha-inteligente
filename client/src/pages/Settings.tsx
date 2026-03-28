@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save, Clock, Timer, CheckCircle, XCircle, Zap, Send, MessageCircle, Eye, EyeOff, Plane, Link2, Unlink, Wheat } from "lucide-react";
+import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save, Clock, Timer, CheckCircle, XCircle, Zap, Send, MessageCircle, Eye, EyeOff, Plane, Link2, Unlink, Wheat, ClipboardList } from "lucide-react";
 import LocationMapPicker from "@/components/LocationMapPicker";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -494,6 +494,9 @@ export default function Settings() {
 
           {/* Resumen de Cosecha por Telegram */}
           <HarvestTelegramSection />
+
+          {/* Notificaciones de Notas de Campo */}
+          <FieldNotesTelegramSection />
 
           {/* WebODM */}
           <WebODMSection />
@@ -1214,6 +1217,171 @@ function HarvestTelegramSection() {
             </div>
             <div className="flex items-center gap-2 text-gray-700">
               <span>🗺️</span> Desglose por parcela
+            </div>
+          </div>
+        </div>
+      </div>
+    </GlassCard>
+  );
+}
+
+// ============ SECCIÓN NOTAS DE CAMPO TELEGRAM ============
+function FieldNotesTelegramSection() {
+  const [chatId, setChatId] = useState("");
+  const [enabled, setEnabled] = useState(false);
+
+  const { data: fieldNotesConfig, refetch } = trpc.telegram.getFieldNotesConfig.useQuery(undefined, { retry: false });
+  const { data: telegramConfig } = trpc.telegram.getConfig.useQuery(undefined, { retry: false });
+
+  const saveConfig = trpc.telegram.saveFieldNotesConfig.useMutation({
+    onSuccess: () => {
+      toast.success("Configuraci\u00f3n de notas de campo guardada");
+      refetch();
+    },
+    onError: (error: any) => toast.error(error.message),
+  });
+
+  const testFieldNotes = trpc.telegram.testFieldNotes.useMutation({
+    onSuccess: (data: any) => {
+      if (data.success) {
+        toast.success("Mensaje de prueba enviado. Revisa tu grupo de Telegram.");
+      } else {
+        toast.error(`Error: ${data.error}`);
+      }
+    },
+    onError: (error: any) => toast.error(error.message),
+  });
+
+  useEffect(() => {
+    if (fieldNotesConfig) {
+      setChatId(fieldNotesConfig.chatId || "");
+      setEnabled(fieldNotesConfig.enabled || false);
+    }
+  }, [fieldNotesConfig]);
+
+  const handleSave = () => {
+    if (!chatId.trim()) {
+      toast.error("Ingresa el Chat ID del grupo");
+      return;
+    }
+    saveConfig.mutate({ chatId: chatId.trim(), enabled });
+  };
+
+  const handleTest = () => {
+    if (!telegramConfig?.botToken) {
+      toast.error("Primero configura el Token del Bot en la secci\u00f3n de Telegram arriba");
+      return;
+    }
+    if (!chatId.trim()) {
+      toast.error("Ingresa el Chat ID antes de probar");
+      return;
+    }
+    testFieldNotes.mutate({ botToken: telegramConfig.botToken, chatId: chatId.trim() });
+  };
+
+  const botConfigured = !!telegramConfig?.botToken;
+
+  return (
+    <GlassCard className="p-4 md:p-6 border-2 border-green-200 bg-green-50/30">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <ClipboardList className="h-6 w-6 text-green-600" />
+          <h2 className="text-lg md:text-2xl font-semibold text-green-900">Grupo de Notas de Campo</h2>
+        </div>
+        {enabled && chatId && (
+          <span className="flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
+            <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+            Activo
+          </span>
+        )}
+      </div>
+
+      <p className="mb-4 text-sm text-green-700">
+        Env\u00eda notificaciones al grupo de Telegram cuando se crean nuevas notas de campo
+        o cuando cambia el estado de una nota existente. Incluye fotos, ubicaci\u00f3n y detalles del reporte.
+      </p>
+
+      {!botConfigured && (
+        <div className="mb-4 rounded-lg bg-green-100/80 p-3 text-sm text-green-800 flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+          Primero configura el Token del Bot en la secci\u00f3n "Notificaciones Telegram" de arriba.
+        </div>
+      )}
+
+      <div className="space-y-4">
+        {/* Habilitado */}
+        <div className="flex items-center gap-3">
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-green-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500"></div>
+          </label>
+          <span className="text-sm font-medium text-green-800">
+            {enabled ? "Notificaciones activadas" : "Notificaciones desactivadas"}
+          </span>
+        </div>
+
+        {/* Chat ID */}
+        <div>
+          <Label htmlFor="fieldNotesChatId" className="text-green-800">Chat ID del Grupo</Label>
+          <Input
+            id="fieldNotesChatId"
+            value={chatId}
+            onChange={(e) => setChatId(e.target.value)}
+            placeholder="-1001234567890"
+          />
+          <p className="mt-1 text-xs text-green-600">
+            Agrega el bot al grupo, luego usa @userinfobot para obtener el Chat ID del grupo.
+            Los IDs de grupo empiezan con -100.
+          </p>
+        </div>
+
+        {/* Botones */}
+        <div className="flex gap-3">
+          <Button
+            onClick={handleSave}
+            disabled={saveConfig.isPending}
+            className="flex-1 bg-green-600 hover:bg-green-700"
+          >
+            <Save className="mr-2 h-4 w-4" />
+            {saveConfig.isPending ? "Guardando..." : "Guardar"}
+          </Button>
+          <Button
+            onClick={handleTest}
+            disabled={testFieldNotes.isPending || !chatId.trim() || !botConfigured}
+            variant="outline"
+            className="flex-1 border-green-300 text-green-700 hover:bg-green-100"
+          >
+            <Send className="mr-2 h-4 w-4" />
+            {testFieldNotes.isPending ? "Enviando..." : "Probar Env\u00edo"}
+          </Button>
+        </div>
+
+        {/* Info */}
+        <div className="rounded-lg bg-white/60 p-4 text-sm">
+          <p className="font-semibold text-green-900 mb-2">El grupo recibir\u00e1:</p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="flex items-center gap-2 text-gray-700">
+              <span>\ud83c\udd95</span> Nuevas notas de campo
+            </div>
+            <div className="flex items-center gap-2 text-gray-700">
+              <span>\ud83d\udcf8</span> Fotos del reporte
+            </div>
+            <div className="flex items-center gap-2 text-gray-700">
+              <span>\ud83d\udd14</span> Cambios de estado
+            </div>
+            <div className="flex items-center gap-2 text-gray-700">
+              <span>\u2705</span> Fotos de resoluci\u00f3n
+            </div>
+            <div className="flex items-center gap-2 text-gray-700">
+              <span>\ud83d\udccd</span> Ubicaci\u00f3n GPS
+            </div>
+            <div className="flex items-center gap-2 text-gray-700">
+              <span>\ud83d\udccb</span> Folio y detalles
             </div>
           </div>
         </div>

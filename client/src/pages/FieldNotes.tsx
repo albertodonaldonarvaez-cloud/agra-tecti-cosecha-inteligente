@@ -27,7 +27,7 @@ const CATEGORIES = [
   { value: "otro", label: "Otro", icon: HelpCircle, color: "text-slate-600 bg-slate-50" },
 ];
 
-const SEVERITIES = [
+const PRIORITIES = [
   { value: "baja", label: "Baja", color: "text-blue-600 bg-blue-50 border-blue-200" },
   { value: "media", label: "Media", color: "text-yellow-600 bg-yellow-50 border-yellow-200" },
   { value: "alta", label: "Alta", color: "text-orange-600 bg-orange-50 border-orange-200" },
@@ -43,7 +43,7 @@ const STATUSES = [
 ];
 
 const getCategoryInfo = (v: string) => CATEGORIES.find(c => c.value === v) || CATEGORIES[9];
-const getSeverityInfo = (v: string) => SEVERITIES.find(s => s.value === v) || SEVERITIES[1];
+const getPriorityInfo = (v: string) => PRIORITIES.find(s => s.value === v) || PRIORITIES[1];
 const getStatusInfo = (v: string) => STATUSES.find(s => s.value === v) || STATUSES[0];
 
 function toDateStr(val: any): string {
@@ -84,7 +84,7 @@ function FieldNotesContent() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
-  const [filterSeverity, setFilterSeverity] = useState("");
+  const [filterPriority, setFilterPriority] = useState("");
 
   // Modal de cambio de estado
   const [statusModal, setStatusModal] = useState<{ noteId: number; status: string } | null>(null);
@@ -125,7 +125,7 @@ function FieldNotesContent() {
   const { data: notes, isLoading } = trpc.fieldNotes.list.useQuery({
     ...(filterStatus ? { status: filterStatus } : {}),
     ...(filterCategory ? { category: filterCategory } : {}),
-    ...(filterSeverity ? { severity: filterSeverity } : {}),
+    ...(filterPriority ? { severity: filterPriority } : {}),
   });
   const { data: summary } = trpc.fieldNotes.summary.useQuery();
   const { data: allParcels } = trpc.parcels.listActive.useQuery();
@@ -358,10 +358,10 @@ function FieldNotesContent() {
               <option value="">Todas las categorias</option>
               {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
             </select>
-            <select value={filterSeverity} onChange={e => setFilterSeverity(e.target.value)}
+            <select value={filterPriority} onChange={e => setFilterPriority(e.target.value)}
               className="px-3 py-2 text-sm border border-gray-200 rounded-xl bg-white/70 focus:ring-2 focus:ring-green-300 outline-none">
-              <option value="">Todas las severidades</option>
-              {SEVERITIES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              <option value="">Todas las prioridades</option>
+              {PRIORITIES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
           </div>
         </GlassCard>
@@ -396,11 +396,11 @@ function FieldNotesContent() {
                 </div>
               </div>
 
-              {/* Severidad */}
+              {/* Prioridad */}
               <div>
-                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Severidad</label>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Prioridad</label>
                 <div className="grid grid-cols-4 gap-2">
-                  {SEVERITIES.map(sev => (
+                  {PRIORITIES.map(sev => (
                     <button key={sev.value} onClick={() => setForm(prev => ({ ...prev, severity: sev.value }))}
                       className={`py-2.5 rounded-xl border text-xs font-semibold transition-all ${
                         form.severity === sev.value ? `${sev.color} shadow-md ring-2 ring-green-300` : "bg-white/60 text-gray-500 border-gray-200 hover:bg-white hover:text-gray-700"
@@ -495,7 +495,7 @@ function FieldNotesContent() {
           <div className="space-y-3">
             {filteredNotes.map((note: any) => {
               const cat = getCategoryInfo(note.category);
-              const sev = getSeverityInfo(note.severity);
+              const sev = getPriorityInfo(note.severity);
               const stat = getStatusInfo(note.status);
               const CatIcon = cat.icon;
               const StatIcon = stat.icon;
@@ -508,7 +508,7 @@ function FieldNotesContent() {
 
               return (
                 <GlassCard key={note.id} className="p-4" onClick={() => setExpandedId(isExpanded ? null : note.id)}>
-                  {/* Indicador de severidad */}
+                  {/* Indicador de prioridad */}
                   {(note.severity === "critica" || note.severity === "alta") && note.status !== "resuelta" && note.status !== "descartada" && (
                     <div className={`absolute top-0 left-0 w-1 h-full rounded-l-3xl ${note.severity === "critica" ? "bg-red-500" : "bg-orange-400"}`} />
                   )}
