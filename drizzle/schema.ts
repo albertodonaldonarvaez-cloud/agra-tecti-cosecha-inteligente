@@ -238,7 +238,7 @@ export type InsertParcelDetails = typeof parcelDetails.$inferInsert;
 export const crops = mysqlTable("crops", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 255 }).notNull().unique(),
-  description: text("description"),
+  description: text("description").notNull(),
   isActive: boolean("isActive").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -252,7 +252,7 @@ export const cropVarieties = mysqlTable("cropVarieties", {
   id: int("id").autoincrement().primaryKey(),
   cropId: int("cropId").notNull(), // FK a crops.id
   name: varchar("name", { length: 255 }).notNull(),
-  description: text("description"),
+  description: text("description").notNull(),
   isActive: boolean("isActive").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -284,7 +284,7 @@ export const fieldActivities = mysqlTable("fieldActivities", {
     "control_maleza", "control_plagas", "aplicacion_fitosanitaria", "otro"
   ]).notNull(),
   activitySubtype: varchar("activitySubtype", { length: 128 }),
-  description: text("description"),
+  description: text("description").notNull(),
   performedBy: varchar("performedBy", { length: 255 }).notNull(),
   activityDate: date("activityDate").notNull(),
   startTime: varchar("startTime", { length: 8 }),
@@ -407,7 +407,7 @@ export const warehouseProducts = mysqlTable("warehouseProducts", {
     "regulador_crecimiento", "bioestimulante", "enmienda_suelo", "nutriente_foliar",
     "semilla", "sustrato", "agua", "otro"
   ]).default("otro").notNull(),
-  description: text("description"),
+  description: text("description").notNull(),
   activeIngredient: varchar("activeIngredient", { length: 255 }),
   concentration: varchar("concentration", { length: 128 }),
   presentation: varchar("presentation", { length: 128 }),
@@ -465,7 +465,7 @@ export const warehouseTools = mysqlTable("warehouseTools", {
   brand: varchar("brand", { length: 255 }),
   model: varchar("model", { length: 255 }),
   serialNumber: varchar("serialNumber", { length: 255 }),
-  description: text("description"),
+  description: text("description").notNull(),
   status: mysqlEnum("status", ["disponible", "en_uso", "mantenimiento", "dañado", "baja"]).default("disponible").notNull(),
   conditionState: mysqlEnum("conditionState", ["nuevo", "bueno", "regular", "malo"]).default("bueno").notNull(),
   acquisitionDate: date("acquisitionDate"),
@@ -505,8 +505,8 @@ export type WarehouseToolAssignment = typeof warehouseToolAssignments.$inferSele
 // Reportes rápidos de observaciones durante recorridos de parcelas
 export const fieldNotes = mysqlTable("fieldNotes", {
   id: int("id").autoincrement().primaryKey(),
-  title: varchar("title", { length: 255 }).notNull(),
-  description: text("description"),
+  folio: varchar("folio", { length: 20 }).notNull().unique(),
+  description: text("description").notNull(),
   category: mysqlEnum("category", [
     "arboles_mal_plantados",
     "plaga_enfermedad",
@@ -530,6 +530,9 @@ export const fieldNotes = mysqlTable("fieldNotes", {
   resolvedByUserId: int("resolvedByUserId"),
   resolutionNotes: text("resolutionNotes"),
   resolvedAt: timestamp("resolvedAt"),
+  // GPS de resolucion
+  resolvedLatitude: decimal("resolvedLatitude", { precision: 10, scale: 7 }),
+  resolvedLongitude: decimal("resolvedLongitude", { precision: 10, scale: 7 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -542,6 +545,8 @@ export const fieldNotePhotos = mysqlTable("fieldNotePhotos", {
   fieldNoteId: int("fieldNoteId").notNull(),
   photoPath: varchar("photoPath", { length: 512 }).notNull(),
   caption: varchar("caption", { length: 255 }),
+  stage: mysqlEnum("stage", ["reporte", "revision", "resolucion"]).default("reporte").notNull(),
+  uploadedByUserId: int("uploadedByUserId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type FieldNotePhoto = typeof fieldNotePhotos.$inferSelect;

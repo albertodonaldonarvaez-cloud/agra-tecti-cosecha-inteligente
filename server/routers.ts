@@ -2224,7 +2224,12 @@ export const appRouter = router({
         const notes = conditions.length > 0
           ? await drizzle.select().from(fieldNotes).where(and(...conditions)).orderBy(desc(fieldNotes.createdAt))
           : await drizzle.select().from(fieldNotes).orderBy(desc(fieldNotes.createdAt));
-        return notes;
+        // Cargar fotos de cada nota
+        const notesWithPhotos = await Promise.all(notes.map(async (n) => {
+          const photos = await drizzle.select().from(fieldNotePhotos).where(eq(fieldNotePhotos.fieldNoteId, n.id));
+          return { ...n, photos };
+        }));
+        return notesWithPhotos;
       }),
 
     getById: protectedProcedure
@@ -2239,33 +2244,58 @@ export const appRouter = router({
 
     create: protectedProcedure
       .input(z.object({
-        title: z.string().min(1),
-        description: z.string().optional(),
+        description: z.string().min(1),
         category: z.string(),
         severity: z.string().optional(),
         parcelId: z.number().optional(),
         latitude: z.number().optional(),
         longitude: z.number().optional(),
+        photoBase64: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const drizzle = await getDb();
+        // Generar folio auto-incremental: NC-000001, NC-000002, etc.
+        const [lastNote] = await drizzle.select({ folio: fieldNotes.folio }).from(fieldNotes).orderBy(desc(fieldNotes.id)).limit(1);
+        let nextNum = 1;
+        if (lastNote?.folio) {
+          const match = lastNote.folio.match(/NC-(\d+)/);
+          if (match) nextNum = parseInt(match[1], 10) + 1;
+        }
+        const folio = `NC-${String(nextNum).padStart(6, "0")}`;
+        const userId = (ctx as any).user?.id || 0;
+
         const [result] = await drizzle.insert(fieldNotes).values({
-          title: input.title,
-          description: input.description || null,
+          folio,
+          description: input.description,
           category: input.category as any,
           severity: (input.severity || "media") as any,
           parcelId: input.parcelId || null,
           latitude: input.latitude ? String(input.latitude) : null,
           longitude: input.longitude ? String(input.longitude) : null,
-          reportedByUserId: (ctx as any).user?.id || 0,
+          reportedByUserId: userId,
         });
-        return { id: result.insertId };
+
+        // Guardar foto del reporte si se proporcionó
+        if (input.photoBase64) {
+          const { storagePut } = await import("./storage");
+          const buffer = Buffer.from(input.photoBase64, "base64");
+          const key = `field-notes/${folio}/reporte-${Date.now()}.jpg`;
+          const { url } = await storagePut(key, buffer, "image/jpeg");
+          await drizzle.insert(fieldNotePhotos).values({
+            fieldNoteId: result.insertId,
+            photoPath: url,
+            caption: "Foto del reporte",
+            stage: "reporte" as any,
+            uploadedByUserId: userId,
+          });
+        }
+
+        return { id: result.insertId, folio };
       }),
 
     update: protectedProcedure
       .input(z.object({
         id: z.number(),
-        title: z.string().optional(),
         description: z.string().optional(),
         category: z.string().optional(),
         severity: z.string().optional(),
@@ -2283,16 +2313,43 @@ export const appRouter = router({
         id: z.number(),
         status: z.string(),
         resolutionNotes: z.string().optional(),
+        photoBase64: z.string().optional(),
+        latitude: z.number().optional(),
+        longitude: z.number().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const drizzle = await getDb();
+        const userId = (ctx as any).user?.id || 0;
         const updateData: any = { status: input.status };
+
         if (input.status === "resuelta" || input.status === "descartada") {
-          updateData.resolvedByUserId = (ctx as any).user?.id || 0;
+          updateData.resolvedByUserId = userId;
           updateData.resolvedAt = new Date();
           if (input.resolutionNotes) updateData.resolutionNotes = input.resolutionNotes;
+          if (input.latitude) updateData.resolvedLatitude = String(input.latitude);
+          if (input.longitude) updateData.resolvedLongitude = String(input.longitude);
         }
+
         await drizzle.update(fieldNotes).set(updateData).where(eq(fieldNotes.id, input.id));
+
+        // Guardar foto de la etapa si se proporcionó
+        if (input.photoBase64) {
+          const { storagePut } = await import("./storage");
+          const [note] = await drizzle.select({ folio: fieldNotes.folio }).from(fieldNotes).where(eq(fieldNotes.id, input.id));
+          const folioStr = note?.folio || `note-${input.id}`;
+          const stage = (input.status === "resuelta" || input.status === "descartada") ? "resolucion" : "revision";
+          const buffer = Buffer.from(input.photoBase64, "base64");
+          const key = `field-notes/${folioStr}/${stage}-${Date.now()}.jpg`;
+          const { url } = await storagePut(key, buffer, "image/jpeg");
+          await drizzle.insert(fieldNotePhotos).values({
+            fieldNoteId: input.id,
+            photoPath: url,
+            caption: stage === "resolucion" ? "Foto de resolución" : "Foto de revisión",
+            stage: stage as any,
+            uploadedByUserId: userId,
+          });
+        }
+
         return { success: true };
       }),
 
@@ -2308,17 +2365,28 @@ export const appRouter = router({
     addPhoto: protectedProcedure
       .input(z.object({
         fieldNoteId: z.number(),
-        photoPath: z.string(),
+        photoBase64: z.string(),
+        stage: z.enum(["reporte", "revision", "resolucion"]).optional(),
         caption: z.string().optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const drizzle = await getDb();
+        const userId = (ctx as any).user?.id || 0;
+        const [note] = await drizzle.select({ folio: fieldNotes.folio }).from(fieldNotes).where(eq(fieldNotes.id, input.fieldNoteId));
+        const folioStr = note?.folio || `note-${input.fieldNoteId}`;
+        const stage = input.stage || "reporte";
+        const { storagePut } = await import("./storage");
+        const buffer = Buffer.from(input.photoBase64, "base64");
+        const key = `field-notes/${folioStr}/${stage}-${Date.now()}.jpg`;
+        const { url } = await storagePut(key, buffer, "image/jpeg");
         const [result] = await drizzle.insert(fieldNotePhotos).values({
           fieldNoteId: input.fieldNoteId,
-          photoPath: input.photoPath,
+          photoPath: url,
           caption: input.caption || null,
+          stage: stage as any,
+          uploadedByUserId: userId,
         });
-        return { id: result.insertId };
+        return { id: result.insertId, url };
       }),
 
     deletePhoto: protectedProcedure
