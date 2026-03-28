@@ -1512,7 +1512,7 @@ export const appRouter = router({
         status: z.string().optional(),
       }).optional())
       .query(async ({ input }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         const filters: any[] = [];
         if (input?.activityType) filters.push(eq(fieldActivities.activityType, input.activityType as any));
         if (input?.status) filters.push(eq(fieldActivities.status, input.status as any));
@@ -1562,7 +1562,7 @@ export const appRouter = router({
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         const [activity] = await drizzle.select().from(fieldActivities).where(eq(fieldActivities.id, input.id));
         if (!activity) throw new TRPCError({ code: "NOT_FOUND", message: "Actividad no encontrada" });
 
@@ -1614,7 +1614,7 @@ export const appRouter = router({
         })).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         const userId = (ctx as any).user?.id || 0;
 
         // Calcular duración si no se proporcionó
@@ -1713,7 +1713,7 @@ export const appRouter = router({
         })).optional(),
       }))
       .mutation(async ({ input }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         const updateData: any = {};
         if (input.activityType) updateData.activityType = input.activityType;
         if (input.activitySubtype !== undefined) updateData.activitySubtype = input.activitySubtype || null;
@@ -1789,7 +1789,7 @@ export const appRouter = router({
     delete: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         // Eliminar relaciones primero
         await Promise.all([
           drizzle.delete(fieldActivityParcels).where(eq(fieldActivityParcels.activityId, input.id)),
@@ -1810,7 +1810,7 @@ export const appRouter = router({
         caption: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         const userId = (ctx as any).user?.id || 0;
         await drizzle.insert(fieldActivityPhotos).values({
           activityId: input.activityId,
@@ -1826,14 +1826,14 @@ export const appRouter = router({
     deletePhoto: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         await drizzle.delete(fieldActivityPhotos).where(eq(fieldActivityPhotos.id, input.id));
         return { success: true };
       }),
 
     // Estadísticas rápidas
     stats: protectedProcedure.query(async () => {
-      const drizzle = getDb();
+      const drizzle = await getDb();
       const [totalResult] = await drizzle.select({ count: sql<number>`COUNT(*)` }).from(fieldActivities);
       const [thisMonthResult] = await drizzle.select({ count: sql<number>`COUNT(*)` }).from(fieldActivities)
         .where(gte(fieldActivities.activityDate, sql`DATE_FORMAT(NOW(), '%Y-%m-01')`));
@@ -1858,7 +1858,7 @@ export const appRouter = router({
     listProducts: protectedProcedure
       .input(z.object({ category: z.string().optional(), search: z.string().optional(), lowStock: z.boolean().optional() }).optional())
       .query(async ({ input }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         let query = drizzle.select().from(warehouseProducts).orderBy(desc(warehouseProducts.updatedAt));
         const results = await query;
         let filtered = results;
@@ -1871,7 +1871,7 @@ export const appRouter = router({
     getProduct: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         const [product] = await drizzle.select().from(warehouseProducts).where(eq(warehouseProducts.id, input.id));
         if (!product) throw new TRPCError({ code: 'NOT_FOUND', message: 'Producto no encontrado' });
         const movements = await drizzle.select().from(warehouseProductMovements).where(eq(warehouseProductMovements.productId, input.id)).orderBy(desc(warehouseProductMovements.createdAt)).limit(50);
@@ -1889,7 +1889,7 @@ export const appRouter = router({
         safetyDataSheet: z.string().optional(), description: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         const result = await drizzle.insert(warehouseProducts).values({
           name: input.name, category: input.category as any, brand: input.brand || null,
           activeIngredient: input.activeIngredient || null, concentration: input.concentration || null,
@@ -1920,7 +1920,7 @@ export const appRouter = router({
         safetyDataSheet: z.string().optional(), isActive: z.boolean().optional(),
       }))
       .mutation(async ({ input }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         const { id, ...data } = input;
         const updateData: any = {};
         if (data.name !== undefined) updateData.name = data.name;
@@ -1948,7 +1948,7 @@ export const appRouter = router({
     deleteProduct: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         await drizzle.delete(warehouseProductMovements).where(eq(warehouseProductMovements.productId, input.id));
         await drizzle.delete(warehouseProducts).where(eq(warehouseProducts.id, input.id));
         return { success: true };
@@ -1962,7 +1962,7 @@ export const appRouter = router({
 
       }))
       .mutation(async ({ input, ctx }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         const userId = (ctx as any).user?.id || 0;
         // Obtener stock actual
         const [product] = await drizzle.select().from(warehouseProducts).where(eq(warehouseProducts.id, input.productId));
@@ -1989,7 +1989,7 @@ export const appRouter = router({
     listTools: protectedProcedure
       .input(z.object({ category: z.string().optional(), search: z.string().optional(), status: z.string().optional() }).optional())
       .query(async ({ input }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         let results = await drizzle.select().from(warehouseTools).orderBy(desc(warehouseTools.updatedAt));
         if (input?.category) results = results.filter(t => t.category === input.category);
         if (input?.search) { const s = input.search.toLowerCase(); results = results.filter(t => t.name.toLowerCase().includes(s) || (t.brand || '').toLowerCase().includes(s)); }
@@ -2009,7 +2009,7 @@ export const appRouter = router({
         maintenanceNotes: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         const result = await drizzle.insert(warehouseTools).values({
           name: input.name, category: input.category as any, brand: input.brand || null,
           model: input.model || null, serialNumber: input.serialNumber || null,
@@ -2039,7 +2039,7 @@ export const appRouter = router({
         isActive: z.boolean().optional(),
       }))
       .mutation(async ({ input }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         const { id, ...data } = input;
         const updateData: any = { updatedAt: new Date() };
         Object.entries(data).forEach(([key, val]) => {
@@ -2052,7 +2052,7 @@ export const appRouter = router({
     deleteTool: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         await drizzle.delete(warehouseToolAssignments).where(eq(warehouseToolAssignments.toolId, input.id));
         await drizzle.delete(warehouseTools).where(eq(warehouseTools.id, input.id));
         return { success: true };
@@ -2065,7 +2065,7 @@ export const appRouter = router({
         assignedTo: z.string().optional(), notes: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         const userId = (ctx as any).user?.id || 0;
         await drizzle.insert(warehouseToolAssignments).values({
           toolId: input.toolId, assignmentType: 'asignacion',
@@ -2080,7 +2080,7 @@ export const appRouter = router({
     returnTool: protectedProcedure
       .input(z.object({ toolId: z.number(), conditionState: z.string().optional(), notes: z.string().optional() }))
       .mutation(async ({ input, ctx }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         const userId = (ctx as any).user?.id || 0;
         // Registrar devolución
         await drizzle.insert(warehouseToolAssignments).values({
@@ -2097,7 +2097,7 @@ export const appRouter = router({
     listSuppliers: protectedProcedure
       .input(z.object({ category: z.string().optional(), search: z.string().optional(), activeOnly: z.boolean().optional() }).optional())
       .query(async ({ input }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         let results = await drizzle.select().from(warehouseSuppliers).orderBy(desc(warehouseSuppliers.updatedAt));
         if (input?.activeOnly !== false) results = results.filter(s => s.isActive);
         if (input?.category) results = results.filter(s => s.category === input.category);
@@ -2111,7 +2111,7 @@ export const appRouter = router({
     getSupplier: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         const [supplier] = await drizzle.select().from(warehouseSuppliers).where(eq(warehouseSuppliers.id, input.id));
         if (!supplier) throw new TRPCError({ code: 'NOT_FOUND', message: 'Proveedor no encontrado' });
         // Obtener productos vinculados a este proveedor
@@ -2132,7 +2132,7 @@ export const appRouter = router({
         rating: z.number().optional(),
       }))
       .mutation(async ({ input }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         const result = await drizzle.insert(warehouseSuppliers).values({
           companyName: input.companyName, contactName: input.contactName || null,
           phone: input.phone || null, phone2: input.phone2 || null,
@@ -2163,7 +2163,7 @@ export const appRouter = router({
         rating: z.number().optional(), isActive: z.boolean().optional(),
       }))
       .mutation(async ({ input }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         const { id, ...data } = input;
         const updateData: any = { updatedAt: new Date() };
         Object.entries(data).forEach(([key, val]) => {
@@ -2176,7 +2176,7 @@ export const appRouter = router({
     deleteSupplier: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
-        const drizzle = getDb();
+        const drizzle = await getDb();
         // Desvincula productos de este proveedor
         await drizzle.update(warehouseProducts).set({ supplierId: null }).where(eq(warehouseProducts.supplierId, input.id));
         await drizzle.delete(warehouseSuppliers).where(eq(warehouseSuppliers.id, input.id));
@@ -2185,7 +2185,7 @@ export const appRouter = router({
 
     // Resumen de inventario
     summary: protectedProcedure.query(async () => {
-      const drizzle = getDb();
+      const drizzle = await getDb();
       const products = await drizzle.select().from(warehouseProducts).where(eq(warehouseProducts.isActive, true));
       const tools = await drizzle.select().from(warehouseTools).where(eq(warehouseTools.isActive, true));
       const lowStockProducts = products.filter(p => p.currentStock !== null && p.minimumStock !== null && Number(p.currentStock) <= Number(p.minimumStock));
