@@ -291,10 +291,10 @@ function FieldNotebookContent() {
     );
   }, [activities, searchTerm]);
 
-  // Parcelas con polígono (filtrar las que tienen coordenadas)
+  // Parcelas con polígono (filtrar las que tienen polígono definido)
   const parcelsWithPolygon = useMemo(() => {
     if (!allParcels) return [];
-    return (allParcels as any[]).filter((p: any) => p.coordinates && p.coordinates.length > 0);
+    return (allParcels as any[]).filter((p: any) => p.polygon && p.polygon.length > 0);
   }, [allParcels]);
 
   const getTypeInfo = (type: string) => ACTIVITY_TYPES.find(t => t.value === type) || ACTIVITY_TYPES[7];
