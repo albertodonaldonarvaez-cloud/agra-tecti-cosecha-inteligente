@@ -136,6 +136,8 @@ export const apiConfig = mysqlTable("apiConfig", {
   telegramHarvestHour: int("telegramHarvestHour").default(7),
   telegramHarvestMinute: int("telegramHarvestMinute").default(0),
   telegramHarvestEnabled: boolean("telegramHarvestEnabled").default(false),
+  telegramFieldNotesChatId: varchar("telegramFieldNotesChatId", { length: 128 }),
+  telegramFieldNotesEnabled: boolean("telegramFieldNotesEnabled").default(false),
   lastSync: timestamp("lastSync"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

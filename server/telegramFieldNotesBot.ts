@@ -163,8 +163,12 @@ async function generateFolio(): Promise<string> {
 async function getFieldNotesGroupChatId(): Promise<string | null> {
   const db = await getDb();
   if (!db) return null;
-  const [config] = await db.execute(sql`SELECT telegramFieldNotesChatId FROM apiConfig LIMIT 1`);
-  return (config as any)?.telegramFieldNotesChatId || null;
+  const result = await db.execute(sql`SELECT telegramFieldNotesChatId, telegramFieldNotesEnabled FROM apiConfig LIMIT 1`);
+  const rows = result as any;
+  const config = Array.isArray(rows) ? rows[0] : (rows?.rows?.[0] || null);
+  if (!config) return null;
+  if (!config.telegramFieldNotesEnabled) return null;
+  return config.telegramFieldNotesChatId || null;
 }
 
 async function createFieldNote(state: ConversationState): Promise<{ folio: string; id: number } | null> {

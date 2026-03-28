@@ -151,8 +151,8 @@ export const appRouter = router({
       const config = await db.getApiConfig();
       if (!config) return { chatId: "", enabled: false };
       return {
-        chatId: (config as any).telegramFieldNotesChatId || "",
-        enabled: Boolean((config as any).telegramFieldNotesEnabled),
+        chatId: config.telegramFieldNotesChatId || "",
+        enabled: Boolean(config.telegramFieldNotesEnabled),
       };
     }),
 
