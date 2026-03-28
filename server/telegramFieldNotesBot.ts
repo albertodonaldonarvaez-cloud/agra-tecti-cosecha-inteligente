@@ -979,11 +979,9 @@ export async function notifyNoteStatusChange(noteId: number, newStatus: string, 
   if (!note) return false;
 
   const reporterId = (note as any).reportedByUserId;
-  if (!reporterId) return false;
-
-  const [user] = await db.select({ telegramChatId: users.telegramChatId, name: users.name })
-    .from(users)
-    .where(eq(users.id, reporterId));
+  const user = reporterId
+    ? (await db.select({ telegramChatId: users.telegramChatId, name: users.name }).from(users).where(eq(users.id, reporterId)))[0]
+    : null;
 
   const statusLabels: Record<string, { label: string; emoji: string }> = {
     abierta: { label: "Abierta", emoji: "🔴" },
@@ -1048,6 +1046,56 @@ export async function notifyNoteStatusChange(noteId: number, newStatus: string, 
   const groupChatId = await getFieldNotesGroupChatId();
   if (groupChatId) {
     await sendMessage(config.botToken, groupChatId, msg);
+  }
+
+  return true;
+}
+
+// ============================================================
+// Notificar al grupo cuando se crea una nota desde la web
+// ============================================================
+
+export async function notifyGroupNewNoteFromWeb(noteId: number, folio: string, description: string, category: string, severity: string, parcelName?: string, reporterName?: string, photoPath?: string): Promise<boolean> {
+  const config = await getTelegramConfig();
+  if (!config) return false;
+
+  const groupChatId = await getFieldNotesGroupChatId();
+  if (!groupChatId) return false;
+
+  const catInfo = CATEGORIES[category] || { label: category, emoji: "📋" };
+  const priorityLabels: Record<string, string> = { baja: "🟢 Baja", media: "🟡 Media", alta: "🟠 Alta", critica: "🔴 Crítica" };
+  const priorityText = priorityLabels[severity] || severity;
+
+  let msg = `🆕 <b>Nueva Nota de Campo</b>\n\n`;
+  msg += `📋 Folio: <b>${folio}</b>\n`;
+  msg += `${catInfo.emoji} ${catInfo.label}\n`;
+  msg += `⚡ Prioridad: ${priorityText}\n`;
+  if (parcelName) msg += `📍 Parcela: ${parcelName}\n`;
+  if (reporterName) msg += `👤 Reportó: ${reporterName}\n`;
+  msg += `\n📝 ${description.substring(0, 200)}\n`;
+  msg += `\n🌐 <i>Creada desde la web</i>`;
+
+  await sendMessage(config.botToken, groupChatId, msg);
+
+  // Enviar foto si existe
+  if (photoPath) {
+    try {
+      const photoFs = await import("fs");
+      if (photoFs.existsSync(photoPath)) {
+        const FormData = (await import("form-data")).default;
+        const formData = new FormData();
+        formData.append("chat_id", groupChatId);
+        formData.append("photo", photoFs.createReadStream(photoPath));
+        formData.append("caption", `📸 Foto — ${folio}`);
+        await fetch(`https://api.telegram.org/bot${config.botToken}/sendPhoto`, {
+          method: "POST",
+          body: formData as any,
+          signal: AbortSignal.timeout(30000),
+        });
+      }
+    } catch (err) {
+      console.error("[TG Bot] Error enviando foto al grupo:", err);
+    }
   }
 
   return true;

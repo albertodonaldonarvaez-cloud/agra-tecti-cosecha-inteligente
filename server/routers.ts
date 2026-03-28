@@ -2349,6 +2349,7 @@ export const appRouter = router({
         });
 
         // Guardar foto del reporte si se proporcionó
+        let savedPhotoPath: string | undefined;
         if (input.photoBase64) {
           const fs = await import("fs");
           const path = await import("path");
@@ -2358,6 +2359,7 @@ export const appRouter = router({
           const filePath = path.join(dir, fileName);
           const buffer = Buffer.from(input.photoBase64, "base64");
           fs.writeFileSync(filePath, buffer);
+          savedPhotoPath = filePath;
           const photoUrl = `/app/photos/field-notes/${folio}/${fileName}`;
           await drizzle.insert(fieldNotePhotos).values({
             fieldNoteId: result.insertId,
@@ -2366,6 +2368,29 @@ export const appRouter = router({
             stage: "reporte" as any,
             uploadedByUserId: userId,
           });
+        }
+
+        // Notificar al grupo de Telegram
+        try {
+          const { notifyGroupNewNoteFromWeb } = await import("./telegramFieldNotesBot");
+          let parcelName: string | undefined;
+          if (input.parcelId) {
+            const [parcel] = await drizzle.select({ name: parcels.name }).from(parcels).where(eq(parcels.id, input.parcelId));
+            parcelName = parcel?.name || undefined;
+          }
+          const userName = (ctx as any).user?.name || "Usuario";
+          await notifyGroupNewNoteFromWeb(
+            result.insertId,
+            folio,
+            input.description,
+            input.category,
+            input.severity || "media",
+            parcelName,
+            userName,
+            savedPhotoPath,
+          );
+        } catch (telegramError) {
+          console.error("[FieldNotes] Error al notificar grupo Telegram:", telegramError);
         }
 
         return { id: result.insertId, folio };
