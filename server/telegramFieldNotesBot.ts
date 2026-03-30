@@ -1,5 +1,5 @@
 import { getDb } from "./db";
-import { users, telegramLinkCodes, fieldNotes, fieldNotePhotos, parcels } from "../drizzle/schema";
+import { users, telegramLinkCodes, fieldNotes, fieldNotePhotos, parcels, apiConfig } from "../drizzle/schema";
 import { eq, and, gt, sql, isNotNull } from "drizzle-orm";
 import { getTelegramConfig } from "./telegramBot";
 import * as fs from "fs";
@@ -160,15 +160,56 @@ async function generateFolio(): Promise<string> {
   return `NC-${String(nextNum).padStart(6, "0")}`;
 }
 
+// Obtener solo el botToken sin requerir el chatId de errores
+async function getBotToken(): Promise<string | null> {
+  try {
+    const db = await getDb();
+    if (!db) return null;
+    const configs = await db.select({
+      botToken: apiConfig.telegramBotToken,
+    }).from(apiConfig).limit(1);
+    const config = configs[0];
+    if (!config?.botToken) return null;
+    return config.botToken;
+  } catch (error) {
+    console.error("[TG Bot] Error en getBotToken:", error);
+    return null;
+  }
+}
+
 async function getFieldNotesGroupChatId(): Promise<string | null> {
-  const db = await getDb();
-  if (!db) return null;
-  const result = await db.execute(sql`SELECT telegramFieldNotesChatId, telegramFieldNotesEnabled FROM apiConfig LIMIT 1`);
-  const rows = result as any;
-  const config = Array.isArray(rows) ? rows[0] : (rows?.rows?.[0] || null);
-  if (!config) return null;
-  if (!config.telegramFieldNotesEnabled) return null;
-  return config.telegramFieldNotesChatId || null;
+  try {
+    const db = await getDb();
+    if (!db) {
+      console.log("[TG Bot] getFieldNotesGroupChatId: DB no disponible");
+      return null;
+    }
+    const configs = await db.select({
+      chatId: apiConfig.telegramFieldNotesChatId,
+      enabled: apiConfig.telegramFieldNotesEnabled,
+    }).from(apiConfig).limit(1);
+    
+    const config = configs[0];
+    console.log("[TG Bot] getFieldNotesGroupChatId config:", JSON.stringify(config));
+    
+    if (!config) {
+      console.log("[TG Bot] getFieldNotesGroupChatId: No hay config en apiConfig");
+      return null;
+    }
+    if (!config.enabled) {
+      console.log("[TG Bot] getFieldNotesGroupChatId: Notificaciones deshabilitadas");
+      return null;
+    }
+    if (!config.chatId) {
+      console.log("[TG Bot] getFieldNotesGroupChatId: No hay chatId configurado");
+      return null;
+    }
+    console.log("[TG Bot] getFieldNotesGroupChatId: Retornando chatId:", config.chatId);
+    return config.chatId;
+  } catch (error) {
+    console.error("[TG Bot] Error en getFieldNotesGroupChatId:", error);
+    return null;
+  }
 }
 
 async function createFieldNote(state: ConversationState): Promise<{ folio: string; id: number } | null> {
@@ -838,11 +879,19 @@ async function finishNote(botToken: string, chatId: string, state: ConversationS
 // ============================================================
 
 async function notifyGroupNewNote(folio: string, state: ConversationState) {
-  const config = await getTelegramConfig();
-  if (!config) return;
+  console.log("[TG Bot] notifyGroupNewNote llamada para folio:", folio);
+  const botToken = await getBotToken();
+  if (!botToken) {
+    console.log("[TG Bot] notifyGroupNewNote: No hay botToken");
+    return;
+  }
 
   const groupChatId = await getFieldNotesGroupChatId();
-  if (!groupChatId) return;
+  console.log("[TG Bot] notifyGroupNewNote: groupChatId =", groupChatId);
+  if (!groupChatId) {
+    console.log("[TG Bot] notifyGroupNewNote: No hay groupChatId, abortando");
+    return;
+  }
 
   const db = await getDb();
   if (!db) return;
@@ -866,7 +915,7 @@ async function notifyGroupNewNote(folio: string, state: ConversationState) {
     `${state.data.photoBase64 ? "\n📸 Con foto" : ""}` +
     `${locationText}`;
 
-  await sendMessage(config.botToken, groupChatId, msg);
+  await sendMessage(botToken, groupChatId, msg);
 
   // Si tiene foto, enviarla al grupo
   if (state.data.photoBase64) {
@@ -878,7 +927,7 @@ async function notifyGroupNewNote(folio: string, state: ConversationState) {
       formData.append("photo", photoBuffer, { filename: "reporte.jpg", contentType: "image/jpeg" });
       formData.append("caption", `📸 Foto — ${folio}`);
 
-      await fetch(`https://api.telegram.org/bot${config.botToken}/sendPhoto`, {
+      await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
         method: "POST",
         body: formData as any,
         signal: AbortSignal.timeout(30000),
@@ -969,11 +1018,18 @@ async function sendHelpMessage(botToken: string, chatId: string) {
 // ============================================================
 
 export async function notifyNoteStatusChange(noteId: number, newStatus: string, resolvedByName?: string): Promise<boolean> {
-  const config = await getTelegramConfig();
-  if (!config) return false;
+  console.log("[TG Bot] notifyNoteStatusChange llamada para noteId:", noteId, "newStatus:", newStatus);
+  const botToken = await getBotToken();
+  if (!botToken) {
+    console.log("[TG Bot] notifyNoteStatusChange: No hay botToken");
+    return false;
+  }
 
   const db = await getDb();
-  if (!db) return false;
+  if (!db) {
+    console.log("[TG Bot] notifyNoteStatusChange: DB no disponible");
+    return false;
+  }
 
   const [note] = await db.select().from(fieldNotes).where(eq(fieldNotes.id, noteId));
   if (!note) return false;
@@ -1008,7 +1064,7 @@ export async function notifyNoteStatusChange(noteId: number, newStatus: string, 
 
   // Notificar al usuario que reportó
   if (user?.telegramChatId) {
-    await sendMessage(config.botToken, user.telegramChatId, msg);
+    await sendMessage(botToken, user.telegramChatId, msg);
 
     // Si es resuelta/descartada, enviar fotos de resolución
     if (newStatus === "resuelta" || newStatus === "descartada") {
@@ -1029,7 +1085,7 @@ export async function notifyNoteStatusChange(noteId: number, newStatus: string, 
             formData.append("photo", fs.createReadStream(photoPath));
             formData.append("caption", `📸 Foto de resolución — ${(note as any).folio}`);
 
-            await fetch(`https://api.telegram.org/bot${config.botToken}/sendPhoto`, {
+            await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
               method: "POST",
               body: formData as any,
               signal: AbortSignal.timeout(30000),
@@ -1044,8 +1100,11 @@ export async function notifyNoteStatusChange(noteId: number, newStatus: string, 
 
   // Notificar al grupo de notas de campo
   const groupChatId = await getFieldNotesGroupChatId();
+  console.log("[TG Bot] notifyNoteStatusChange: groupChatId =", groupChatId);
   if (groupChatId) {
-    await sendMessage(config.botToken, groupChatId, msg);
+    console.log("[TG Bot] notifyNoteStatusChange: Enviando al grupo...");
+    await sendMessage(botToken, groupChatId, msg);
+    console.log("[TG Bot] notifyNoteStatusChange: Enviado al grupo OK");
   }
 
   return true;
@@ -1056,11 +1115,19 @@ export async function notifyNoteStatusChange(noteId: number, newStatus: string, 
 // ============================================================
 
 export async function notifyGroupNewNoteFromWeb(noteId: number, folio: string, description: string, category: string, severity: string, parcelName?: string, reporterName?: string, photoPath?: string): Promise<boolean> {
-  const config = await getTelegramConfig();
-  if (!config) return false;
+  console.log("[TG Bot] notifyGroupNewNoteFromWeb llamada para folio:", folio);
+  const botToken = await getBotToken();
+  if (!botToken) {
+    console.log("[TG Bot] notifyGroupNewNoteFromWeb: No hay botToken");
+    return false;
+  }
 
   const groupChatId = await getFieldNotesGroupChatId();
-  if (!groupChatId) return false;
+  console.log("[TG Bot] notifyGroupNewNoteFromWeb: groupChatId =", groupChatId);
+  if (!groupChatId) {
+    console.log("[TG Bot] notifyGroupNewNoteFromWeb: No hay groupChatId, abortando");
+    return false;
+  }
 
   const catInfo = CATEGORIES[category] || { label: category, emoji: "📋" };
   const priorityLabels: Record<string, string> = { baja: "🟢 Baja", media: "🟡 Media", alta: "🟠 Alta", critica: "🔴 Crítica" };
@@ -1075,7 +1142,8 @@ export async function notifyGroupNewNoteFromWeb(noteId: number, folio: string, d
   msg += `\n📝 ${description.substring(0, 200)}\n`;
   msg += `\n🌐 <i>Creada desde la web</i>`;
 
-  await sendMessage(config.botToken, groupChatId, msg);
+  await sendMessage(botToken, groupChatId, msg);
+  console.log("[TG Bot] notifyGroupNewNoteFromWeb: Mensaje enviado al grupo OK");
 
   // Enviar foto si existe
   if (photoPath) {
@@ -1087,7 +1155,7 @@ export async function notifyGroupNewNoteFromWeb(noteId: number, folio: string, d
         formData.append("chat_id", groupChatId);
         formData.append("photo", photoFs.createReadStream(photoPath));
         formData.append("caption", `📸 Foto — ${folio}`);
-        await fetch(`https://api.telegram.org/bot${config.botToken}/sendPhoto`, {
+        await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
           method: "POST",
           body: formData as any,
           signal: AbortSignal.timeout(30000),
