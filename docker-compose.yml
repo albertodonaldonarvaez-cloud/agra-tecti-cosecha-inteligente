@@ -26,6 +26,7 @@ services:
       - agratec-network
     volumes:
       - ./data:/app/data
+      - ./photos:/app/photos
 
   # Base de datos MySQL/TiDB
   db:

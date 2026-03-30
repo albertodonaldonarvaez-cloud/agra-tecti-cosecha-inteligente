@@ -1,7 +1,7 @@
 import { getDb } from "./db";
 import { users, telegramLinkCodes, fieldNotes, fieldNotePhotos, parcels, apiConfig } from "../drizzle/schema";
 import { eq, and, gt, sql, isNotNull } from "drizzle-orm";
-import { getTelegramConfig } from "./telegramBot";
+// getTelegramConfig ya no se usa - todas las funciones usan getBotToken() local
 import * as fs from "fs";
 import * as path from "path";
 
@@ -728,11 +728,8 @@ async function startNewNote(botToken: string, chatId: string, userId: number) {
 // ============================================================
 
 async function handlePhotoStep(botToken: string, chatId: string, state: ConversationState, photo: any[], caption?: string) {
-  const config = await getTelegramConfig();
-  if (!config) return;
-
   const largestPhoto = photo[photo.length - 1];
-  const buffer = await downloadFile(config.botToken, largestPhoto.file_id);
+  const buffer = await downloadFile(botToken, largestPhoto.file_id);
   if (buffer) {
     state.data.photoBase64 = buffer.toString("base64");
   }
@@ -1105,6 +1102,43 @@ export async function notifyNoteStatusChange(noteId: number, newStatus: string, 
     console.log("[TG Bot] notifyNoteStatusChange: Enviando al grupo...");
     await sendMessage(botToken, groupChatId, msg);
     console.log("[TG Bot] notifyNoteStatusChange: Enviado al grupo OK");
+
+    // Enviar fotos de la etapa al grupo
+    try {
+      const stage = (newStatus === "resuelta" || newStatus === "descartada") ? "resolucion" : "revision";
+      const groupPhotos = await db.select()
+        .from(fieldNotePhotos)
+        .where(and(
+          eq(fieldNotePhotos.fieldNoteId, noteId),
+          eq(fieldNotePhotos.stage, stage as any),
+        ));
+
+      for (const gPhoto of groupPhotos) {
+        const gPhotoPath = (gPhoto as any).photoPath;
+        if (gPhotoPath && fs.existsSync(gPhotoPath)) {
+          try {
+            const FormData = (await import("form-data")).default;
+            const formData = new FormData();
+            formData.append("chat_id", groupChatId);
+            formData.append("photo", fs.createReadStream(gPhotoPath));
+            formData.append("caption", `📸 Foto de ${stage} — ${(note as any).folio}`);
+
+            await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+              method: "POST",
+              body: formData as any,
+              signal: AbortSignal.timeout(30000),
+            });
+            console.log("[TG Bot] Foto de", stage, "enviada al grupo OK");
+          } catch (err) {
+            console.error("[TG Bot] Error enviando foto al grupo:", err);
+          }
+        } else {
+          console.log("[TG Bot] Foto no encontrada en disco:", gPhotoPath);
+        }
+      }
+    } catch (photoErr) {
+      console.error("[TG Bot] Error al enviar fotos al grupo:", photoErr);
+    }
   }
 
   return true;
@@ -1174,9 +1208,9 @@ export async function notifyGroupNewNoteFromWeb(noteId: number, folio: string, d
 // ============================================================
 
 async function pollUpdates() {
-  const config = await getTelegramConfig();
-  if (!config) {
-    console.log("[TG Bot] No hay configuración de Telegram, reintentando en 60s...");
+  const botToken = await getBotToken();
+  if (!botToken) {
+    console.log("[TG Bot] No hay botToken configurado, reintentando en 60s...");
     pollTimer = setTimeout(pollUpdates, 60000);
     return;
   }
@@ -1184,7 +1218,7 @@ async function pollUpdates() {
   try {
     cleanExpiredConversations();
 
-    const result = await callTelegram(config.botToken, "getUpdates", {
+    const result = await callTelegram(botToken, "getUpdates", {
       offset: pollingOffset,
       timeout: 25,
       allowed_updates: ["message", "callback_query"],
@@ -1194,7 +1228,7 @@ async function pollUpdates() {
       for (const update of result.result) {
         pollingOffset = update.update_id + 1;
         try {
-          await handleUpdate(config.botToken, update);
+          await handleUpdate(botToken, update);
         } catch (error) {
           console.error("[TG Bot] Error procesando update:", error);
         }
