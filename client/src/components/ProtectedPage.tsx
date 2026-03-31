@@ -4,12 +4,27 @@ import { getLoginUrl } from "@/const";
 import { useEffect } from "react";
 import { useLocation } from "wouter";
 
+// Todos los permisos canView* definidos en el schema de usuarios
+type ViewPermission =
+  | "canViewDashboard"
+  | "canViewBoxes"
+  | "canViewAnalytics"
+  | "canViewDailyAnalysis"
+  | "canViewClimate"
+  | "canViewPerformance"
+  | "canViewParcelAnalysis"
+  | "canViewParcels"
+  | "canViewHarvesters"
+  | "canViewEditor"
+  | "canViewErrors"
+  | "canViewCrops"
+  | "canViewFieldNotes"
+  | "canViewFieldNotebook"
+  | "canViewWarehouse";
+
 interface ProtectedPageProps {
   children: React.ReactNode;
-  permission?: keyof Pick<
-    any,
-    "canViewDashboard" | "canViewBoxes" | "canViewAnalytics" | "canViewDailyAnalysis" | "canViewParcels" | "canViewHarvesters" | "canViewErrors" | "canViewParcelAnalysis" | "canViewWarehouse" | "canViewFieldNotebook" | "canViewFieldNotes"
-  >;
+  permission?: ViewPermission;
 }
 
 export function ProtectedPage({ children, permission }: ProtectedPageProps) {
@@ -32,7 +47,7 @@ export function ProtectedPage({ children, permission }: ProtectedPageProps) {
   }
 
   // Si se especifica un permiso, verificarlo
-  if (permission && !user[permission]) {
+  if (permission && !(user as any)[permission]) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-green-50 via-white to-emerald-50">
         <GlassCard className="p-8 text-center max-w-md">
