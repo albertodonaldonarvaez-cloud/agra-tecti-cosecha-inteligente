@@ -44,36 +44,33 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Crear usuario no-root para seguridad
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 agratec
-
 # Copiar dependencias de producción
 COPY --from=deps /app/node_modules ./node_modules
 
 # Copiar código fuente del servidor
-COPY --chown=agratec:nodejs server ./server
-COPY --chown=agratec:nodejs drizzle ./drizzle
-COPY --chown=agratec:nodejs shared ./shared
+COPY server ./server
+COPY drizzle ./drizzle
+COPY shared ./shared
 
 # Copiar build del servidor compilado
-COPY --from=builder --chown=agratec:nodejs /app/dist/index.js ./dist/index.js
+COPY --from=builder /app/dist/index.js ./dist/index.js
 
 # Copiar build del cliente al directorio correcto para producción
 # En producción, server/_core/vite.ts busca en path.resolve(import.meta.dirname, "public")
 # que se traduce a /app/server/_core/public
-COPY --from=builder --chown=agratec:nodejs /app/dist/public ./server/_core/public
+COPY --from=builder /app/dist/public ./server/_core/public
 
 # Copiar archivos de configuración
-COPY --chown=agratec:nodejs package.json ./
-COPY --chown=agratec:nodejs tsconfig.json ./
-COPY --chown=agratec:nodejs drizzle.config.ts ./
+COPY package.json ./
+COPY tsconfig.json ./
+COPY drizzle.config.ts ./
 
-# Crear directorios para fotos descargadas y uploads temporales
-RUN mkdir -p /app/photos /tmp/uploads && chown -R agratec:nodejs /app/photos /tmp/uploads
+# Copiar entrypoint
+COPY entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
 
-# Cambiar al usuario no-root
-USER agratec
+# Crear directorios para fotos y uploads temporales
+RUN mkdir -p /app/photos/field-notes /app/photos/warehouse/products /tmp/uploads
 
 # Exponer puerto 3000
 EXPOSE 3000
@@ -82,5 +79,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:3000/ || exit 1
 
-# Comando para iniciar la aplicación
-CMD ["pnpm", "start"]
+# Usar entrypoint que asegura permisos de directorios montados
+ENTRYPOINT ["./entrypoint.sh"]
