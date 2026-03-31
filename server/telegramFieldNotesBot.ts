@@ -196,8 +196,10 @@ async function getFieldNotesGroupChatId(): Promise<string | null> {
       console.log("[TG Bot] getFieldNotesGroupChatId: No hay config en apiConfig");
       return null;
     }
-    if (!config.enabled) {
-      console.log("[TG Bot] getFieldNotesGroupChatId: Notificaciones deshabilitadas");
+    // MySQL tinyint(1) puede venir como number (1/0) o boolean (true/false)
+    const isEnabled = config.enabled === true || config.enabled === 1 || config.enabled === "1";
+    if (!isEnabled) {
+      console.log("[TG Bot] getFieldNotesGroupChatId: Notificaciones deshabilitadas, enabled =", config.enabled, typeof config.enabled);
       return null;
     }
     if (!config.chatId) {
@@ -917,16 +919,16 @@ async function notifyGroupNewNote(folio: string, state: ConversationState) {
   // Si tiene foto, enviarla al grupo
   if (state.data.photoBase64) {
     try {
-      const FormData = (await import("form-data")).default;
-      const formData = new FormData();
-      formData.append("chat_id", groupChatId);
       const photoBuffer = Buffer.from(state.data.photoBase64, "base64");
-      formData.append("photo", photoBuffer, { filename: "reporte.jpg", contentType: "image/jpeg" });
+      const blob = new Blob([photoBuffer], { type: "image/jpeg" });
+      const formData = new globalThis.FormData();
+      formData.append("chat_id", groupChatId);
+      formData.append("photo", blob, "reporte.jpg");
       formData.append("caption", `📸 Foto — ${folio}`);
 
       await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
         method: "POST",
-        body: formData as any,
+        body: formData,
         signal: AbortSignal.timeout(30000),
       });
     } catch (err) {
@@ -1076,15 +1078,16 @@ export async function notifyNoteStatusChange(noteId: number, newStatus: string, 
         const photoPath = (photo as any).photoPath;
         if (photoPath && fs.existsSync(photoPath)) {
           try {
-            const FormData = (await import("form-data")).default;
-            const formData = new FormData();
+            const photoBuffer = fs.readFileSync(photoPath);
+            const blob = new Blob([photoBuffer], { type: "image/jpeg" });
+            const formData = new globalThis.FormData();
             formData.append("chat_id", user.telegramChatId);
-            formData.append("photo", fs.createReadStream(photoPath));
+            formData.append("photo", blob, "resolucion.jpg");
             formData.append("caption", `📸 Foto de resolución — ${(note as any).folio}`);
 
             await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
               method: "POST",
-              body: formData as any,
+              body: formData,
               signal: AbortSignal.timeout(30000),
             });
           } catch (err) {
@@ -1117,15 +1120,16 @@ export async function notifyNoteStatusChange(noteId: number, newStatus: string, 
         const gPhotoPath = (gPhoto as any).photoPath;
         if (gPhotoPath && fs.existsSync(gPhotoPath)) {
           try {
-            const FormData = (await import("form-data")).default;
-            const formData = new FormData();
+            const photoBuffer = fs.readFileSync(gPhotoPath);
+            const blob = new Blob([photoBuffer], { type: "image/jpeg" });
+            const formData = new globalThis.FormData();
             formData.append("chat_id", groupChatId);
-            formData.append("photo", fs.createReadStream(gPhotoPath));
+            formData.append("photo", blob, `${stage}.jpg`);
             formData.append("caption", `📸 Foto de ${stage} — ${(note as any).folio}`);
 
             await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
               method: "POST",
-              body: formData as any,
+              body: formData,
               signal: AbortSignal.timeout(30000),
             });
             console.log("[TG Bot] Foto de", stage, "enviada al grupo OK");
@@ -1149,14 +1153,27 @@ export async function notifyNoteStatusChange(noteId: number, newStatus: string, 
 // ============================================================
 
 export async function notifyGroupNewNoteFromWeb(noteId: number, folio: string, description: string, category: string, severity: string, parcelName?: string, reporterName?: string, photoPath?: string): Promise<boolean> {
-  console.log("[TG Bot] notifyGroupNewNoteFromWeb llamada para folio:", folio);
-  const botToken = await getBotToken();
+  console.log("[TG Bot] notifyGroupNewNoteFromWeb llamada para folio:", folio, "noteId:", noteId);
+  
+  let botToken: string | null = null;
+  try {
+    botToken = await getBotToken();
+  } catch (err) {
+    console.error("[TG Bot] notifyGroupNewNoteFromWeb: Error obteniendo botToken:", err);
+    return false;
+  }
   if (!botToken) {
-    console.log("[TG Bot] notifyGroupNewNoteFromWeb: No hay botToken");
+    console.log("[TG Bot] notifyGroupNewNoteFromWeb: No hay botToken configurado");
     return false;
   }
 
-  const groupChatId = await getFieldNotesGroupChatId();
+  let groupChatId: string | null = null;
+  try {
+    groupChatId = await getFieldNotesGroupChatId();
+  } catch (err) {
+    console.error("[TG Bot] notifyGroupNewNoteFromWeb: Error obteniendo groupChatId:", err);
+    return false;
+  }
   console.log("[TG Bot] notifyGroupNewNoteFromWeb: groupChatId =", groupChatId);
   if (!groupChatId) {
     console.log("[TG Bot] notifyGroupNewNoteFromWeb: No hay groupChatId, abortando");
@@ -1176,24 +1193,41 @@ export async function notifyGroupNewNoteFromWeb(noteId: number, folio: string, d
   msg += `\n📝 ${description.substring(0, 200)}\n`;
   msg += `\n🌐 <i>Creada desde la web</i>`;
 
-  await sendMessage(botToken, groupChatId, msg);
-  console.log("[TG Bot] notifyGroupNewNoteFromWeb: Mensaje enviado al grupo OK");
+  try {
+    const result = await sendMessage(botToken, groupChatId, msg);
+    console.log("[TG Bot] notifyGroupNewNoteFromWeb: Mensaje enviado al grupo, result:", result ? "OK" : "FAILED");
+    if (!result) {
+      console.error("[TG Bot] notifyGroupNewNoteFromWeb: sendMessage retornó null");
+    }
+  } catch (err) {
+    console.error("[TG Bot] notifyGroupNewNoteFromWeb: Error enviando mensaje al grupo:", err);
+    return false;
+  }
 
   // Enviar foto si existe
   if (photoPath) {
     try {
-      const photoFs = await import("fs");
-      if (photoFs.existsSync(photoPath)) {
-        const FormData = (await import("form-data")).default;
-        const formData = new FormData();
+      console.log("[TG Bot] notifyGroupNewNoteFromWeb: Intentando enviar foto:", photoPath);
+      if (fs.existsSync(photoPath)) {
+        const photoBuffer = fs.readFileSync(photoPath);
+        // Usar fetch con FormData nativo de Node.js 22 (no requiere form-data externo)
+        const blob = new Blob([photoBuffer], { type: "image/jpeg" });
+        const formData = new globalThis.FormData();
         formData.append("chat_id", groupChatId);
-        formData.append("photo", photoFs.createReadStream(photoPath));
+        formData.append("photo", blob, "reporte.jpg");
         formData.append("caption", `📸 Foto — ${folio}`);
-        await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+        const photoResult = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
           method: "POST",
-          body: formData as any,
+          body: formData,
           signal: AbortSignal.timeout(30000),
         });
+        console.log("[TG Bot] notifyGroupNewNoteFromWeb: Foto enviada, status:", photoResult.status);
+        if (!photoResult.ok) {
+          const errText = await photoResult.text();
+          console.error("[TG Bot] notifyGroupNewNoteFromWeb: Error respuesta foto:", errText);
+        }
+      } else {
+        console.log("[TG Bot] notifyGroupNewNoteFromWeb: Archivo de foto no existe:", photoPath);
       }
     } catch (err) {
       console.error("[TG Bot] Error enviando foto al grupo:", err);
