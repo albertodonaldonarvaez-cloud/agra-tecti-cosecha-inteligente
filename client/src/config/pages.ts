@@ -27,6 +27,7 @@ import {
   BookOpen,
   Warehouse as WarehouseIcon,
   ClipboardList,
+  UsersRound,
   type LucideIcon
 } from "lucide-react";
 
@@ -215,6 +216,18 @@ export const PAGES_CONFIG: PageConfig[] = [
     showInNav: true,
   },
   {
+    permissionKey: "canViewCollaborators",
+    path: "/collaborators",
+    icon: UsersRound,
+    label: "Equipo",
+    fullName: "Colaboradores de Campo",
+    description: "Gestionar colaboradores y asignar tareas",
+    adminOnly: false,
+    defaultValue: false,
+    order: 14,
+    showInNav: true,
+  },
+  {
     permissionKey: "canViewCrops",
     path: "/crops",
     icon: Sprout,
@@ -223,7 +236,7 @@ export const PAGES_CONFIG: PageConfig[] = [
     description: "Gestionar cultivos y sus variedades",
     adminOnly: true,
     defaultValue: false,
-    order: 14,
+    order: 15,
     showInNav: true,
   },
   {

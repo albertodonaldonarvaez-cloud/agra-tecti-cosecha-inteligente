@@ -288,6 +288,16 @@ async function handleUpdate(botToken: string, update: any) {
   const chatId = String(message.chat.id);
   const chatType = message.chat.type;
 
+  // Intentar manejar como colaborador primero
+  try {
+    const { handleCollaboratorUpdate, cleanExpiredCollabConversations } = await import("./telegramCollaboratorBot");
+    cleanExpiredCollabConversations();
+    const handled = await handleCollaboratorUpdate(botToken, update);
+    if (handled) return;
+  } catch (err) {
+    console.error("[TG Bot] Error en collaborator handler:", err);
+  }
+
   // Si es callback_query (botón inline presionado)
   if (update.callback_query) {
     await handleCallback(botToken, chatId, update.callback_query);

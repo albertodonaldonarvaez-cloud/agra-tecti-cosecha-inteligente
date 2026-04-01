@@ -26,6 +26,7 @@ export const users = mysqlTable("users", {
   canViewErrors: boolean("canViewErrors").default(false).notNull(),
   canViewCrops: boolean("canViewCrops").default(false).notNull(),
   canViewFieldNotes: boolean("canViewFieldNotes").default(true).notNull(),
+  canViewCollaborators: boolean("canViewCollaborators").default(false).notNull(),
   // Campos de personalización de perfil
   avatarColor: varchar("avatarColor", { length: 32 }).default("#16a34a"),
   avatarEmoji: varchar("avatarEmoji", { length: 16 }).default("🌿"),
@@ -566,3 +567,51 @@ export const fieldNotePhotos = mysqlTable("fieldNotePhotos", {
 });
 export type FieldNotePhoto = typeof fieldNotePhotos.$inferSelect;
 export type InsertFieldNotePhoto = typeof fieldNotePhotos.$inferInsert;
+
+// ============ COLABORADORES DE CAMPO ============
+// Usuarios externos que interactúan solo por Telegram (no acceden al sistema web)
+
+export const collaborators = mysqlTable("collaborators", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  phone: varchar("phone", { length: 32 }),
+  role: varchar("role", { length: 128 }), // Ej: "Encargado de riego", "Jornalero"
+  telegramChatId: varchar("telegramChatId", { length: 64 }),
+  telegramUsername: varchar("telegramUsername", { length: 128 }),
+  telegramLinkedAt: timestamp("telegramLinkedAt"),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type Collaborator = typeof collaborators.$inferSelect;
+export type InsertCollaborator = typeof collaborators.$inferInsert;
+
+// Códigos de vinculación de Telegram para colaboradores
+export const collaboratorLinkCodes = mysqlTable("collaboratorLinkCodes", {
+  id: int("id").autoincrement().primaryKey(),
+  collaboratorId: int("collaboratorId").notNull(),
+  code: varchar("code", { length: 8 }).notNull().unique(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  used: boolean("used").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CollaboratorLinkCode = typeof collaboratorLinkCodes.$inferSelect;
+
+// Asignación de tareas (actividades de campo) a colaboradores
+export const fieldActivityAssignments = mysqlTable("fieldActivityAssignments", {
+  id: int("id").autoincrement().primaryKey(),
+  activityId: int("activityId").notNull(), // FK a fieldActivities.id
+  collaboratorId: int("collaboratorId").notNull(), // FK a collaborators.id
+  status: mysqlEnum("status", ["pendiente", "en_progreso", "completada", "cancelada"]).default("pendiente").notNull(),
+  startedAt: timestamp("startedAt"),
+  completedAt: timestamp("completedAt"),
+  evidencePhotoPath: varchar("evidencePhotoPath", { length: 512 }),
+  evidenceNotes: text("evidenceNotes"),
+  notifiedAt: timestamp("notifiedAt"),
+  assignedByUserId: int("assignedByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type FieldActivityAssignment = typeof fieldActivityAssignments.$inferSelect;
+export type InsertFieldActivityAssignment = typeof fieldActivityAssignments.$inferInsert;

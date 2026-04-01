@@ -7,7 +7,7 @@ import * as db from "./db";
 import * as dbExt from "./db_extended";
 import * as webodm from "./webodmService";
 import { getDb } from "./db";
-import { users, boxes, harvesters, parcels, parcelDetails, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos, telegramLinkCodes } from "../drizzle/schema";
+import { users, boxes, harvesters, parcels, parcelDetails, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos, telegramLinkCodes, collaborators, collaboratorLinkCodes, fieldActivityAssignments } from "../drizzle/schema";
 import { eq, desc, and, gte, lte, inArray, sql } from "drizzle-orm";
 
 export const appRouter = router({
@@ -2625,6 +2625,182 @@ export const appRouter = router({
           telegramLinkedAt: null,
         }).where(eq(users.id, targetUserId));
         return { success: true };
+      }),
+  }),
+
+  // ============ COLABORADORES ============
+  collaborators: router({
+    // Listar todos los colaboradores
+    list: protectedProcedure.query(async () => {
+      const drizzle = await getDb();
+      const result = await drizzle.select().from(collaborators).orderBy(desc(collaborators.createdAt));
+      return result;
+    }),
+
+    // Crear colaborador
+    create: protectedProcedure
+      .input(z.object({
+        name: z.string().min(1),
+        phone: z.string().optional(),
+        role: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const drizzle = await getDb();
+        const userId = (ctx as any).user?.id;
+        if (!userId) throw new TRPCError({ code: "UNAUTHORIZED" });
+        const [result] = await drizzle.insert(collaborators).values({
+          name: input.name,
+          phone: input.phone || null,
+          role: input.role || null,
+          createdByUserId: userId,
+        });
+        return { success: true, id: result.insertId };
+      }),
+
+    // Actualizar colaborador
+    update: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        name: z.string().min(1),
+        phone: z.string().optional(),
+        role: z.string().optional(),
+        isActive: z.boolean().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const drizzle = await getDb();
+        const updateData: any = { name: input.name };
+        if (input.phone !== undefined) updateData.phone = input.phone || null;
+        if (input.role !== undefined) updateData.role = input.role || null;
+        if (input.isActive !== undefined) updateData.isActive = input.isActive;
+        await drizzle.update(collaborators).set(updateData).where(eq(collaborators.id, input.id));
+        return { success: true };
+      }),
+
+    // Eliminar (desactivar) colaborador
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const drizzle = await getDb();
+        await drizzle.update(collaborators).set({ isActive: false }).where(eq(collaborators.id, input.id));
+        return { success: true };
+      }),
+
+    // Generar código de vinculación de Telegram
+    generateLinkCode: protectedProcedure
+      .input(z.object({ collaboratorId: z.number() }))
+      .mutation(async ({ input }) => {
+        const drizzle = await getDb();
+        // Generar código de 6 dígitos
+        const code = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutos
+        // Invalidar códigos anteriores no usados
+        await drizzle.update(collaboratorLinkCodes)
+          .set({ used: true })
+          .where(and(
+            eq(collaboratorLinkCodes.collaboratorId, input.collaboratorId),
+            eq(collaboratorLinkCodes.used, false),
+          ));
+        await drizzle.insert(collaboratorLinkCodes).values({
+          collaboratorId: input.collaboratorId,
+          code,
+          expiresAt,
+        });
+        return { code, expiresAt: expiresAt.toISOString() };
+      }),
+
+    // Desvincular Telegram de un colaborador
+    unlinkTelegram: protectedProcedure
+      .input(z.object({ collaboratorId: z.number() }))
+      .mutation(async ({ input }) => {
+        const drizzle = await getDb();
+        await drizzle.update(collaborators).set({
+          telegramChatId: null,
+          telegramUsername: null,
+          telegramLinkedAt: null,
+        }).where(eq(collaborators.id, input.collaboratorId));
+        return { success: true };
+      }),
+
+    // Obtener asignaciones de un colaborador
+    getAssignments: protectedProcedure
+      .input(z.object({ collaboratorId: z.number() }))
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        const assignments = await drizzle.select()
+          .from(fieldActivityAssignments)
+          .where(eq(fieldActivityAssignments.collaboratorId, input.collaboratorId))
+          .orderBy(desc(fieldActivityAssignments.createdAt));
+        // Enriquecer con datos de la actividad
+        const enriched = [];
+        for (const a of assignments) {
+          const [activity] = await drizzle.select().from(fieldActivities).where(eq(fieldActivities.id, a.activityId));
+          const actParcels = await drizzle.select().from(fieldActivityParcels).where(eq(fieldActivityParcels.activityId, a.activityId));
+          const parcelIds = actParcels.map(p => p.parcelId);
+          let parcelNames: string[] = [];
+          if (parcelIds.length > 0) {
+            const parcelRows = await drizzle.select({ name: parcels.name }).from(parcels).where(inArray(parcels.id, parcelIds));
+            parcelNames = parcelRows.map(p => p.name);
+          }
+          enriched.push({ ...a, activity: activity || null, parcelNames });
+        }
+        return enriched;
+      }),
+
+    // Asignar tarea a colaborador
+    assignTask: protectedProcedure
+      .input(z.object({
+        activityId: z.number(),
+        collaboratorId: z.number(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const drizzle = await getDb();
+        const userId = (ctx as any).user?.id;
+        if (!userId) throw new TRPCError({ code: "UNAUTHORIZED" });
+        // Verificar que no exista ya la asignación
+        const existing = await drizzle.select().from(fieldActivityAssignments)
+          .where(and(
+            eq(fieldActivityAssignments.activityId, input.activityId),
+            eq(fieldActivityAssignments.collaboratorId, input.collaboratorId),
+          ));
+        if (existing.length > 0) throw new TRPCError({ code: "CONFLICT", message: "Ya existe esta asignación" });
+        const [result] = await drizzle.insert(fieldActivityAssignments).values({
+          activityId: input.activityId,
+          collaboratorId: input.collaboratorId,
+          assignedByUserId: userId,
+        });
+        // Notificar al colaborador por Telegram si está vinculado
+        try {
+          const { notifyCollaboratorNewTask } = await import("./telegramCollaboratorBot");
+          await notifyCollaboratorNewTask(input.collaboratorId, input.activityId);
+        } catch (err) {
+          console.error("[Collaborators] Error notificando por Telegram:", err);
+        }
+        return { success: true, id: result.insertId };
+      }),
+
+    // Desasignar tarea
+    unassignTask: protectedProcedure
+      .input(z.object({ assignmentId: z.number() }))
+      .mutation(async ({ input }) => {
+        const drizzle = await getDb();
+        await drizzle.delete(fieldActivityAssignments).where(eq(fieldActivityAssignments.id, input.assignmentId));
+        return { success: true };
+      }),
+
+    // Obtener asignaciones de una actividad
+    getActivityAssignments: protectedProcedure
+      .input(z.object({ activityId: z.number() }))
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        const assignments = await drizzle.select()
+          .from(fieldActivityAssignments)
+          .where(eq(fieldActivityAssignments.activityId, input.activityId));
+        const enriched = [];
+        for (const a of assignments) {
+          const [collab] = await drizzle.select().from(collaborators).where(eq(collaborators.id, a.collaboratorId));
+          enriched.push({ ...a, collaborator: collab || null });
+        }
+        return enriched;
       }),
   }),
 });
