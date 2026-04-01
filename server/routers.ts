@@ -1571,13 +1571,14 @@ export const appRouter = router({
         }
         const activities = await query;
 
-        // Enriquecer con parcelas, productos, herramientas y fotos
+        // Enriquecer con parcelas, productos, herramientas, fotos y asignaciones
         const enriched = await Promise.all(activities.map(async (act) => {
-          const [actParcels, actProducts, actTools, actPhotos] = await Promise.all([
+          const [actParcels, actProducts, actTools, actPhotos, actAssignments] = await Promise.all([
             drizzle.select().from(fieldActivityParcels).where(eq(fieldActivityParcels.activityId, act.id)),
             drizzle.select().from(fieldActivityProducts).where(eq(fieldActivityProducts.activityId, act.id)),
             drizzle.select().from(fieldActivityTools).where(eq(fieldActivityTools.activityId, act.id)),
             drizzle.select().from(fieldActivityPhotos).where(eq(fieldActivityPhotos.activityId, act.id)),
+            drizzle.select().from(fieldActivityAssignments).where(eq(fieldActivityAssignments.activityId, act.id)),
           ]);
 
           // Obtener nombres de parcelas
@@ -1588,12 +1589,24 @@ export const appRouter = router({
             parcelNames = parcelRows;
           }
 
+          // Obtener nombres de colaboradores asignados
+          let assignedCollaborators: { id: number; name: string; status: string }[] = [];
+          if (actAssignments.length > 0) {
+            const collabIds = actAssignments.map(a => a.collaboratorId);
+            const collabRows = await drizzle.select({ id: collaborators.id, name: collaborators.name }).from(collaborators).where(inArray(collaborators.id, collabIds));
+            assignedCollaborators = actAssignments.map(a => {
+              const c = collabRows.find(cr => cr.id === a.collaboratorId);
+              return { id: a.collaboratorId, name: c?.name || "Desconocido", status: a.status };
+            });
+          }
+
           return {
             ...act,
             parcels: parcelNames,
             products: actProducts,
             tools: actTools,
             photos: actPhotos,
+            assignments: assignedCollaborators,
           };
         }));
 
@@ -1658,6 +1671,7 @@ export const appRouter = router({
           toolType: z.string().optional(),
           notes: z.string().optional(),
         })).optional(),
+        collaboratorIds: z.array(z.number()).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const drizzle = await getDb();
@@ -1724,6 +1738,25 @@ export const appRouter = router({
           );
         }
 
+        // Insertar asignaciones de colaboradores
+        if (input.collaboratorIds && input.collaboratorIds.length > 0) {
+          await drizzle.insert(fieldActivityAssignments).values(
+            input.collaboratorIds.map(cid => ({
+              activityId,
+              collaboratorId: cid,
+              status: "pendiente" as const,
+              assignedByUserId: userId,
+            }))
+          );
+          // Notificar a cada colaborador por Telegram
+          try {
+            const { notifyCollaboratorNewTask } = await import("./telegramCollaboratorBot");
+            for (const cid of input.collaboratorIds) {
+              notifyCollaboratorNewTask(cid, activityId).catch(e => console.error("Error notificando colaborador:", e));
+            }
+          } catch (e) { console.error("Error importando telegramCollaboratorBot:", e); }
+        }
+
         return { id: activityId, success: true };
       }),
 
@@ -1757,8 +1790,9 @@ export const appRouter = router({
           toolType: z.string().optional(),
           notes: z.string().optional(),
         })).optional(),
+        collaboratorIds: z.array(z.number()).optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const drizzle = await getDb();
         const updateData: any = {};
         if (input.activityType) updateData.activityType = input.activityType;
@@ -1828,6 +1862,39 @@ export const appRouter = router({
           }
         }
 
+        // Reemplazar asignaciones de colaboradores
+        if (input.collaboratorIds !== undefined) {
+          // Obtener asignaciones existentes que no estén completadas
+          const existingAssignments = await drizzle.select().from(fieldActivityAssignments).where(eq(fieldActivityAssignments.activityId, input.id));
+          const existingCollabIds = existingAssignments.map(a => a.collaboratorId);
+          const newCollabIds = input.collaboratorIds;
+          // Eliminar asignaciones que ya no están (solo pendientes/en_progreso)
+          const toRemove = existingAssignments.filter(a => !newCollabIds.includes(a.collaboratorId) && (a.status === "pendiente" || a.status === "en_progreso"));
+          for (const a of toRemove) {
+            await drizzle.delete(fieldActivityAssignments).where(eq(fieldActivityAssignments.id, a.id));
+          }
+          // Agregar nuevas asignaciones
+          const toAdd = newCollabIds.filter(cid => !existingCollabIds.includes(cid));
+          if (toAdd.length > 0) {
+            const userId = (ctx as any).user?.id || 0;
+            await drizzle.insert(fieldActivityAssignments).values(
+              toAdd.map(cid => ({
+                activityId: input.id,
+                collaboratorId: cid,
+                status: "pendiente" as const,
+                assignedByUserId: userId,
+              }))
+            );
+            // Notificar nuevos colaboradores
+            try {
+              const { notifyCollaboratorNewTask } = await import("./telegramCollaboratorBot");
+              for (const cid of toAdd) {
+                notifyCollaboratorNewTask(cid, input.id).catch(e => console.error("Error notificando colaborador:", e));
+              }
+            } catch (e) { console.error("Error importando telegramCollaboratorBot:", e); }
+          }
+        }
+
         return { success: true };
       }),
 
@@ -1842,6 +1909,7 @@ export const appRouter = router({
           drizzle.delete(fieldActivityProducts).where(eq(fieldActivityProducts.activityId, input.id)),
           drizzle.delete(fieldActivityTools).where(eq(fieldActivityTools.activityId, input.id)),
           drizzle.delete(fieldActivityPhotos).where(eq(fieldActivityPhotos.activityId, input.id)),
+          drizzle.delete(fieldActivityAssignments).where(eq(fieldActivityAssignments.activityId, input.id)),
         ]);
         await drizzle.delete(fieldActivities).where(eq(fieldActivities.id, input.id));
         return { success: true };

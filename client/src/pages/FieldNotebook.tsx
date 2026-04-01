@@ -8,7 +8,7 @@ import {
   BookOpen, Plus, Search, Filter, Calendar, User, Clock, MapPin, Package, Wrench,
   Trash2, Edit3, ChevronDown, ChevronUp, Save, X, Droplets, FlaskConical, Scissors,
   Bug, Sprout, CloudSun, Thermometer, Camera, CheckCircle2, AlertCircle, Pause,
-  Leaf, Shield, Warehouse, ArrowDown, Info,
+  Leaf, Shield, Warehouse, ArrowDown, Info, UsersRound,
 } from "lucide-react";
 
 // ===== CONSTANTES =====
@@ -133,6 +133,7 @@ function FieldNotebookContent() {
     temperature: "",
     status: "completada",
     parcelIds: [] as number[],
+    collaboratorIds: [] as number[],
   });
   const [formProducts, setFormProducts] = useState<ProductForm[]>([]);
   const [formTools, setFormTools] = useState<ToolForm[]>([]);
@@ -148,6 +149,12 @@ function FieldNotebookContent() {
   const { data: warehouseProductsList } = trpc.warehouse.listProducts.useQuery({ }, { staleTime: 120_000 });
   const { data: warehouseToolsList } = trpc.warehouse.listTools.useQuery({ status: "disponible" }, { staleTime: 120_000 });
   const { data: currentWeather } = trpc.weather.getCurrent.useQuery(undefined, { staleTime: 300_000, retry: false });
+  const { data: collaboratorsList } = trpc.collaborators.list.useQuery(undefined, { staleTime: 120_000 });
+
+  // Colaboradores activos con Telegram vinculado
+  const activeCollaborators = useMemo(() => {
+    return ((collaboratorsList as any[]) || []).filter((c: any) => c.isActive);
+  }, [collaboratorsList]);
 
   // Mutations
   const createMutation = trpc.fieldNotebook.create.useMutation({
@@ -187,7 +194,7 @@ function FieldNotebookContent() {
     setFormData({
       activityType: "riego", activitySubtype: "", description: "", performedBy: "",
       activityDate: new Date().toISOString().split("T")[0], startTime: "", endTime: "",
-      durationMinutes: undefined, weatherCondition: "", temperature: "", status: "completada", parcelIds: [],
+      durationMinutes: undefined, weatherCondition: "", temperature: "", status: "completada", parcelIds: [], collaboratorIds: [],
     });
     setFormProducts([]);
     setFormTools([]);
@@ -201,6 +208,7 @@ function FieldNotebookContent() {
       endTime: activity.endTime || "", durationMinutes: activity.durationMinutes || undefined,
       weatherCondition: activity.weatherCondition || "", temperature: activity.temperature || "",
       status: activity.status, parcelIds: activity.parcels?.map((p: any) => p.id) || [],
+      collaboratorIds: activity.assignments?.map((a: any) => a.id) || [],
     });
     setFormProducts(
       activity.products?.map((p: any) => ({
@@ -541,6 +549,45 @@ function FieldNotebookContent() {
                 </div>
               </div>
 
+              {/* Asignar Colaboradores */}
+              {activeCollaborators.length > 0 && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                    <UsersRound className="w-3.5 h-3.5 inline mr-1" />
+                    Asignar Colaboradores
+                    <span className="text-[10px] text-gray-400 font-normal ml-2">(Se les notificará por Telegram)</span>
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {activeCollaborators.map((c: any) => {
+                      const selected = formData.collaboratorIds.includes(c.id);
+                      return (
+                        <button key={c.id}
+                          onClick={() => setFormData(prev => ({
+                            ...prev,
+                            collaboratorIds: selected ? prev.collaboratorIds.filter(id => id !== c.id) : [...prev.collaboratorIds, c.id],
+                          }))}
+                          className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all flex items-center gap-1.5 ${
+                            selected ? "bg-blue-100 text-blue-700 border-blue-300 shadow-sm" : "bg-white/50 text-gray-500 border-gray-200 hover:border-gray-300"
+                          }`}>
+                          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                            selected ? "bg-blue-500 text-white" : "bg-gray-200 text-gray-600"
+                          }`}>{c.name.charAt(0).toUpperCase()}</span>
+                          {c.name}
+                          {c.role && <span className="text-[10px] opacity-60">({c.role})</span>}
+                          {c.telegramChatId && <span className="text-[10px]">📱</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {formData.collaboratorIds.length > 0 && (
+                    <p className="text-[10px] text-blue-500 mt-1.5 flex items-center gap-1">
+                      <UsersRound className="w-3 h-3" />
+                      {formData.collaboratorIds.length} colaborador{formData.collaboratorIds.length > 1 ? "es" : ""} asignado{formData.collaboratorIds.length > 1 ? "s" : ""}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Productos - Integración con Almacén */}
               <div>
                 <div className="flex items-center justify-between mb-2">
@@ -773,6 +820,9 @@ function FieldNotebookContent() {
                           {activity.parcels?.length > 0 && (
                             <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{activity.parcels.map((p: any) => p.name).join(", ")}</span>
                           )}
+                          {activity.assignments?.length > 0 && (
+                            <span className="flex items-center gap-1"><UsersRound className="w-3 h-3" />{activity.assignments.map((a: any) => a.name).join(", ")}</span>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
@@ -885,6 +935,30 @@ function FieldNotebookContent() {
                                 <span className="text-xs text-gray-400">({TOOL_TYPES.find(tt => tt.value === t.toolType)?.label || t.toolType})</span>
                               </div>
                             ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Colaboradores asignados */}
+                      {activity.assignments?.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
+                            <UsersRound className="w-3.5 h-3.5" /> Colaboradores Asignados ({activity.assignments.length})
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {activity.assignments.map((a: any, i: number) => {
+                              const statusColor = a.status === "completada" ? "bg-green-50 text-green-700 border-green-200" :
+                                a.status === "en_progreso" ? "bg-blue-50 text-blue-700 border-blue-200" :
+                                a.status === "cancelada" ? "bg-red-50 text-red-600 border-red-200" :
+                                "bg-amber-50 text-amber-700 border-amber-200";
+                              return (
+                                <div key={i} className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium ${statusColor}`}>
+                                  <span className="w-5 h-5 rounded-full bg-white/60 flex items-center justify-center text-[10px] font-bold">{a.name.charAt(0).toUpperCase()}</span>
+                                  {a.name}
+                                  <span className="text-[10px] opacity-70 capitalize">({a.status === "en_progreso" ? "en progreso" : a.status})</span>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       )}
