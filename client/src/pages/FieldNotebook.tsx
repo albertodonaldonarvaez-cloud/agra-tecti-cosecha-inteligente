@@ -124,7 +124,6 @@ function FieldNotebookContent() {
     activityType: "riego" as string,
     activitySubtype: "",
     description: "",
-    performedBy: "",
     activityDate: new Date().toISOString().split("T")[0],
     startTime: "",
     endTime: "",
@@ -192,7 +191,7 @@ function FieldNotebookContent() {
     setShowForm(false);
     setEditingId(null);
     setFormData({
-      activityType: "riego", activitySubtype: "", description: "", performedBy: "",
+      activityType: "riego", activitySubtype: "", description: "",
       activityDate: new Date().toISOString().split("T")[0], startTime: "", endTime: "",
       durationMinutes: undefined, weatherCondition: "", temperature: "", status: "completada", parcelIds: [], collaboratorIds: [],
     });
@@ -203,7 +202,7 @@ function FieldNotebookContent() {
   const handleEdit = useCallback((activity: any) => {
     setFormData({
       activityType: activity.activityType, activitySubtype: activity.activitySubtype || "",
-      description: activity.description || "", performedBy: activity.performedBy,
+      description: activity.description || "",
       activityDate: activity.activityDate, startTime: activity.startTime || "",
       endTime: activity.endTime || "", durationMinutes: activity.durationMinutes || undefined,
       weatherCondition: activity.weatherCondition || "", temperature: activity.temperature || "",
@@ -227,8 +226,8 @@ function FieldNotebookContent() {
   }, []);
 
   const handleSubmit = useCallback(async () => {
-    if (!formData.performedBy.trim()) { toast.error("Indica quién realizó la actividad"); return; }
     if (!formData.activityDate) { toast.error("Indica la fecha de la actividad"); return; }
+    if (formData.collaboratorIds.length === 0) { toast.error("Asigna al menos un colaborador"); return; }
 
     const payload = {
       ...formData,
@@ -291,7 +290,7 @@ function FieldNotebookContent() {
     if (!searchTerm.trim()) return activities;
     const term = searchTerm.toLowerCase();
     return activities.filter((a: any) =>
-      a.performedBy?.toLowerCase().includes(term) ||
+      a.assignments?.some((as: any) => as.name.toLowerCase().includes(term)) ||
       a.description?.toLowerCase().includes(term) ||
       a.activitySubtype?.toLowerCase().includes(term) ||
       a.parcels?.some((p: any) => p.name.toLowerCase().includes(term)) ||
@@ -448,22 +447,52 @@ function FieldNotebookContent() {
                 </div>
               )}
 
-              {/* Datos principales */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Realizado por *</label>
-                  <div className="relative">
-                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <input type="text" value={formData.performedBy} onChange={(e) => setFormData(prev => ({ ...prev, performedBy: e.target.value }))}
-                      placeholder="Nombre de quien realizó la actividad"
-                      className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-xl bg-white/70 focus:ring-2 focus:ring-green-300 outline-none" />
+              {/* Asignar Colaboradores * */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                  <UsersRound className="w-3.5 h-3.5 inline mr-1" />
+                  Colaborador(es) que realizan la actividad *
+                  <span className="text-[10px] text-gray-400 font-normal ml-2">(Se les notificará por Telegram)</span>
+                </label>
+                {activeCollaborators.length === 0 ? (
+                  <p className="text-xs text-amber-600 bg-amber-50 rounded-xl p-3 border border-amber-200">No hay colaboradores activos. Agrégalos desde la página de Equipo de Campo.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {activeCollaborators.map((c: any) => {
+                      const selected = formData.collaboratorIds.includes(c.id);
+                      return (
+                        <button key={c.id}
+                          onClick={() => setFormData(prev => ({
+                            ...prev,
+                            collaboratorIds: selected ? prev.collaboratorIds.filter(id => id !== c.id) : [...prev.collaboratorIds, c.id],
+                          }))}
+                          className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all flex items-center gap-1.5 ${
+                            selected ? "bg-blue-100 text-blue-700 border-blue-300 shadow-sm" : "bg-white/50 text-gray-500 border-gray-200 hover:border-gray-300"
+                          }`}>
+                          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                            selected ? "bg-blue-500 text-white" : "bg-gray-200 text-gray-600"
+                          }`}>{c.name.charAt(0).toUpperCase()}</span>
+                          {c.name}
+                          {c.role && <span className="text-[10px] opacity-60">({c.role})</span>}
+                          {c.telegramChatId && <span className="text-[10px]">📱</span>}
+                        </button>
+                      );
+                    })}
                   </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Fecha *</label>
-                  <input type="date" value={formData.activityDate} onChange={(e) => setFormData(prev => ({ ...prev, activityDate: e.target.value }))}
-                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl bg-white/70 focus:ring-2 focus:ring-green-300 outline-none" />
-                </div>
+                )}
+                {formData.collaboratorIds.length > 0 && (
+                  <p className="text-[10px] text-blue-500 mt-1.5 flex items-center gap-1">
+                    <UsersRound className="w-3 h-3" />
+                    {formData.collaboratorIds.length} colaborador{formData.collaboratorIds.length > 1 ? "es" : ""} asignado{formData.collaboratorIds.length > 1 ? "s" : ""}
+                  </p>
+                )}
+              </div>
+
+              {/* Fecha */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Fecha *</label>
+                <input type="date" value={formData.activityDate} onChange={(e) => setFormData(prev => ({ ...prev, activityDate: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl bg-white/70 focus:ring-2 focus:ring-green-300 outline-none" />
               </div>
 
               {/* Tiempo de ejecución */}
@@ -548,45 +577,6 @@ function FieldNotebookContent() {
                   )}
                 </div>
               </div>
-
-              {/* Asignar Colaboradores */}
-              {activeCollaborators.length > 0 && (
-                <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                    <UsersRound className="w-3.5 h-3.5 inline mr-1" />
-                    Asignar Colaboradores
-                    <span className="text-[10px] text-gray-400 font-normal ml-2">(Se les notificará por Telegram)</span>
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {activeCollaborators.map((c: any) => {
-                      const selected = formData.collaboratorIds.includes(c.id);
-                      return (
-                        <button key={c.id}
-                          onClick={() => setFormData(prev => ({
-                            ...prev,
-                            collaboratorIds: selected ? prev.collaboratorIds.filter(id => id !== c.id) : [...prev.collaboratorIds, c.id],
-                          }))}
-                          className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all flex items-center gap-1.5 ${
-                            selected ? "bg-blue-100 text-blue-700 border-blue-300 shadow-sm" : "bg-white/50 text-gray-500 border-gray-200 hover:border-gray-300"
-                          }`}>
-                          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                            selected ? "bg-blue-500 text-white" : "bg-gray-200 text-gray-600"
-                          }`}>{c.name.charAt(0).toUpperCase()}</span>
-                          {c.name}
-                          {c.role && <span className="text-[10px] opacity-60">({c.role})</span>}
-                          {c.telegramChatId && <span className="text-[10px]">📱</span>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {formData.collaboratorIds.length > 0 && (
-                    <p className="text-[10px] text-blue-500 mt-1.5 flex items-center gap-1">
-                      <UsersRound className="w-3 h-3" />
-                      {formData.collaboratorIds.length} colaborador{formData.collaboratorIds.length > 1 ? "es" : ""} asignado{formData.collaboratorIds.length > 1 ? "s" : ""}
-                    </p>
-                  )}
-                </div>
-              )}
 
               {/* Productos - Integración con Almacén */}
               <div>
@@ -813,15 +803,14 @@ function FieldNotebookContent() {
                             <Calendar className="w-3 h-3" />
                             {new Date(activity.activityDate + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" })}
                           </span>
-                          <span className="flex items-center gap-1"><User className="w-3 h-3" />{activity.performedBy}</span>
+                          {activity.assignments?.length > 0 && (
+                            <span className="flex items-center gap-1"><UsersRound className="w-3 h-3" />{activity.assignments.map((a: any) => a.name).join(", ")}</span>
+                          )}
                           {activity.durationMinutes && (
                             <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{formatDuration(activity.durationMinutes)}</span>
                           )}
                           {activity.parcels?.length > 0 && (
                             <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{activity.parcels.map((p: any) => p.name).join(", ")}</span>
-                          )}
-                          {activity.assignments?.length > 0 && (
-                            <span className="flex items-center gap-1"><UsersRound className="w-3 h-3" />{activity.assignments.map((a: any) => a.name).join(", ")}</span>
                           )}
                         </div>
                       </div>
