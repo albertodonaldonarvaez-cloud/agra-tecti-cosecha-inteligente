@@ -26,6 +26,8 @@ export const users = mysqlTable("users", {
   canViewErrors: boolean("canViewErrors").default(false).notNull(),
   canViewCrops: boolean("canViewCrops").default(false).notNull(),
   canViewFieldNotes: boolean("canViewFieldNotes").default(true).notNull(),
+  canViewFieldNotebook: boolean("canViewFieldNotebook").default(true).notNull(),
+  canViewWarehouse: boolean("canViewWarehouse").default(true).notNull(),
   canViewCollaborators: boolean("canViewCollaborators").default(false).notNull(),
   // Campos de personalización de perfil
   avatarColor: varchar("avatarColor", { length: 32 }).default("#16a34a"),
