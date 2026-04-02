@@ -475,13 +475,6 @@ async function handleCollabCallback(botToken: string, chatId: string, callbackQu
     return;
   }
 
-  // Ver detalle de nota
-  if (data.startsWith("collab_note_")) {
-    const noteId = parseInt(data.replace("collab_note_", ""));
-    await showNoteDetail(botToken, chatId, noteId, collab.id);
-    return;
-  }
-
   // ---- CAMBIAR ESTADO DE NOTA: En proceso ----
   if (data.startsWith("collab_note_progress_")) {
     const noteId = parseInt(data.replace("collab_note_progress_", ""));
@@ -516,6 +509,14 @@ async function handleCollabCallback(botToken: string, chatId: string, callbackQu
     );
     return;
   }
+
+  // Ver detalle de nota (DEBE ir después de los handlers específicos de collab_note_progress/review/resolve)
+  if (data.startsWith("collab_note_")) {
+    const noteId = parseInt(data.replace("collab_note_", ""));
+    await showNoteDetail(botToken, chatId, noteId, collab.id);
+    return;
+  }
+
 
   // Resolver sin foto
   if (data === "collab_resolve_skip_photo") {
