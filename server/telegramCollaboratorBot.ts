@@ -1,5 +1,5 @@
 import { getDb } from "./db";
-import { collaborators, collaboratorLinkCodes, fieldActivityAssignments, fieldActivities, fieldActivityParcels, parcels, fieldNotes, fieldNotePhotos, apiConfig } from "../drizzle/schema";
+import { collaborators, collaboratorLinkCodes, fieldActivityAssignments, fieldActivities, fieldActivityParcels, parcels, fieldNotes, fieldNotePhotos, apiConfig, users } from "../drizzle/schema";
 import { eq, and, gt, desc, inArray, sql, or } from "drizzle-orm";
 import * as fs from "fs";
 import * as path from "path";
@@ -482,6 +482,67 @@ async function handleCollabCallback(botToken: string, chatId: string, callbackQu
     return;
   }
 
+  // ---- CAMBIAR ESTADO DE NOTA: En proceso ----
+  if (data.startsWith("collab_note_progress_")) {
+    const noteId = parseInt(data.replace("collab_note_progress_", ""));
+    await changeNoteStatus(botToken, chatId, noteId, "en_progreso", collab);
+    return;
+  }
+
+  // ---- CAMBIAR ESTADO DE NOTA: En revisión ----
+  if (data.startsWith("collab_note_review_")) {
+    const noteId = parseInt(data.replace("collab_note_review_", ""));
+    await changeNoteStatus(botToken, chatId, noteId, "en_revision", collab);
+    return;
+  }
+
+  // ---- RESOLVER NOTA: Pedir evidencia ----
+  if (data.startsWith("collab_note_resolve_")) {
+    const noteId = parseInt(data.replace("collab_note_resolve_", ""));
+    collabConversations.set(chatId, {
+      step: "waiting_resolve_photo",
+      data: { noteId },
+      collaboratorId: collab.id,
+      lastActivity: Date.now(),
+    });
+    await sendMessage(botToken, chatId,
+      `\u2705 <b>Resolver nota</b>\n\n` +
+      `Para marcar esta nota como resuelta, env\u00eda una <b>foto de evidencia</b> de c\u00f3mo se solucion\u00f3 el problema.\n\n` +
+      `\ud83d\udca1 <i>Puedes agregar un comentario como pie de foto.</i>`,
+      { inline_keyboard: [
+        [{ text: "\u23ed\ufe0f Resolver sin foto", callback_data: "collab_resolve_skip_photo" }],
+        [{ text: "\u274c Cancelar", callback_data: "collab_menu" }],
+      ]}
+    );
+    return;
+  }
+
+  // Resolver sin foto
+  if (data === "collab_resolve_skip_photo") {
+    const conv2 = collabConversations.get(chatId);
+    if (conv2 && conv2.step === "waiting_resolve_photo") {
+      conv2.step = "waiting_resolve_notes";
+      await sendMessage(botToken, chatId,
+        `\ud83d\udcdd <b>Notas de resoluci\u00f3n</b>\n\n` +
+        `\u00bfC\u00f3mo se solucion\u00f3 el problema? Escribe una breve descripci\u00f3n:`,
+        { inline_keyboard: [
+          [{ text: "\u23ed\ufe0f Omitir descripci\u00f3n", callback_data: "collab_resolve_skip_notes" }],
+          [{ text: "\u274c Cancelar", callback_data: "collab_menu" }],
+        ]}
+      );
+    }
+    return;
+  }
+
+  // Omitir notas de resolución
+  if (data === "collab_resolve_skip_notes") {
+    const conv2 = collabConversations.get(chatId);
+    if (conv2) {
+      await resolveNote(botToken, chatId, conv2);
+    }
+    return;
+  }
+
   // Agregar foto a nota existente
   if (data.startsWith("collab_addphoto_")) {
     const noteId = parseInt(data.replace("collab_addphoto_", ""));
@@ -613,6 +674,50 @@ async function handleCollabMessage(botToken: string, chatId: string, message: an
     }
     conv.step = "waiting_note_priority";
     await askNotePriority(botToken, chatId);
+    return;
+  }
+
+  // ---- RESOLUCIÓN DE NOTA: FOTO ----
+  if (conv.step === "waiting_resolve_photo") {
+    if (photo) {
+      const fileId = photo[photo.length - 1].file_id;
+      const photoBuffer = await downloadFile(botToken, fileId);
+      if (photoBuffer) {
+        conv.data.resolvePhotoBuffer = photoBuffer;
+        conv.data.resolveNotes = message.caption || "";
+      }
+      if (message.caption) {
+        // Ya tiene notas del caption, resolver directamente
+        await resolveNote(botToken, chatId, conv);
+      } else {
+        conv.step = "waiting_resolve_notes";
+        await sendMessage(botToken, chatId,
+          `\u2705 <b>Foto recibida</b>\n\n` +
+          `\u00bfC\u00f3mo se solucion\u00f3 el problema? Escribe una breve descripci\u00f3n:`,
+          { inline_keyboard: [
+            [{ text: "\u23ed\ufe0f Omitir descripci\u00f3n", callback_data: "collab_resolve_skip_notes" }],
+            [{ text: "\u274c Cancelar", callback_data: "collab_menu" }],
+          ]}
+        );
+      }
+      return;
+    }
+    await sendMessage(botToken, chatId,
+      `\ud83d\udcf8 Por favor env\u00eda una <b>foto de evidencia</b> o presiona \"Resolver sin foto\":`,
+      { inline_keyboard: [
+        [{ text: "\u23ed\ufe0f Resolver sin foto", callback_data: "collab_resolve_skip_photo" }],
+        [{ text: "\u274c Cancelar", callback_data: "collab_menu" }],
+      ]}
+    );
+    return;
+  }
+
+  // ---- RESOLUCIÓN DE NOTA: NOTAS ----
+  if (conv.step === "waiting_resolve_notes") {
+    if (text) {
+      conv.data.resolveNotes = text;
+    }
+    await resolveNote(botToken, chatId, conv);
     return;
   }
 
@@ -1053,7 +1158,18 @@ async function showNoteDetail(botToken: string, chatId: string, noteId: number, 
   }
 
   const buttons: any[] = [];
-  if ((note as any).status !== "resuelta" && (note as any).status !== "descartada") {
+  const noteStatus = (note as any).status;
+  if (noteStatus !== "resuelta" && noteStatus !== "descartada") {
+    // Botones de cambio de estado según estado actual
+    if (noteStatus === "abierta") {
+      buttons.push([{ text: "🔄 Poner en proceso", callback_data: `collab_note_progress_${noteId}` }]);
+      buttons.push([{ text: "🔍 Poner en revisión", callback_data: `collab_note_review_${noteId}` }]);
+    } else if (noteStatus === "en_progreso") {
+      buttons.push([{ text: "🔍 Poner en revisión", callback_data: `collab_note_review_${noteId}` }]);
+    }
+    if (noteStatus === "abierta" || noteStatus === "en_progreso" || noteStatus === "en_revision") {
+      buttons.push([{ text: "✅ Resolver con evidencia", callback_data: `collab_note_resolve_${noteId}` }]);
+    }
     buttons.push([{ text: "📸 Agregar foto de seguimiento", callback_data: `collab_addphoto_${noteId}` }]);
   }
   buttons.push([{ text: "🔍 Notas abiertas", callback_data: "collab_open_notes" }]);
@@ -1087,6 +1203,130 @@ async function showNoteDetail(botToken: string, chatId: string, noteId: number, 
   }
 
   await sendMessage(botToken, chatId, msg, { inline_keyboard: buttons });
+}
+
+// ============================================================
+// Gestión de estado de notas de campo
+// ============================================================
+async function changeNoteStatus(botToken: string, chatId: string, noteId: number, newStatus: string, collab: any) {
+  try {
+    const db = await getDb();
+    const [note] = await db.select().from(fieldNotes).where(eq(fieldNotes.id, noteId));
+    if (!note) {
+      await sendMessage(botToken, chatId, "❌ Nota no encontrada.", { inline_keyboard: [[{ text: "🏠 Menú", callback_data: "collab_menu" }]] });
+      return;
+    }
+
+    // Actualizar estado en la DB
+    await db.update(fieldNotes).set({
+      status: newStatus as any,
+    }).where(eq(fieldNotes.id, noteId));
+
+    const statusLabels: Record<string, { label: string; emoji: string }> = {
+      en_progreso: { label: "En proceso", emoji: "🔨" },
+      en_revision: { label: "En revisión", emoji: "🔍" },
+    };
+    const statusInfo = statusLabels[newStatus] || { label: newStatus, emoji: "📋" };
+
+    // Confirmar al colaborador
+    await sendMessage(botToken, chatId,
+      `${statusInfo.emoji} <b>Estado actualizado</b>\n\n` +
+      `La nota <b>${(note as any).folio}</b> ahora está <b>${statusInfo.label}</b>.\n\n` +
+      `Se notificará al equipo de este cambio.`,
+      { inline_keyboard: [
+        [{ text: "🔍 Ver nota", callback_data: `collab_note_${noteId}` }],
+        [{ text: "🔍 Notas abiertas", callback_data: "collab_open_notes" }],
+        [{ text: "🏠 Menú principal", callback_data: "collab_menu" }],
+      ]}
+    );
+
+    // Notificar al creador de la nota y al grupo usando la función del bot principal
+    try {
+      const { notifyNoteStatusChange } = await import("./telegramFieldNotesBot");
+      await notifyNoteStatusChange(noteId, newStatus, `${collab.name} (colaborador)`);
+      console.log(`[Collab Bot] Notificación enviada: nota ${(note as any).folio} → ${newStatus} por ${collab.name}`);
+    } catch (err) {
+      console.error("[Collab Bot] Error notificando cambio de estado:", err);
+    }
+
+  } catch (error) {
+    console.error("[Collab Bot] Error cambiando estado de nota:", error);
+    await sendMessage(botToken, chatId,
+      `❌ <b>Error al actualizar el estado</b>\n\nPor favor intenta de nuevo.`,
+      { inline_keyboard: [[{ text: "🏠 Menú", callback_data: "collab_menu" }]] }
+    );
+  }
+}
+
+async function resolveNote(botToken: string, chatId: string, conv: CollabConversation) {
+  try {
+    const db = await getDb();
+    const noteId = conv.data.noteId;
+    const [note] = await db.select().from(fieldNotes).where(eq(fieldNotes.id, noteId));
+    if (!note) {
+      collabConversations.delete(chatId);
+      await sendMessage(botToken, chatId, "❌ Nota no encontrada.", { inline_keyboard: [[{ text: "🏠 Menú", callback_data: "collab_menu" }]] });
+      return;
+    }
+
+    const collab = await getCollaboratorByChatId(chatId);
+
+    // Guardar foto de resolución si existe
+    if (conv.data.resolvePhotoBuffer) {
+      const dir = `/app/photos/field-notes/${(note as any).folio}`;
+      fs.mkdirSync(dir, { recursive: true });
+      const filename = `resolucion-${Date.now()}.jpg`;
+      const filepath = path.join(dir, filename);
+      fs.writeFileSync(filepath, conv.data.resolvePhotoBuffer);
+      await db.insert(fieldNotePhotos).values({
+        fieldNoteId: noteId,
+        photoPath: filepath,
+        stage: "resolucion" as any,
+        uploadedByUserId: 0,
+        caption: conv.data.resolveNotes || null,
+      });
+    }
+
+    // Actualizar la nota como resuelta
+    await db.update(fieldNotes).set({
+      status: "resuelta" as any,
+      resolutionNotes: conv.data.resolveNotes || `Resuelto por ${collab?.name || "colaborador"}`,
+      resolvedByUserId: 0, // 0 = resuelto por colaborador
+      resolvedAt: new Date(),
+    }).where(eq(fieldNotes.id, noteId));
+
+    collabConversations.delete(chatId);
+
+    await sendMessage(botToken, chatId,
+      `✅ <b>¡Nota resuelta!</b> 🎉\n\n` +
+      `La nota <b>${(note as any).folio}</b> ha sido marcada como resuelta` +
+      (conv.data.resolvePhotoBuffer ? ` con foto de evidencia` : ``) +
+      (conv.data.resolveNotes ? ` y notas de resolución` : ``) +
+      `.\n\n` +
+      `Se notificará a quien levantó la nota y al equipo. ¡Excelente trabajo! 🙏`,
+      { inline_keyboard: [
+        [{ text: "🔍 Notas abiertas", callback_data: "collab_open_notes" }],
+        [{ text: "🏠 Menú principal", callback_data: "collab_menu" }],
+      ]}
+    );
+
+    // Notificar al creador de la nota y al grupo
+    try {
+      const { notifyNoteStatusChange } = await import("./telegramFieldNotesBot");
+      await notifyNoteStatusChange(noteId, "resuelta", `${collab?.name || "Colaborador"} (colaborador)`);
+      console.log(`[Collab Bot] Nota ${(note as any).folio} resuelta por ${collab?.name}. Notificaciones enviadas.`);
+    } catch (err) {
+      console.error("[Collab Bot] Error notificando resolución:", err);
+    }
+
+  } catch (error) {
+    console.error("[Collab Bot] Error resolviendo nota:", error);
+    collabConversations.delete(chatId);
+    await sendMessage(botToken, chatId,
+      `❌ <b>Error al resolver la nota</b>\n\nPor favor intenta de nuevo.`,
+      { inline_keyboard: [[{ text: "🏠 Menú", callback_data: "collab_menu" }]] }
+    );
+  }
 }
 
 // ============================================================
