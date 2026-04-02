@@ -203,7 +203,7 @@ function FieldNotebookContent() {
     setFormData({
       activityType: activity.activityType, activitySubtype: activity.activitySubtype || "",
       description: activity.description || "",
-      activityDate: activity.activityDate, startTime: activity.startTime || "",
+      activityDate: activity.activityDate instanceof Date ? activity.activityDate.toISOString().split("T")[0] : (typeof activity.activityDate === "string" ? activity.activityDate : String(activity.activityDate || "")), startTime: activity.startTime || "",
       endTime: activity.endTime || "", durationMinutes: activity.durationMinutes || undefined,
       weatherCondition: activity.weatherCondition || "", temperature: activity.temperature || "",
       status: activity.status, parcelIds: activity.parcels?.map((p: any) => p.id) || [],
@@ -801,7 +801,7 @@ function FieldNotebookContent() {
                         <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 flex-wrap">
                           <span className="flex items-center gap-1">
                             <Calendar className="w-3 h-3" />
-                            {new Date(activity.activityDate + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" })}
+                            {(() => { const d = activity.activityDate instanceof Date ? activity.activityDate : new Date(String(activity.activityDate) + "T12:00:00"); return d.toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" }); })()}
                           </span>
                           {activity.assignments?.length > 0 && (
                             <span className="flex items-center gap-1"><UsersRound className="w-3 h-3" />{activity.assignments.map((a: any) => a.name).join(", ")}</span>

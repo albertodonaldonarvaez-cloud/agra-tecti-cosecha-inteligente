@@ -502,7 +502,7 @@ function CollaboratorCard({
                     <div key={a.id} className={`flex items-center gap-3 p-2.5 rounded-xl border bg-white/50 ${a.status === "completada" || a.status === "cancelada" ? "opacity-60" : ""}`}>
                       <div className="flex-1 min-w-0">
                         <div className="text-xs font-medium text-gray-800 truncate">
-                          {a.activity?.activityType || "—"} — {a.activity?.activityDate || "—"}
+                          {a.activity?.activityType || "—"} — {a.activity?.activityDate ? new Date(a.activity.activityDate).toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" }) : "—"}
                         </div>
                         <div className="text-[10px] text-gray-500 truncate mt-0.5">
                           {a.parcelNames?.join(", ") || "Sin parcela"}
