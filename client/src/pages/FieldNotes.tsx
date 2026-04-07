@@ -16,7 +16,7 @@ import {
 // ===== CONSTANTES =====
 
 const CATEGORIES = [
-  { value: "arboles_mal_plantados", label: "Arboles mal plantados", icon: TreePine, color: "text-green-600 bg-green-100/80", iconBg: "bg-green-200" },
+  { value: "arboles_mal_plantados", label: "Árbol en mal estado / Falta árbol", icon: TreePine, color: "text-green-600 bg-green-100/80", iconBg: "bg-green-200" },
   { value: "plaga_enfermedad", label: "Plaga / Enfermedad", icon: Bug, color: "text-red-600 bg-red-100/80", iconBg: "bg-red-200" },
   { value: "riego_drenaje", label: "Riego / Drenaje", icon: Droplets, color: "text-blue-600 bg-blue-100/80", iconBg: "bg-blue-200" },
   { value: "dano_mecanico", label: "Dano mecanico", icon: Wrench, color: "text-orange-600 bg-orange-100/80", iconBg: "bg-orange-200" },

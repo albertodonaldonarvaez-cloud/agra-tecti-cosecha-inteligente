@@ -32,7 +32,7 @@ let isPolling = false;
 let pollTimer: NodeJS.Timeout | null = null;
 
 const CATEGORIES: Record<string, { label: string; emoji: string }> = {
-  arboles_mal_plantados: { label: "Árboles mal plantados", emoji: "🌳" },
+  arboles_mal_plantados: { label: "Árbol en mal estado / Falta árbol", emoji: "🌳" },
   plaga_enfermedad: { label: "Plaga/Enfermedad", emoji: "🐛" },
   riego_drenaje: { label: "Riego/Drenaje", emoji: "💧" },
   dano_mecanico: { label: "Daño mecánico", emoji: "🔧" },
