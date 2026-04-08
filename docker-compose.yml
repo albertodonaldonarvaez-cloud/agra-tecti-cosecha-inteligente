@@ -4,6 +4,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-latest}
     container_name: agratec-dashboard
     restart: unless-stopped
     ports:
@@ -14,6 +16,7 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - VITE_APP_TITLE=${VITE_APP_TITLE}
       - VITE_APP_LOGO=${VITE_APP_LOGO}
+      - APP_VERSION=${APP_VERSION:-latest}
     extra_hosts:
       - "smart-harvest.tecti-cloud.com:172.16.3.3"
       - "kf.smart-harvest.tecti-cloud.com:172.16.3.3"
@@ -27,6 +30,15 @@ services:
     volumes:
       - ./data:/app/data
       - ./photos:/app/photos
+    # Graceful shutdown: esperar 20s antes de SIGKILL
+    stop_grace_period: 20s
+    # Health check mejorado apuntando al endpoint /api/health
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
 
   # Base de datos MySQL/TiDB
   db:

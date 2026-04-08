@@ -10,6 +10,9 @@ import { appRouter } from "../routers";
 import { createContext } from "./authContext";
 import { serveStatic, setupVite } from "./vite";
 
+const APP_VERSION = process.env.APP_VERSION || "dev";
+const startedAt = new Date();
+
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
     const server = net.createServer();
@@ -42,6 +45,34 @@ async function startServer() {
   const upload = multer({ 
     dest: "/tmp/uploads/",
     limits: { fileSize: 50 * 1024 * 1024 } // 50MB
+  });
+
+  // ============================================
+  // HEALTH CHECK — Usado por Docker, Nginx, y CI/CD para verificar que el servidor está vivo
+  // ============================================
+  app.get("/api/health", async (_req, res) => {
+    try {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      const dbConnected = db !== null;
+
+      res.json({
+        status: "ok",
+        version: APP_VERSION,
+        uptime: Math.floor(process.uptime()),
+        startedAt: startedAt.toISOString(),
+        database: dbConnected ? "connected" : "disconnected",
+        environment: process.env.NODE_ENV || "unknown",
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error: any) {
+      res.status(503).json({
+        status: "error",
+        version: APP_VERSION,
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      });
+    }
   });
   
   // File upload endpoint
@@ -113,7 +144,7 @@ async function startServer() {
   }
 
   server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
+    console.log(`🚀 Server v${APP_VERSION} running on http://localhost:${port}/`);
     
     // Iniciar sincronización automática de KoboToolbox
     // Se ejecuta 2 veces al día: 7:00 AM y 6:00 PM hora del servidor
@@ -147,6 +178,29 @@ async function startServer() {
       console.error("Error al iniciar TelegramFieldNotesBot:", err);
     });
   });
+
+  // ============================================
+  // GRACEFUL SHUTDOWN — Permite a Docker cerrar el servidor limpiamente
+  // durante rolling updates, sin cortar peticiones en vuelo
+  // ============================================
+  const shutdown = (signal: string) => {
+    console.log(`\n🛑 ${signal} recibido. Cerrando servidor gracefully...`);
+    
+    // Dejar de aceptar nuevas conexiones
+    server.close(() => {
+      console.log("✅ Servidor HTTP cerrado limpiamente");
+      process.exit(0);
+    });
+
+    // Si después de 15 segundos no cierra, forzar salida
+    setTimeout(() => {
+      console.error("⚠️ Forzando cierre después de 15s de timeout");
+      process.exit(1);
+    }, 15000).unref();
+  };
+
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 startServer().catch(console.error);

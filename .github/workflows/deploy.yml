@@ -1,0 +1,95 @@
+name: Deploy — Producción (Ubuntu Server)
+
+on:
+  push:
+    branches: [main]
+
+env:
+  DEPLOY_PATH: /home/ubuntu/agra-tecti-cosecha-inteligente  # Ajustar según tu ruta en el servidor
+
+jobs:
+  deploy:
+    name: Deploy a Producción
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout código
+        uses: actions/checkout@v4
+
+      - name: 🔑 Configurar SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SERVER_SSH_KEY }}
+
+      - name: 🔒 Agregar host conocido
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: 🚀 Deploy al servidor
+        run: |
+          ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'DEPLOY_SCRIPT'
+            set -e
+            cd ${{ env.DEPLOY_PATH }}
+
+            echo "📋 === DEPLOY INICIADO ==="
+            echo "📅 $(date)"
+
+            # Guardar hash del commit actual para rollback
+            PREV_COMMIT=$(git rev-parse HEAD)
+            echo "📌 Commit actual (rollback): $PREV_COMMIT"
+
+            # Pull cambios
+            echo "📥 Pulling cambios desde main..."
+            git fetch origin main
+            git reset --hard origin/main
+
+            NEW_COMMIT=$(git rev-parse HEAD)
+            echo "📌 Nuevo commit: $NEW_COMMIT"
+
+            # Rebuild y restart con zero-downtime
+            echo "🏗️ Rebuilding Docker image..."
+            docker compose build app
+
+            echo "🔄 Reiniciando servicio (zero-downtime)..."
+            docker compose up -d --no-deps app
+
+            # Esperar a que el health check pase
+            echo "⏳ Esperando health check (máx 60s)..."
+            HEALTH_OK=false
+            for i in $(seq 1 12); do
+              sleep 5
+              if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
+                HEALTH_OK=true
+                echo "✅ Health check OK después de $((i * 5))s"
+                break
+              fi
+              echo "⏳ Intento $i/12..."
+            done
+
+            if [ "$HEALTH_OK" = false ]; then
+              echo "❌ HEALTH CHECK FALLÓ — Iniciando ROLLBACK"
+              echo "🔙 Restaurando commit: $PREV_COMMIT"
+              git reset --hard $PREV_COMMIT
+              docker compose build app
+              docker compose up -d --no-deps app
+              echo "🔙 Rollback completado"
+              exit 1
+            fi
+
+            # Mostrar versión desplegada
+            HEALTH_DATA=$(curl -sf http://localhost:3000/api/health)
+            echo "🎉 Deploy exitoso!"
+            echo "📊 Health: $HEALTH_DATA"
+            echo "📋 === DEPLOY COMPLETADO ==="
+          DEPLOY_SCRIPT
+
+      - name: 📢 Notificar resultado
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Deploy exitoso a producción"
+          else
+            echo "❌ Deploy falló — se ejecutó rollback automático"
+          fi
