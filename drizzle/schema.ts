@@ -310,7 +310,7 @@ export const fieldActivities = mysqlTable("fieldActivities", {
   durationMinutes: int("durationMinutes"),
   weatherCondition: varchar("weatherCondition", { length: 128 }),
   temperature: varchar("temperature", { length: 16 }),
-  status: mysqlEnum("status", ["planificada", "en_progreso", "completada", "cancelada"]).default("completada").notNull(),
+  status: mysqlEnum("status", ["planificada", "en_progreso", "completada", "cancelada"]).default("planificada").notNull(),
   createdByUserId: int("createdByUserId").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

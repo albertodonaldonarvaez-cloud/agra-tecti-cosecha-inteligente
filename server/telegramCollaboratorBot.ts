@@ -3,6 +3,7 @@ import { collaborators, collaboratorLinkCodes, fieldActivityAssignments, fieldAc
 import { eq, and, gt, desc, inArray, sql, or } from "drizzle-orm";
 import * as fs from "fs";
 import * as path from "path";
+import * as dbExt from "./db_extended";
 
 // ============================================================
 // Bot de Telegram para Colaboradores de Campo
@@ -60,6 +61,45 @@ const STATUS_LABELS: Record<string, { label: string; emoji: string }> = {
   completada: { label: "Completada", emoji: "✅" },
   cancelada: { label: "Cancelada", emoji: "❌" },
 };
+
+// ============================================================
+// Helpers de formato
+// ============================================================
+function formatDateNice(dateValue: any): string {
+  try {
+    const d = dateValue instanceof Date ? dateValue : new Date(dateValue + "T12:00:00");
+    return d.toLocaleDateString("es-MX", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  } catch {
+    return String(dateValue || "—");
+  }
+}
+
+async function getWeatherForActivity(activityDate: any): Promise<string> {
+  try {
+    const { getCurrentWeather, getWeatherForDate } = await import("./weatherService");
+    const locationConfig = await dbExt.getLocationConfig();
+    if (!locationConfig) return "";
+    
+    const dateStr = activityDate instanceof Date ? activityDate.toISOString().split("T")[0] : String(activityDate);
+    const today = new Date().toISOString().split("T")[0];
+    
+    if (dateStr === today) {
+      const current = await getCurrentWeather(locationConfig.latitude, locationConfig.longitude, locationConfig.timezone);
+      if (current) {
+        return `\n\n☀️ <b>Clima:</b> ${current.conditionText}, ${Math.round(current.temperature)}°C` +
+          `\n💧 Humedad: ${current.humidity}% | 🌬️ Viento: ${current.windSpeed} km/h`;
+      }
+    } else {
+      const weather = await getWeatherForDate(locationConfig.latitude, locationConfig.longitude, dateStr, locationConfig.timezone);
+      if (weather) {
+        return `\n\n🌤️ <b>Clima previsto:</b> ${weather.temperatureMin.toFixed(0)}°C - ${weather.temperatureMax.toFixed(0)}°C (promedio ${weather.temperatureMean.toFixed(0)}°C)`;
+      }
+    }
+  } catch (err) {
+    console.error("[Collab Bot] Error obteniendo clima:", err);
+  }
+  return "";
+}
 
 // ============================================================
 // Funciones de API de Telegram
@@ -792,9 +832,10 @@ async function showTasks(botToken: string, chatId: string, collaboratorId: numbe
     const typeInfo = ACTIVITY_TYPES[activity.activityType] || { emoji: "📋", label: activity.activityType };
     const statusInfo = STATUS_LABELS[a.status] || { emoji: "❓", label: a.status };
     msg += `${statusInfo.emoji} <b>${typeInfo.emoji} ${typeInfo.label}</b>\n`;
-    msg += `   📅 ${activity.activityDate}\n`;
+    msg += `   📅 ${formatDateNice(activity.activityDate)}\n`;
     msg += `   ${activity.description.substring(0, 60)}${activity.description.length > 60 ? "..." : ""}\n\n`;
-    buttons.push([{ text: `${statusInfo.emoji} ${typeInfo.label} — ${activity.activityDate}`, callback_data: `collab_task_${a.id}` }]);
+    const shortDate = activity.activityDate instanceof Date ? activity.activityDate.toLocaleDateString("es-MX", { day: "2-digit", month: "short" }) : String(activity.activityDate).substring(5);
+    buttons.push([{ text: `${statusInfo.emoji} ${typeInfo.label} — ${shortDate}`, callback_data: `collab_task_${a.id}` }]);
   }
 
   buttons.push([{ text: "🏠 Menú principal", callback_data: "collab_menu" }]);
@@ -827,11 +868,15 @@ async function showTaskDetail(botToken: string, chatId: string, assignmentId: nu
   const typeInfo = ACTIVITY_TYPES[activity.activityType] || { emoji: "📋", label: activity.activityType };
   const statusInfo = STATUS_LABELS[assignment.status] || { emoji: "❓", label: assignment.status };
 
+  // Obtener clima
+  const weatherInfo = await getWeatherForActivity(activity.activityDate);
+
   let msg = `${typeInfo.emoji} <b>${typeInfo.label}</b>\n\n`;
-  msg += `📅 <b>Fecha:</b> ${activity.activityDate}\n`;
+  msg += `📅 <b>Fecha:</b> ${formatDateNice(activity.activityDate)}\n`;
   msg += `⏰ <b>Horario:</b> ${activity.startTime || "—"} a ${activity.endTime || "—"}\n`;
   msg += `🗺️ <b>Parcelas:</b> ${parcelNames}\n`;
-  msg += `📊 <b>Estado:</b> ${statusInfo.emoji} ${statusInfo.label}\n\n`;
+  msg += `📊 <b>Estado:</b> ${statusInfo.emoji} ${statusInfo.label}\n`;
+  msg += weatherInfo + `\n\n`;
   msg += `📝 <b>Descripción:</b>\n${activity.description}\n`;
 
   if (activity.weatherCondition) {
@@ -1387,12 +1432,16 @@ export async function notifyCollaboratorNewTask(collaboratorId: number, activity
     eq(fieldActivityAssignments.collaboratorId, collaboratorId),
   ));
 
+  // Obtener clima para la fecha de la tarea
+  const weatherInfo = await getWeatherForActivity(activity.activityDate);
+
   await sendMessage(botToken, collab.telegramChatId,
     `🔔 <b>¡Nueva tarea asignada!</b>\n\n` +
     `${typeInfo.emoji} <b>${typeInfo.label}</b>\n\n` +
-    `📅 <b>Fecha:</b> ${activity.activityDate}\n` +
+    `📅 <b>Fecha:</b> ${formatDateNice(activity.activityDate)}\n` +
     `⏰ <b>Horario:</b> ${activity.startTime || "—"} a ${activity.endTime || "—"}\n` +
-    `🗺️ <b>Parcelas:</b> ${parcelNames}\n\n` +
+    `🗺️ <b>Parcelas:</b> ${parcelNames}` +
+    weatherInfo + `\n\n` +
     `📝 ${activity.description}\n\n` +
     `Presiona "Ver tarea" para más detalles.`,
     { inline_keyboard: [
@@ -1424,7 +1473,7 @@ async function notifyGroupTaskCompleted(assignmentId: number) {
   await sendMessage(botToken, config.chatId,
     `✅ <b>Tarea completada</b>\n\n` +
     `${typeInfo.emoji} <b>${typeInfo.label}</b>\n` +
-    `📅 ${activity.activityDate}\n` +
+    `📅 ${formatDateNice(activity.activityDate)}\n` +
     `👷 <b>Completada por:</b> ${collab?.name || "Colaborador"}\n` +
     (assignment.evidenceNotes ? `📝 ${assignment.evidenceNotes}\n` : ``) +
     `\n📝 ${activity.description.substring(0, 100)}`,

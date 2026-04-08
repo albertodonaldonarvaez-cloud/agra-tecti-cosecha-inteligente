@@ -1081,6 +1081,47 @@ export const appRouter = router({
   }),
 
   weather: router({
+    // Obtener clima para una fecha específica (histórico, actual o pronóstico)
+    getForDate: protectedProcedure
+      .input(z.object({ date: z.string() }))
+      .query(async ({ input }) => {
+        const { getWeatherForDate, getCurrentWeather } = await import("./weatherService");
+        const locationConfig = await dbExt.getLocationConfig();
+        if (!locationConfig) throw new Error("Configuración de ubicación no encontrada.");
+        
+        const today = new Date().toISOString().split("T")[0];
+        
+        // Si es hoy, usar getCurrentWeather para datos en tiempo real
+        if (input.date === today) {
+          const current = await getCurrentWeather(locationConfig.latitude, locationConfig.longitude, locationConfig.timezone);
+          if (current) {
+            return {
+              date: today,
+              conditionText: current.conditionText,
+              temperature: Math.round(current.temperature),
+              humidity: current.humidity,
+              windSpeed: current.windSpeed,
+              precipitation: current.precipitation,
+              isRealtime: true,
+            };
+          }
+        }
+        
+        // Para otras fechas, usar getWeatherForDate (histórico o pronóstico)
+        const weather = await getWeatherForDate(locationConfig.latitude, locationConfig.longitude, input.date, locationConfig.timezone);
+        if (weather) {
+          return {
+            date: weather.date,
+            conditionText: `Temp: ${weather.temperatureMin.toFixed(0)}°C - ${weather.temperatureMax.toFixed(0)}°C`,
+            temperature: Math.round(weather.temperatureMean),
+            temperatureMax: weather.temperatureMax,
+            temperatureMin: weather.temperatureMin,
+            isRealtime: false,
+          };
+        }
+        return null;
+      }),
+
     getForDateRange: protectedProcedure
       .input(z.object({
         startDate: z.string(),
@@ -1697,7 +1738,7 @@ export const appRouter = router({
           durationMinutes: duration || null,
           weatherCondition: input.weatherCondition || null,
           temperature: input.temperature || null,
-          status: (input.status as any) || "completada",
+          status: (input.status as any) || "planificada",
           createdByUserId: userId,
         });
 

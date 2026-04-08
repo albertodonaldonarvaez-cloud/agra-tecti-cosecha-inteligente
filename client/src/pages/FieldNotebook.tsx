@@ -130,7 +130,7 @@ function FieldNotebookContent() {
     durationMinutes: undefined as number | undefined,
     weatherCondition: "",
     temperature: "",
-    status: "completada",
+    status: "planificada",
     parcelIds: [] as number[],
     collaboratorIds: [] as number[],
   });
@@ -170,22 +170,40 @@ function FieldNotebookContent() {
   });
   const addMovementMutation = trpc.warehouse.addMovement.useMutation();
 
-  // Auto-llenar clima cuando se abre el formulario
+  // Auto-llenar clima cuando se abre el formulario o cambia la fecha
+  const weatherForDateQuery = trpc.weather.getForDate.useQuery(
+    { date: formData.activityDate },
+    { enabled: showForm && !!formData.activityDate, staleTime: 300_000, retry: false }
+  );
+
   useEffect(() => {
-    if (showForm && !editingId && currentWeather && !formData.weatherCondition && !formData.temperature) {
-      const today = new Date().toISOString().split("T")[0];
-      if (formData.activityDate === today) {
-        const w = currentWeather as any;
-        const condition = w.description || w.weatherDescription || w.condition || "";
-        const temp = w.temperature ?? w.temp ?? "";
-        setFormData(prev => ({
-          ...prev,
-          weatherCondition: condition ? String(condition) : prev.weatherCondition,
-          temperature: temp !== "" ? `${temp}°C` : prev.temperature,
-        }));
-      }
+    if (!showForm || editingId) return;
+    const today = new Date().toISOString().split("T")[0];
+    
+    if (formData.activityDate === today && currentWeather) {
+      // Para hoy: usar clima actual (más preciso)
+      const w = currentWeather as any;
+      const condition = w.conditionText || w.description || w.weatherDescription || w.condition || "";
+      const temp = w.temperature ?? w.temp ?? "";
+      setFormData(prev => ({
+        ...prev,
+        weatherCondition: condition ? String(condition) : prev.weatherCondition,
+        temperature: temp !== "" ? `${Math.round(Number(temp))}°C` : prev.temperature,
+      }));
+    } else if (weatherForDateQuery.data) {
+      // Para otra fecha: usar pronóstico/histórico
+      const w = weatherForDateQuery.data as any;
+      const condition = w.conditionText || w.condition || "";
+      const tempMin = w.temperatureMin ?? w.tempMin;
+      const tempMax = w.temperatureMax ?? w.tempMax;
+      const tempMean = w.temperatureMean ?? w.tempMean;
+      setFormData(prev => ({
+        ...prev,
+        weatherCondition: condition ? String(condition) : prev.weatherCondition,
+        temperature: tempMean !== undefined ? `${Math.round(Number(tempMean))}°C (${Math.round(Number(tempMin))}° - ${Math.round(Number(tempMax))}°)` : prev.temperature,
+      }));
     }
-  }, [showForm, editingId, currentWeather]);
+  }, [showForm, editingId, currentWeather, formData.activityDate, weatherForDateQuery.data]);
 
   const resetForm = useCallback(() => {
     setShowForm(false);
@@ -193,7 +211,7 @@ function FieldNotebookContent() {
     setFormData({
       activityType: "riego", activitySubtype: "", description: "",
       activityDate: new Date().toISOString().split("T")[0], startTime: "", endTime: "",
-      durationMinutes: undefined, weatherCondition: "", temperature: "", status: "completada", parcelIds: [], collaboratorIds: [],
+      durationMinutes: undefined, weatherCondition: "", temperature: "", status: "planificada", parcelIds: [], collaboratorIds: [],
     });
     setFormProducts([]);
     setFormTools([]);
@@ -526,11 +544,15 @@ function FieldNotebookContent() {
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Condiciones Climáticas</label>
-                  {currentWeather && (
-                    <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full flex items-center gap-1">
-                      <CloudSun className="w-3 h-3" /> Auto-llenado del sistema
+                  {weatherForDateQuery.isLoading ? (
+                    <span className="text-[10px] bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse">
+                      <CloudSun className="w-3 h-3" /> Obteniendo clima...
                     </span>
-                  )}
+                  ) : (formData.weatherCondition || formData.temperature) ? (
+                    <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <CloudSun className="w-3 h-3" /> Clima real para {formData.activityDate}
+                    </span>
+                  ) : null}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="relative">
