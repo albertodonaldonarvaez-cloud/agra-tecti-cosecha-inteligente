@@ -172,7 +172,9 @@ async function getCollaboratorByChatId(chatId: string): Promise<any> {
 async function getActiveParcels(): Promise<any[]> {
   try {
     const db = await getDb();
-    return await db.select().from(parcels).where(eq(parcels.isActive, true));
+    // Solo parcelas activas que tengan polígono definido (no null, no vacío, no '[]')
+    const result = await db.select().from(parcels).where(eq(parcels.isActive, true));
+    return result.filter((p: any) => p.polygon && p.polygon !== '' && p.polygon !== '[]');
   } catch { return []; }
 }
 

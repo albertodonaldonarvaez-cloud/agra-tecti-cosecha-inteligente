@@ -139,10 +139,11 @@ async function getUserByChatId(chatId: string): Promise<any> {
 async function getActiveParcels(): Promise<any[]> {
   const db = await getDb();
   if (!db) return [];
-  const result = await db.select({ id: parcels.id, name: parcels.name, code: parcels.code })
+  // Solo parcelas que tengan polígono definido (no null, no vacío, no '[]')
+  const result = await db.select({ id: parcels.id, name: parcels.name, code: parcels.code, polygon: parcels.polygon })
     .from(parcels)
     .where(and(isNotNull(parcels.polygon)));
-  return result.filter((p: any) => p.name);
+  return result.filter((p: any) => p.name && p.polygon && p.polygon !== '' && p.polygon !== '[]');
 }
 
 async function generateFolio(): Promise<string> {

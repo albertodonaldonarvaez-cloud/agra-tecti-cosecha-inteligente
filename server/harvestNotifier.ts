@@ -109,7 +109,7 @@ async function getYesterdayHarvest(): Promise<{ totals: ParcelHarvestSummary; pa
   const yesterday = getYesterdayMexico();
 
   try {
-    // Obtener resumen por parcela del día anterior
+    // Obtener resumen por parcela del día anterior (solo parcelas con polígono definido)
     const result = await db.execute(sql`
       SELECT 
         b.parcelCode,
@@ -122,6 +122,7 @@ async function getYesterdayHarvest(): Promise<{ totals: ParcelHarvestSummary; pa
       FROM boxes b
       LEFT JOIN parcels p ON p.code = b.parcelCode
       WHERE DATE(b.submissionTime) = ${yesterday} AND b.archived = 0
+        AND p.polygon IS NOT NULL AND p.polygon != '' AND p.polygon != '[]'
       GROUP BY b.parcelCode, p.name, b.parcelName
       ORDER BY totalWeight DESC
     `);
