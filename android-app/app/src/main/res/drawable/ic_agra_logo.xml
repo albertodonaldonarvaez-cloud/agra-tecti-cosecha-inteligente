@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Vector logo placeholder - the actual PNG will be used via BitmapFactory -->
+<!-- This serves as a simple leaf icon fallback for ic_launcher -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Green circle background -->
+    <path
+        android:fillColor="#16a34a"
+        android:pathData="M54,54m-40,0a40,40 0,1 1,80 0a40,40 0,1 1,-80 0" />
+    <!-- Leaf shape -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,28c-14,0 -24,10 -24,26c0,16 10,26 24,26c4,0 8,-1 11,-3c-2,-4 -3,-9 -3,-14c0,-10 5,-18 13,-23c-4,-7 -12,-12 -21,-12z" />
+    <!-- Tech dots -->
+    <path
+        android:fillColor="#22c55e"
+        android:pathData="M68,42m-3,0a3,3 0,1 1,6 0a3,3 0,1 1,-6 0" />
+    <path
+        android:fillColor="#22c55e"
+        android:pathData="M76,50m-3,0a3,3 0,1 1,6 0a3,3 0,1 1,-6 0" />
+    <path
+        android:fillColor="#22c55e"
+        android:pathData="M72,58m-2,0a2,2 0,1 1,4 0a2,2 0,1 1,-4 0" />
+</vector>

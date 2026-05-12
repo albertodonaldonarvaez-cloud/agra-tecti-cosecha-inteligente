@@ -4,92 +4,91 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Agriculture
-import androidx.compose.material3.*
+import androidx.compose.animation.*
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
+import com.agratec.fieldapp.data.remote.RetrofitClient
+import com.agratec.fieldapp.data.repository.AuthRepository
+import com.agratec.fieldapp.ui.screens.CreateNoteScreen
+import com.agratec.fieldapp.ui.screens.LoginScreen
+import com.agratec.fieldapp.ui.screens.NotesListScreen
+import com.agratec.fieldapp.ui.theme.AgraFieldTheme
+import com.agratec.fieldapp.ui.theme.DarkBg1
 
 /**
- * Activity principal de la aplicación.
- * Scaffold básico — aquí se extenderá con NavigationHost,
- * pantalla de login, lista de notas, y formulario de creación.
+ * Activity principal con navegación simple entre:
+ * - Login → Notas → Crear Nota
  *
- * Este archivo es un placeholder funcional para que el proyecto
- * compile y se pueda probar la estructura base en Android Studio.
+ * Usa navegación basada en estado (sin Navigation Component)
+ * para mantener la simplicidad del scaffolding.
  */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MaterialTheme(
-                colorScheme = darkColorScheme()
-            ) {
+            AgraFieldTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background,
+                    color = DarkBg1,
                 ) {
-                    PlaceholderScreen()
+                    AppNavigation()
                 }
             }
         }
     }
 }
 
+enum class Screen { Login, NotesList, CreateNote }
+
 @Composable
-fun PlaceholderScreen() {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Icon(
-            imageVector = Icons.Default.Agriculture,
-            contentDescription = null,
-            modifier = Modifier.size(80.dp),
-            tint = MaterialTheme.colorScheme.primary,
+fun AppNavigation() {
+    val context = LocalContext.current
+    val authRepository = remember { AuthRepository(context) }
+
+    // Start at login or notes based on saved session
+    var currentScreen by remember {
+        mutableStateOf(
+            if (authRepository.isLoggedIn()) Screen.NotesList else Screen.Login
         )
-        Spacer(modifier = Modifier.height(24.dp))
-        Text(
-            text = "Agra Field App",
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "Notas de Campo — Offline First",
-            fontSize = 16.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.height(32.dp))
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            )
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "✅ Scaffolding completado",
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    "• Room DB configurada\n• Retrofit + tRPC listo\n• SyncWorker programado\n• Auth con Bearer token",
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+    }
+
+    AnimatedContent(
+        targetState = currentScreen,
+        transitionSpec = {
+            when (targetState) {
+                Screen.Login -> fadeIn() togetherWith fadeOut()
+                Screen.CreateNote -> slideInHorizontally { it } + fadeIn() togetherWith
+                        slideOutHorizontally { -it / 3 } + fadeOut()
+                Screen.NotesList -> {
+                    if (initialState == Screen.CreateNote) {
+                        slideInHorizontally { -it / 3 } + fadeIn() togetherWith
+                                slideOutHorizontally { it } + fadeOut()
+                    } else {
+                        fadeIn() togetherWith fadeOut()
+                    }
+                }
             }
+        },
+        label = "screenTransition",
+    ) { screen ->
+        when (screen) {
+            Screen.Login -> LoginScreen(
+                onLoginSuccess = { currentScreen = Screen.NotesList }
+            )
+            Screen.NotesList -> NotesListScreen(
+                onCreateNote = { currentScreen = Screen.CreateNote },
+                onLogout = {
+                    authRepository.logout()
+                    currentScreen = Screen.Login
+                },
+            )
+            Screen.CreateNote -> CreateNoteScreen(
+                onBack = { currentScreen = Screen.NotesList }
+            )
         }
     }
 }

@@ -19,7 +19,7 @@ android {
 
         // URL base del servidor — cambiar según entorno
         // Para desarrollo local: usar la IP de tu máquina (NO localhost/10.0.2.2)
-        buildConfigField("String", "BASE_URL", "\"https://smart-harvest.tecti-cloud.com\"")
+        buildConfigField("String", "BASE_URL", "\"https://agra.tecti-cloud.com\"")
     }
 
     buildTypes {
