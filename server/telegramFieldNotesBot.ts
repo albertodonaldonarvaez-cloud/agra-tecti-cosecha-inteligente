@@ -560,34 +560,22 @@ async function handleCallback(botToken: string, chatId: string, callbackQuery: a
     return;
   }
 
-  // Después de ubicación → mostrar parcelas directamente (prioridad auto = media)
-  // Parcelas se muestran desde handleConversationStep cuando recibe ubicación
-
-  // Parcela seleccionada → mostrar parcelas
-  async function showParcelSelection(botToken2: string, chatId2: string, state2: ConversationState) {
-    state2.data.priority = "media"; // Auto-asignar prioridad media
-    const parcelsList = await getActiveParcels();
-    if (parcelsList.length > 0) {
-      state2.step = "waiting_parcel";
-      const rows: any[][] = [];
-      const sliced = parcelsList.slice(0, 20);
-      for (let i = 0; i < sliced.length; i += 2) {
-        const row = [];
-        row.push({ text: `🌱 ${sliced[i].name}`, callback_data: `parcel_${sliced[i].id}` });
-        if (sliced[i + 1]) {
-          row.push({ text: `🌱 ${sliced[i + 1].name}`, callback_data: `parcel_${sliced[i + 1].id}` });
-        }
-        rows.push(row);
-      }
-      rows.push([{ text: "❌ Cancelar", callback_data: "cancel_note" }]);
-
-      await sendMessage(botToken2, chatId2,
-        `Paso 4️⃣ de 4️⃣ — Selecciona la <b>parcela</b>:`,
-        { inline_keyboard: rows }
-      );
-    } else {
-      await finishNote(botToken2, chatId2, state2);
+  // Omitir foto (botón discreto)
+  if (data === "skip_photo" && state.step === "waiting_photo") {
+    if (messageId) {
+      await editMessageText(botToken, chatId, messageId, `📸 Foto: sin foto`);
     }
+    state.step = "waiting_location";
+    await askLocation(botToken, chatId);
+    return;
+  }
+
+  // Omitir ubicación (botón discreto)
+  if (data === "skip_location" && state.step === "waiting_location") {
+    await sendMessage(botToken, chatId, `📍 Ubicación: omitida`, { remove_keyboard: true });
+    state.data.priority = "media";
+    await goToParcelStep(botToken, chatId, state);
+    return;
   }
 
   // Parcela seleccionada
@@ -639,7 +627,7 @@ async function handleConversationStep(botToken: string, chatId: string, state: C
         `Presiona 📎 → <b>Cámara</b> para tomar la foto directamente.\n` +
         `También puedes enviar una foto de tu galería.`,
         { inline_keyboard: [
-          [{ text: "❌ Cancelar", callback_data: "cancel_note" }],
+          [{ text: "omitir", callback_data: "skip_photo" }, { text: "❌ Cancelar", callback_data: "cancel_note" }],
         ]}
       );
       break;
@@ -649,10 +637,10 @@ async function handleConversationStep(botToken: string, chatId: string, state: C
         await handlePhotoStep(botToken, chatId, state, photo, message.caption);
       } else {
         await sendMessage(botToken, chatId,
-          "📸 <b>La foto es obligatoria.</b>\n\n" +
+          "📸 <b>Envía una foto</b> del problema.\n\n" +
           "Presiona el icono 📎 y selecciona <b>Cámara</b> para tomar una foto rápida.",
           { inline_keyboard: [
-            [{ text: "❌ Cancelar", callback_data: "cancel_note" }],
+            [{ text: "omitir", callback_data: "skip_photo" }, { text: "❌ Cancelar", callback_data: "cancel_note" }],
           ]}
         );
       }
@@ -663,35 +651,10 @@ async function handleConversationStep(botToken: string, chatId: string, state: C
         state.data.latitude = location.latitude;
         state.data.longitude = location.longitude;
         await sendMessage(botToken, chatId, `✅ Ubicación registrada: 📍 ${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}`, { remove_keyboard: true });
-        // Ir directo a parcela (sin paso de prioridad)
         state.data.priority = "media";
-        const parcelsList = await getActiveParcels();
-        if (parcelsList.length > 0) {
-          state.step = "waiting_parcel";
-          const rows: any[][] = [];
-          const sliced = parcelsList.slice(0, 20);
-          for (let i = 0; i < sliced.length; i += 2) {
-            const row = [];
-            row.push({ text: `🌱 ${sliced[i].name}`, callback_data: `parcel_${sliced[i].id}` });
-            if (sliced[i + 1]) {
-              row.push({ text: `🌱 ${sliced[i + 1].name}`, callback_data: `parcel_${sliced[i + 1].id}` });
-            }
-            rows.push(row);
-          }
-          rows.push([{ text: "❌ Cancelar", callback_data: "cancel_note" }]);
-          await sendMessage(botToken, chatId,
-            `Paso 4️⃣ de 4️⃣ — Selecciona la <b>parcela</b>:`,
-            { inline_keyboard: rows }
-          );
-        } else {
-          await finishNote(botToken, chatId, state);
-        }
+        await goToParcelStep(botToken, chatId, state);
       } else {
-        // Reenviar botón de ubicación
-        await sendMessage(botToken, chatId,
-          "📍 <b>La ubicación es obligatoria.</b>\n\nPresiona el botón <b>\"📍 Enviar mi ubicación\"</b> que aparece abajo:",
-          { reply_keyboard: [[{ text: "📍 Enviar mi ubicación", request_location: true }]] }
-        );
+        await askLocation(botToken, chatId);
       }
       break;
 
@@ -787,11 +750,11 @@ async function handlePhotoStep(botToken: string, chatId: string, state: Conversa
 }
 
 // ============================================================
-// Pedir ubicación con reply keyboard (botón grande) — OBLIGATORIA
+// Pedir ubicación con reply keyboard (botón grande)
 // ============================================================
 
 async function askLocation(botToken: string, chatId: string) {
-  // Enviar botón grande de ubicación (reply keyboard nativo de Telegram)
+  // Botón grande nativo de Telegram para ubicación
   await sendMessage(botToken, chatId,
     `📍 <b>Envía tu ubicación</b>\n\n` +
     `👇 Presiona el botón grande que aparece abajo:`,
@@ -801,9 +764,38 @@ async function askLocation(botToken: string, chatId: string) {
       ],
     }
   );
+  // Botón discreto de omitir
+  await sendMessage(botToken, chatId, `ㅤ`, {
+    inline_keyboard: [
+      [{ text: "omitir", callback_data: "skip_location" }, { text: "❌ Cancelar", callback_data: "cancel_note" }],
+    ],
+  });
 }
 
-// Paso de prioridad eliminado — se auto-asigna "media" para simplificar el flujo
+// Función auxiliar para ir al paso de parcela
+async function goToParcelStep(botToken: string, chatId: string, state: ConversationState) {
+  const parcelsList = await getActiveParcels();
+  if (parcelsList.length > 0) {
+    state.step = "waiting_parcel";
+    const rows: any[][] = [];
+    const sliced = parcelsList.slice(0, 20);
+    for (let i = 0; i < sliced.length; i += 2) {
+      const row = [];
+      row.push({ text: `🌱 ${sliced[i].name}`, callback_data: `parcel_${sliced[i].id}` });
+      if (sliced[i + 1]) {
+        row.push({ text: `🌱 ${sliced[i + 1].name}`, callback_data: `parcel_${sliced[i + 1].id}` });
+      }
+      rows.push(row);
+    }
+    rows.push([{ text: "❌ Cancelar", callback_data: "cancel_note" }]);
+    await sendMessage(botToken, chatId,
+      `Paso 4️⃣ de 4️⃣ — Selecciona la <b>parcela</b>:`,
+      { inline_keyboard: rows }
+    );
+  } else {
+    await finishNote(botToken, chatId, state);
+  }
+}
 
 // ============================================================
 // Finalizar nota

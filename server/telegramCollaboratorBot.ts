@@ -467,10 +467,40 @@ async function handleCollabCallback(botToken: string, chatId: string, callbackQu
     return;
   }
 
-  // Omitir foto de nota — ELIMINADO (foto obligatoria)
-  // Las fotos son obligatorias ahora
+  // Omitir foto de nota (botón discreto)
+  if (data === "collab_note_skip_photo") {
+    const conv2 = collabConversations.get(chatId);
+    if (conv2) {
+      conv2.step = "waiting_note_location";
+      await askNoteLocation(botToken, chatId);
+    }
+    return;
+  }
 
-  // Omitir ubicación de nota — ELIMINADO (ubicación obligatoria)
+  // Omitir ubicación de nota (botón discreto)
+  if (data === "collab_note_skip_location") {
+    const conv2 = collabConversations.get(chatId);
+    if (conv2) {
+      await sendMessage(botToken, chatId, `📍 Ubicación: omitida`, { remove_keyboard: true });
+      conv2.data.priority = "media";
+      conv2.step = "waiting_note_parcel";
+      const parcelList = await getActiveParcels();
+      if (parcelList.length === 0) {
+        conv2.data.parcelId = null;
+        await finishNote(botToken, chatId, conv2);
+        return;
+      }
+      const parcelButtons = parcelList.map(p => (
+        [{ text: `🗺️ ${p.name}`, callback_data: `collab_parcel_${p.id}` }]
+      ));
+      parcelButtons.push([{ text: "❌ Cancelar", callback_data: "collab_menu" }]);
+      await sendMessage(botToken, chatId,
+        `🗺️ <b>¿En qué parcela?</b>\n\nSelecciona la parcela donde observaste el problema:`,
+        { inline_keyboard: parcelButtons }
+      );
+    }
+    return;
+  }
 
   // ---- NOTAS ABIERTAS ----
   if (data === "collab_open_notes") {
@@ -638,7 +668,7 @@ async function handleCollabMessage(botToken: string, chatId: string, message: an
         `Envía una foto del problema que observas.\n\n` +
         `💡 Presiona 📎 → <b>Cámara</b> para tomar la foto directamente.`,
         { inline_keyboard: [
-          [{ text: "❌ Cancelar", callback_data: "collab_menu" }],
+          [{ text: "omitir", callback_data: "collab_note_skip_photo" }, { text: "❌ Cancelar", callback_data: "collab_menu" }],
         ]}
       );
     } else {
@@ -663,10 +693,10 @@ async function handleCollabMessage(botToken: string, chatId: string, message: an
       }
       await sendMessage(botToken, chatId, `✅ Foto recibida.`);
     } else {
-      // Foto obligatoria — reenviar mensaje
+      // Insistir en foto pero con botón discreto de omitir
       await sendMessage(botToken, chatId,
-        `📸 <b>La foto es obligatoria.</b>\n\nPresiona 📎 → <b>Cámara</b> para tomar la foto.`,
-        { inline_keyboard: [[{ text: "❌ Cancelar", callback_data: "collab_menu" }]] }
+        `📸 <b>Envía una foto</b> del problema.\n\nPresiona 📎 → <b>Cámara</b> para tomar la foto.`,
+        { inline_keyboard: [[{ text: "omitir", callback_data: "collab_note_skip_photo" }, { text: "❌ Cancelar", callback_data: "collab_menu" }]] }
       );
       return;
     }
@@ -699,11 +729,8 @@ async function handleCollabMessage(botToken: string, chatId: string, message: an
         { inline_keyboard: parcelButtons }
       );
     } else {
-      // Ubicación obligatoria — reenviar botón
-      await sendMessage(botToken, chatId,
-        `📍 <b>La ubicación es obligatoria.</b>\n\n👇 Presiona el botón grande que aparece abajo:`,
-        { reply_keyboard: [[{ text: "📍 Enviar mi ubicación", request_location: true }]] }
-      );
+      // Reenviar botón de ubicación
+      await askNoteLocation(botToken, chatId);
     }
     return;
   }
@@ -995,6 +1022,12 @@ async function askNoteLocation(botToken: string, chatId: string) {
       ],
     }
   );
+  // Botón discreto de omitir
+  await sendMessage(botToken, chatId, `ㅤ`, {
+    inline_keyboard: [
+      [{ text: "omitir", callback_data: "collab_note_skip_location" }, { text: "❌ Cancelar", callback_data: "collab_menu" }],
+    ],
+  });
 }
 
 // Paso de prioridad eliminado — se auto-asigna "media" para simplificar el flujo del colaborador
