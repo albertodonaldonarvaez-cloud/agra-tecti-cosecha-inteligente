@@ -554,45 +554,21 @@ async function handleCallback(botToken: string, chatId: string, callbackQuery: a
     }
 
     await sendMessage(botToken, chatId,
-      `Paso 2️⃣ de 5️⃣ — Escribe una <b>descripción</b> del problema:`,
+      `Paso 2️⃣ de 4️⃣ — Escribe una <b>descripción</b> del problema:`,
       { inline_keyboard: [[{ text: "❌ Cancelar", callback_data: "cancel_note" }]] }
     );
     return;
   }
 
-  // Omitir foto
-  if (data === "skip_photo" && state.step === "waiting_photo") {
-    if (messageId) {
-      await editMessageText(botToken, chatId, messageId, `⏭️ Foto: <b>Omitida</b>`);
-    }
-    state.step = "waiting_location";
-    await askLocation(botToken, chatId);
-    return;
-  }
+  // Después de ubicación → mostrar parcelas directamente (prioridad auto = media)
+  // Parcelas se muestran desde handleConversationStep cuando recibe ubicación
 
-  // Omitir ubicación
-  if (data === "skip_location" && state.step === "waiting_location") {
-    // Quitar reply keyboard
-    await sendMessage(botToken, chatId, `⏭️ Ubicación: <b>Omitida</b>`, { remove_keyboard: true });
-    state.step = "waiting_priority";
-    await askPriority(botToken, chatId);
-    return;
-  }
-
-  // Prioridad seleccionada
-  if (data.startsWith("pri_") && state.step === "waiting_priority") {
-    const priority = data.replace("pri_", "");
-    state.data.priority = priority;
-    const priInfo = PRIORITIES[priority] || { label: priority, emoji: "🟡" };
-
-    if (messageId) {
-      await editMessageText(botToken, chatId, messageId, `✅ Prioridad: <b>${priInfo.emoji} ${priInfo.label}</b>`);
-    }
-
-    // Mostrar parcelas
+  // Parcela seleccionada → mostrar parcelas
+  async function showParcelSelection(botToken2: string, chatId2: string, state2: ConversationState) {
+    state2.data.priority = "media"; // Auto-asignar prioridad media
     const parcelsList = await getActiveParcels();
     if (parcelsList.length > 0) {
-      state.step = "waiting_parcel";
+      state2.step = "waiting_parcel";
       const rows: any[][] = [];
       const sliced = parcelsList.slice(0, 20);
       for (let i = 0; i < sliced.length; i += 2) {
@@ -603,17 +579,15 @@ async function handleCallback(botToken: string, chatId: string, callbackQuery: a
         }
         rows.push(row);
       }
-      rows.push([{ text: "⏭️ Sin parcela específica", callback_data: "parcel_none" }]);
       rows.push([{ text: "❌ Cancelar", callback_data: "cancel_note" }]);
 
-      await sendMessage(botToken, chatId,
-        `Paso 5️⃣ de 5️⃣ — Selecciona la <b>parcela</b>:`,
+      await sendMessage(botToken2, chatId2,
+        `Paso 4️⃣ de 4️⃣ — Selecciona la <b>parcela</b>:`,
         { inline_keyboard: rows }
       );
     } else {
-      await finishNote(botToken, chatId, state);
+      await finishNote(botToken2, chatId2, state2);
     }
-    return;
   }
 
   // Parcela seleccionada
@@ -658,13 +632,13 @@ async function handleConversationStep(botToken: string, chatId: string, state: C
       state.data.description = text;
       state.step = "waiting_photo";
 
-      // Pedir foto con reply keyboard para abrir cámara rápido
+      // Pedir foto OBLIGATORIA
       await sendMessage(botToken, chatId,
         `✅ Descripción registrada.\n\n` +
-        `Paso 3️⃣ de 5️⃣ — <b>Toma una foto</b> del problema 📸\n\n` +
-        `Presiona el botón de abajo para abrir la cámara rápidamente:`,
+        `Paso 3️⃣ de 4️⃣ — 📸 <b>Toma una foto</b> del problema\n\n` +
+        `Presiona 📎 → <b>Cámara</b> para tomar la foto directamente.\n` +
+        `También puedes enviar una foto de tu galería.`,
         { inline_keyboard: [
-          [{ text: "⏭️ Omitir foto", callback_data: "skip_photo" }],
           [{ text: "❌ Cancelar", callback_data: "cancel_note" }],
         ]}
       );
@@ -675,9 +649,9 @@ async function handleConversationStep(botToken: string, chatId: string, state: C
         await handlePhotoStep(botToken, chatId, state, photo, message.caption);
       } else {
         await sendMessage(botToken, chatId,
-          "📸 Envía una <b>foto</b> del problema.\n\nPresiona el icono 📎 y selecciona <b>Cámara</b> para tomar una foto rápida.",
+          "📸 <b>La foto es obligatoria.</b>\n\n" +
+          "Presiona el icono 📎 y selecciona <b>Cámara</b> para tomar una foto rápida.",
           { inline_keyboard: [
-            [{ text: "⏭️ Omitir foto", callback_data: "skip_photo" }],
             [{ text: "❌ Cancelar", callback_data: "cancel_note" }],
           ]}
         );
@@ -688,13 +662,36 @@ async function handleConversationStep(botToken: string, chatId: string, state: C
       if (location) {
         state.data.latitude = location.latitude;
         state.data.longitude = location.longitude;
-        // Quitar reply keyboard
-        await sendMessage(botToken, chatId, `✅ Ubicación registrada.`, { remove_keyboard: true });
-        state.step = "waiting_priority";
-        await askPriority(botToken, chatId);
+        await sendMessage(botToken, chatId, `✅ Ubicación registrada: 📍 ${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}`, { remove_keyboard: true });
+        // Ir directo a parcela (sin paso de prioridad)
+        state.data.priority = "media";
+        const parcelsList = await getActiveParcels();
+        if (parcelsList.length > 0) {
+          state.step = "waiting_parcel";
+          const rows: any[][] = [];
+          const sliced = parcelsList.slice(0, 20);
+          for (let i = 0; i < sliced.length; i += 2) {
+            const row = [];
+            row.push({ text: `🌱 ${sliced[i].name}`, callback_data: `parcel_${sliced[i].id}` });
+            if (sliced[i + 1]) {
+              row.push({ text: `🌱 ${sliced[i + 1].name}`, callback_data: `parcel_${sliced[i + 1].id}` });
+            }
+            rows.push(row);
+          }
+          rows.push([{ text: "❌ Cancelar", callback_data: "cancel_note" }]);
+          await sendMessage(botToken, chatId,
+            `Paso 4️⃣ de 4️⃣ — Selecciona la <b>parcela</b>:`,
+            { inline_keyboard: rows }
+          );
+        } else {
+          await finishNote(botToken, chatId, state);
+        }
       } else {
-        // Reenviar el reply keyboard de ubicación
-        await askLocation(botToken, chatId);
+        // Reenviar botón de ubicación
+        await sendMessage(botToken, chatId,
+          "📍 <b>La ubicación es obligatoria.</b>\n\nPresiona el botón <b>\"📍 Enviar mi ubicación\"</b> que aparece abajo:",
+          { reply_keyboard: [[{ text: "📍 Enviar mi ubicación", request_location: true }]] }
+        );
       }
       break;
 
@@ -731,7 +728,7 @@ async function startNewNote(botToken: string, chatId: string, userId: number) {
 
   await sendMessage(botToken, chatId,
     `📝 <b>Nueva Nota de Campo</b>\n\n` +
-    `Paso 1️⃣ de 5️⃣ — Selecciona la <b>categoría</b>:`,
+    `Paso 1️⃣ de 4️⃣ — Selecciona la <b>categoría</b>:`,
     { inline_keyboard: rows }
   );
 }
@@ -790,48 +787,23 @@ async function handlePhotoStep(botToken: string, chatId: string, state: Conversa
 }
 
 // ============================================================
-// Pedir ubicación con reply keyboard (botón grande)
+// Pedir ubicación con reply keyboard (botón grande) — OBLIGATORIA
 // ============================================================
 
 async function askLocation(botToken: string, chatId: string) {
-  // Primero enviar instrucciones con botón de omitir
+  // Enviar botón grande de ubicación (reply keyboard nativo de Telegram)
   await sendMessage(botToken, chatId,
-    `Paso 4️⃣ de 5️⃣ — <b>Envía tu ubicación</b> 📍\n\n` +
-    `Presiona el botón <b>"📍 Enviar mi ubicación"</b> que aparece abajo:`,
+    `📍 <b>Envía tu ubicación</b>\n\n` +
+    `👇 Presiona el botón grande que aparece abajo:`,
     {
       reply_keyboard: [
         [{ text: "📍 Enviar mi ubicación", request_location: true }],
       ],
     }
   );
-  // Enviar botones inline para omitir/cancelar
-  await sendMessage(botToken, chatId,
-    `O si prefieres:`,
-    { inline_keyboard: [
-      [{ text: "⏭️ Omitir ubicación", callback_data: "skip_location" }],
-      [{ text: "❌ Cancelar", callback_data: "cancel_note" }],
-    ]}
-  );
 }
 
-// ============================================================
-// Pedir prioridad
-// ============================================================
-
-async function askPriority(botToken: string, chatId: string) {
-  const rows: any[][] = [];
-  const priEntries = Object.entries(PRIORITIES);
-  rows.push(priEntries.map(([key, val]) => ({
-    text: `${val.emoji} ${val.label}`,
-    callback_data: `pri_${key}`,
-  })));
-  rows.push([{ text: "❌ Cancelar", callback_data: "cancel_note" }]);
-
-  await sendMessage(botToken, chatId,
-    `Paso 4️⃣ de 5️⃣ — Selecciona la <b>prioridad</b>:`,
-    { inline_keyboard: rows }
-  );
-}
+// Paso de prioridad eliminado — se auto-asigna "media" para simplificar el flujo
 
 // ============================================================
 // Finalizar nota
