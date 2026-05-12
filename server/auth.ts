@@ -5,7 +5,7 @@ import { users } from "../drizzle/schema";
 import { getDb } from "./db";
 
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production";
-const JWT_EXPIRES_IN = "7d";
+const JWT_EXPIRES_IN = "30d";
 
 export interface JWTPayload {
   userId: number;

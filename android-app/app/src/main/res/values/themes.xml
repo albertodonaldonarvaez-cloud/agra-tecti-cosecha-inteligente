@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.AgraFieldApp" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- Colores base del tema -->
+        <item name="android:colorPrimary">#16a34a</item>
+        <item name="android:colorPrimaryDark">#15803d</item>
+        <item name="android:colorAccent">#22c55e</item>
+        <item name="android:statusBarColor">#0f172a</item>
+        <item name="android:navigationBarColor">#0f172a</item>
+    </style>
+</resources>

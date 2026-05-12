@@ -17,16 +17,27 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         const { user, token } = await loginUser(input.email, input.password);
         
-        // Establecer cookie
-        // secure: false permite HTTP (cambiar a true si usas HTTPS)
+        // Establecer cookie (30 días para sesiones móviles de larga duración)
         ctx.res.cookie(COOKIE_NAME, token, {
           httpOnly: true,
           secure: false, // Cambiar a true si usas HTTPS
           sameSite: "lax",
-          maxAge: 7 * 24 * 60 * 60 * 1000, // 7 días
+          maxAge: 30 * 24 * 60 * 60 * 1000, // 30 días
         });
         
         return { success: true, user: { id: user.id, email: user.email, name: user.name, role: user.role } };
+      }),
+
+    // Login para app móvil: retorna token en body (para Bearer auth)
+    loginMobile: publicProcedure
+      .input(z.object({ email: z.string().email(), password: z.string() }))
+      .mutation(async ({ input }) => {
+        const { user, token } = await loginUser(input.email, input.password);
+        return {
+          success: true,
+          token,
+          user: { id: user.id, email: user.email, name: user.name, role: user.role },
+        };
       }),
     
     me: publicProcedure.query(({ ctx }) => ctx.user),
@@ -2911,6 +2922,126 @@ export const appRouter = router({
         }
         return enriched;
       }),
+  }),
+
+  // ============ SINCRONIZACIÓN OFFLINE (App Móvil) ============
+  offlineSync: router({
+    // Sincronizar notas de campo desde la app móvil
+    // IDEMPOTENTE: usa folio (UUID) como clave única
+    syncFieldNotes: protectedProcedure
+      .input(z.object({
+        notes: z.array(z.object({
+          folio: z.string().uuid(),
+          description: z.string().min(1),
+          category: z.enum([
+            "arboles_mal_plantados", "plaga_enfermedad", "riego_drenaje",
+            "dano_mecanico", "maleza", "fertilizacion", "suelo",
+            "infraestructura", "fauna", "otro"
+          ]),
+          severity: z.enum(["baja", "media", "alta", "critica"]).optional(),
+          parcelId: z.number().optional(),
+          latitude: z.number().optional(),
+          longitude: z.number().optional(),
+          createdAtLocal: z.string().optional(), // ISO timestamp del dispositivo
+        })),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const drizzle = await getDb();
+        const userId = (ctx as any).user?.id || 0;
+        const results: { folio: string; status: "created" | "updated" | "error"; error?: string }[] = [];
+
+        for (const note of input.notes) {
+          try {
+            await drizzle.insert(fieldNotes).values({
+              folio: note.folio,
+              description: note.description,
+              category: note.category as any,
+              severity: (note.severity || "media") as any,
+              syncSource: "mobile" as any,
+              parcelId: note.parcelId || null,
+              latitude: note.latitude ? String(note.latitude) : null,
+              longitude: note.longitude ? String(note.longitude) : null,
+              reportedByUserId: userId,
+            }).onDuplicateKeyUpdate({
+              set: {
+                description: note.description,
+                category: note.category as any,
+                severity: (note.severity || "media") as any,
+                parcelId: note.parcelId || null,
+                latitude: note.latitude ? String(note.latitude) : null,
+                longitude: note.longitude ? String(note.longitude) : null,
+              },
+            });
+            
+            // Verificar si fue insert o update
+            const [existing] = await drizzle.select({ id: fieldNotes.id })
+              .from(fieldNotes)
+              .where(eq(fieldNotes.folio, note.folio))
+              .limit(1);
+            results.push({ folio: note.folio, status: existing ? "created" : "updated" });
+          } catch (error: any) {
+            console.error(`[OfflineSync] Error syncing folio ${note.folio}:`, error.message);
+            results.push({ folio: note.folio, status: "error", error: error.message });
+          }
+        }
+
+        // Notificar al grupo de Telegram sobre nuevas notas
+        try {
+          const { notifyGroupNewNoteFromWeb } = await import("./telegramFieldNotesBot");
+          const userName = (ctx as any).user?.name || "App Móvil";
+          for (const note of input.notes) {
+            const result = results.find(r => r.folio === note.folio);
+            if (result?.status === "created") {
+              let parcelName: string | undefined;
+              if (note.parcelId) {
+                const [parcel] = await drizzle.select({ name: parcels.name })
+                  .from(parcels).where(eq(parcels.id, note.parcelId));
+                parcelName = parcel?.name || undefined;
+              }
+              const [dbNote] = await drizzle.select({ id: fieldNotes.id })
+                .from(fieldNotes).where(eq(fieldNotes.folio, note.folio));
+              if (dbNote) {
+                await notifyGroupNewNoteFromWeb(
+                  dbNote.id, note.folio, note.description,
+                  note.category, note.severity || "media",
+                  parcelName, userName, undefined,
+                );
+              }
+            }
+          }
+        } catch (telegramError) {
+          console.error("[OfflineSync] Error notificando Telegram:", telegramError);
+        }
+
+        return { success: true, results, syncedCount: results.filter(r => r.status !== "error").length };
+      }),
+
+    // Obtener notas actualizadas desde el servidor (sync bidireccional)
+    getUpdatedNotes: protectedProcedure
+      .input(z.object({
+        since: z.string().optional(), // ISO timestamp
+        limit: z.number().max(100).default(50),
+      }))
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        let conditions: any[] = [];
+        if (input.since) {
+          conditions.push(gte(fieldNotes.updatedAt, new Date(input.since)));
+        }
+        const notes = conditions.length > 0
+          ? await drizzle.select().from(fieldNotes).where(and(...conditions)).orderBy(desc(fieldNotes.updatedAt)).limit(input.limit)
+          : await drizzle.select().from(fieldNotes).orderBy(desc(fieldNotes.updatedAt)).limit(input.limit);
+        return notes;
+      }),
+
+    // Obtener parcelas (para selector offline)
+    getParcels: protectedProcedure.query(async () => {
+      const drizzle = await getDb();
+      return drizzle.select({ id: parcels.id, code: parcels.code, name: parcels.name })
+        .from(parcels)
+        .where(eq(parcels.isActive, true))
+        .orderBy(parcels.name);
+    }),
   }),
 });
 export type AppRouter = typeof appRouter;

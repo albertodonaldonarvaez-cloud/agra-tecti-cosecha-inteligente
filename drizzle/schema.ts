@@ -523,8 +523,9 @@ export type WarehouseToolAssignment = typeof warehouseToolAssignments.$inferSele
 // Reportes rápidos de observaciones durante recorridos de parcelas
 export const fieldNotes = mysqlTable("fieldNotes", {
   id: int("id").autoincrement().primaryKey(),
-  folio: varchar("folio", { length: 20 }).notNull().unique(),
+  folio: varchar("folio", { length: 64 }).notNull().unique(),
   description: text("description").notNull(),
+  syncSource: mysqlEnum("syncSource", ["web", "telegram", "mobile"]).default("web").notNull(),
   category: mysqlEnum("category", [
     "arboles_mal_plantados",
     "plaga_enfermedad",
@@ -561,6 +562,7 @@ export type InsertFieldNote = typeof fieldNotes.$inferInsert;
 export const fieldNotePhotos = mysqlTable("fieldNotePhotos", {
   id: int("id").autoincrement().primaryKey(),
   fieldNoteId: int("fieldNoteId").notNull(),
+  localPhotoId: varchar("localPhotoId", { length: 64 }),
   photoPath: varchar("photoPath", { length: 512 }).notNull(),
   caption: varchar("caption", { length: 255 }),
   stage: mysqlEnum("stage", ["reporte", "revision", "resolucion"]).default("reporte").notNull(),

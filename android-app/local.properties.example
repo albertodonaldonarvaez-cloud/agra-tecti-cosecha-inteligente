@@ -1,0 +1,9 @@
+# Template — copiar como local.properties y ajustar la IP de tu servidor
+# Android Studio genera este archivo automáticamente con sdk.dir
+
+# sdk.dir=/Users/TU_USUARIO/Library/Android/sdk   # macOS
+# sdk.dir=C:\\Users\\TU_USUARIO\\AppData\\Local\\Android\\Sdk   # Windows
+
+# IP del servidor backend para pruebas locales
+# Descomentar y cambiar a la IP de tu máquina en la red local:
+# SERVER_BASE_URL=http://192.168.1.100:3000

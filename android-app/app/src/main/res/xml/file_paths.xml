@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Directorio para fotos capturadas por la cámara -->
+    <files-path
+        name="field_photos"
+        path="photos/" />
+    <cache-path
+        name="cache_photos"
+        path="photos/" />
+</paths>

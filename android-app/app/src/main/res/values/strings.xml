@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">Agra Campo</string>
+    <string name="login_title">Iniciar Sesión</string>
+    <string name="email_hint">Correo electrónico</string>
+    <string name="password_hint">Contraseña</string>
+    <string name="login_button">Entrar</string>
+    <string name="logout_button">Cerrar Sesión</string>
+    <string name="notes_title">Notas de Campo</string>
+    <string name="create_note">Nueva Nota</string>
+    <string name="sync_pending">Pendiente de sincronizar</string>
+    <string name="sync_ok">Sincronizado</string>
+    <string name="no_connection">Sin conexión — los datos se guardan localmente</string>
+    <string name="sync_in_progress">Sincronizando...</string>
+</resources>

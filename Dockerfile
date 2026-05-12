@@ -74,7 +74,7 @@ COPY entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
 # Crear directorios para fotos y uploads temporales
-RUN mkdir -p /app/photos/field-notes /app/photos/warehouse/products /tmp/uploads
+RUN mkdir -p /app/photos/field-notes /app/photos/warehouse/products /app/photos/sync-uploads /tmp/uploads
 
 # Exponer puerto 3000
 EXPOSE 3000

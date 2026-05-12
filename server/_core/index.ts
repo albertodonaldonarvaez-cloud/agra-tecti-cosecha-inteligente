@@ -118,6 +118,94 @@ async function startServer() {
   app.get("/api/odm-bounds/:projectId/:taskUuid", getOdmTaskBounds);
   app.get("/api/odm-layers/:projectId/:taskUuid", getOdmAvailableLayers);
   
+  // ============================================
+  // SYNC PHOTO — Subida de fotos offline desde app móvil
+  // Endpoint REST clásico porque tRPC no soporta multipart/form-data
+  // ============================================
+  app.post("/api/sync/photo", upload.single("photo"), async (req, res) => {
+    try {
+      // Verificar autenticación (Bearer token o cookie)
+      const { getUserFromToken } = await import("../auth");
+      let token = req.cookies?.auth_token;
+      if (!token) {
+        const authHeader = req.headers.authorization;
+        if (authHeader?.startsWith("Bearer ")) {
+          token = authHeader.slice(7);
+        }
+      }
+      if (!token) {
+        return res.status(401).json({ error: "No autenticado" });
+      }
+      const user = await getUserFromToken(token);
+      if (!user) {
+        return res.status(401).json({ error: "Token inválido o expirado" });
+      }
+
+      // Validar campos requeridos
+      const { fieldNoteFolio, localPhotoId } = req.body;
+      if (!fieldNoteFolio || !localPhotoId) {
+        return res.status(400).json({ error: "fieldNoteFolio y localPhotoId son requeridos" });
+      }
+      if (!req.file) {
+        return res.status(400).json({ error: "No se recibió ninguna foto" });
+      }
+
+      // Verificar que la nota de campo existe
+      const { getDb } = await import("../db");
+      const { fieldNotes, fieldNotePhotos } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      const drizzle = await getDb();
+      if (!drizzle) {
+        return res.status(503).json({ error: "Base de datos no disponible" });
+      }
+      
+      const [note] = await drizzle.select({ id: fieldNotes.id })
+        .from(fieldNotes)
+        .where(eq(fieldNotes.folio, fieldNoteFolio))
+        .limit(1);
+      
+      if (!note) {
+        return res.status(404).json({ error: `Nota de campo con folio '${fieldNoteFolio}' no encontrada` });
+      }
+
+      // Guardar archivo en directorio permanente
+      const fs = await import("fs");
+      const pathModule = await import("path");
+      const dir = `/app/photos/field-notes/${fieldNoteFolio}`;
+      fs.mkdirSync(dir, { recursive: true });
+      
+      const ext = pathModule.extname(req.file.originalname) || ".jpg";
+      const fileName = `mobile-${localPhotoId}${ext}`;
+      const destPath = pathModule.join(dir, fileName);
+      
+      // Mover archivo de /tmp/uploads a destino final
+      fs.copyFileSync(req.file.path, destPath);
+      fs.unlinkSync(req.file.path); // Limpiar temporal
+      
+      const photoUrl = `/app/photos/field-notes/${fieldNoteFolio}/${fileName}`;
+      
+      // Upsert: si localPhotoId ya existe, actualizar ruta
+      await drizzle.insert(fieldNotePhotos).values({
+        fieldNoteId: note.id,
+        localPhotoId: localPhotoId,
+        photoPath: photoUrl,
+        caption: "Foto desde app móvil",
+        stage: "reporte" as any,
+        uploadedByUserId: user.id,
+      }).onDuplicateKeyUpdate({
+        set: {
+          photoPath: photoUrl,
+          caption: "Foto desde app móvil",
+        },
+      });
+
+      res.json({ success: true, photoUrl, fieldNoteFolio, localPhotoId });
+    } catch (error: any) {
+      console.error("[SyncPhoto] Error:", error);
+      res.status(500).json({ error: error.message || "Error interno del servidor" });
+    }
+  });
+  
   // Servir fotos estáticas desde /app/photos
   app.use("/app/photos", express.static("/app/photos"));
   

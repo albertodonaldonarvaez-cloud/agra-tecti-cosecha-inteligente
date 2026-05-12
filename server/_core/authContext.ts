@@ -11,8 +11,16 @@ export interface AuthContext {
 }
 
 export async function createContext({ req, res }: { req: Request; res: Response }): Promise<AuthContext> {
-  // Obtener token de la cookie
-  const token = req.cookies[COOKIE_NAME];
+  // Obtener token de la cookie O del header Authorization (para app móvil)
+  let token = req.cookies[COOKIE_NAME];
+  
+  // Si no hay cookie, intentar Bearer token (usado por la app Android)
+  if (!token) {
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      token = authHeader.slice(7);
+    }
+  }
   
   let user: User | null = null;
   

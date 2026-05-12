@@ -4,7 +4,7 @@
 # los permisos del usuario agratec (UID 1001)
 
 # Crear subdirectorios necesarios si no existen
-mkdir -p /app/photos/field-notes /app/photos/warehouse/products /tmp/uploads
+mkdir -p /app/photos/field-notes /app/photos/warehouse/products /app/photos/sync-uploads /tmp/uploads
 
 # Iniciar la aplicación
 exec pnpm start
