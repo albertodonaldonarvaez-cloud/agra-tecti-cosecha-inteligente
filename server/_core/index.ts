@@ -234,19 +234,25 @@ async function startServer() {
 
       const { getDb } = await import("../db");
       const { parcels } = await import("../../drizzle/schema");
-      const { eq } = await import("drizzle-orm");
+      const { eq, and, isNotNull, ne } = await import("drizzle-orm");
       const drizzle = await getDb();
       if (!drizzle) {
         return res.status(503).json({ error: "Base de datos no disponible" });
       }
 
+      // Solo parcelas activas CON polígono definido (no null, no vacío, no '[]')
       const result = await drizzle.select({
         id: parcels.id,
         code: parcels.code,
         name: parcels.name,
       })
         .from(parcels)
-        .where(eq(parcels.isActive, true))
+        .where(and(
+          eq(parcels.isActive, true),
+          isNotNull(parcels.polygon),
+          ne(parcels.polygon, ""),
+          ne(parcels.polygon, "[]"),
+        ))
         .orderBy(parcels.name);
 
       res.json({ success: true, parcels: result });
