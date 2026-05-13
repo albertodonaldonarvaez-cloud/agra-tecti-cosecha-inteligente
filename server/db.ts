@@ -313,12 +313,21 @@ export async function createManualUser(data: { name: string; email: string; pass
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   
-  await db.insert(users).values({
-    name: data.name,
-    email: data.email,
-    password: data.password,
-    role: data.role || "user",
-  });
+  try {
+    await db.insert(users).values({
+      name: data.name,
+      email: data.email,
+      password: data.password,
+      role: data.role || "user",
+    });
+  } catch (error: any) {
+    console.error("[createManualUser] Error MySQL:", error.message);
+    // Duplicate entry error (ER_DUP_ENTRY)
+    if (error.code === 'ER_DUP_ENTRY' || error.message?.includes('Duplicate entry')) {
+      throw new Error(`El email "${data.email}" ya está registrado`);
+    }
+    throw error;
+  }
 }
 
 export async function getBoxesWithFilters(startDate?: string, endDate?: string) {
