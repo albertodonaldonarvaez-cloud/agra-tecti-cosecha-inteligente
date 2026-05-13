@@ -182,12 +182,15 @@ fun CreateNoteScreen(onBack: () -> Unit) {
     }
 
     // Camera launcher
-    fun createImageFile(): Uri {
+    var lastPhotoRealPath by remember { mutableStateOf<String?>(null) }
+
+    fun createImageFile(): Pair<Uri, String> {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val imageFileName = "AGRA_${timeStamp}_"
         val storageDir = context.getExternalFilesDir(Environment.DIRECTORY_PICTURES)
         val imageFile = File.createTempFile(imageFileName, ".jpg", storageDir)
-        return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", imageFile)
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", imageFile)
+        return Pair(uri, imageFile.absolutePath)
     }
 
     val cameraLauncher = rememberLauncherForActivityResult(
@@ -204,8 +207,9 @@ fun CreateNoteScreen(onBack: () -> Unit) {
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            val uri = createImageFile()
+            val (uri, realPath) = createImageFile()
             tempPhotoUri = uri
+            lastPhotoRealPath = realPath
             cameraLauncher.launch(uri)
         }
     }
@@ -567,8 +571,9 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                             ) == PackageManager.PERMISSION_GRANTED
                             if (hasPerm) {
                                 try {
-                                    val uri = createImageFile()
+                                    val (uri, realPath) = createImageFile()
                                     tempPhotoUri = uri
+                                    lastPhotoRealPath = realPath
                                     cameraLauncher.launch(uri)
                                 } catch (e: Exception) {
                                     Log.e("CreateNote", "Error al abrir cámara", e)
@@ -658,7 +663,7 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                                 parcelId = selectedParcel?.serverId,
                                 latitude = currentLocation?.latitude,
                                 longitude = currentLocation?.longitude,
-                                photoUri = photoUri?.toString(),
+                                photoUri = lastPhotoRealPath,
                             )
                             SyncWorker.enqueueImmediateSync(context)
                             isSaving = false
