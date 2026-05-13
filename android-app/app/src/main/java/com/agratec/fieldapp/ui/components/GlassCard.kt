@@ -41,7 +41,7 @@ fun GlassCard(
         initialValue = 0.05f,
         targetValue = 0.15f,
         animationSpec = infiniteRepeatable(
-            animation = tween(3000, easing = EaseInOutSine),
+            animation = tween(3000, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "glowAlpha"

@@ -10,6 +10,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -78,7 +79,6 @@ fun CreateNoteScreen(onBack: () -> Unit) {
     // Parcel state
     var selectedParcel by remember { mutableStateOf<ParcelOption?>(null) }
     var parcelExpanded by remember { mutableStateOf(false) }
-    // TODO: Cargar parcelas desde Room/API via offlineSync.getParcels
     val parcels = remember {
         listOf(
             ParcelOption(1, "Parcela Norte - Higo"),
@@ -106,14 +106,12 @@ fun CreateNoteScreen(onBack: () -> Unit) {
         }
     }
 
-    // Gallery launcher
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         uri?.let { photoUri = it }
     }
 
-    // Permission launcher
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -137,7 +135,7 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, "Volver", tint = Color.White)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Volver", tint = Color.White)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -163,10 +161,9 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                 color = Color.White.copy(alpha = 0.7f),
             )
             Spacer(Modifier.height(8.dp))
-            ExposedDropdownMenuBox(
-                expanded = parcelExpanded,
-                onExpandedChange = { parcelExpanded = !parcelExpanded },
-            ) {
+
+            // Simple parcel dropdown using Box + DropdownMenu
+            Box(modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
                     value = selectedParcel?.name ?: "",
                     onValueChange = {},
@@ -185,7 +182,14 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                         )
                     },
                     trailingIcon = {
-                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = parcelExpanded)
+                        IconButton(onClick = { parcelExpanded = !parcelExpanded }) {
+                            Icon(
+                                if (parcelExpanded) Icons.Default.ArrowDropUp
+                                else Icons.Default.ArrowDropDown,
+                                null,
+                                tint = Color.White.copy(alpha = 0.6f),
+                            )
+                        }
                     },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = AgraGreen,
@@ -197,12 +201,14 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .menuAnchor(),
+                        .clickable { parcelExpanded = true },
                 )
-                ExposedDropdownMenu(
+                DropdownMenu(
                     expanded = parcelExpanded,
                     onDismissRequest = { parcelExpanded = false },
-                    containerColor = DarkBg3,
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f)
+                        .background(DarkBg3),
                 ) {
                     parcels.forEach { parcel ->
                         DropdownMenuItem(
@@ -256,12 +262,6 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                             labelColor = Color.White.copy(alpha = 0.6f),
                             iconColor = Color.White.copy(alpha = 0.4f),
                         ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            borderColor = Color.White.copy(alpha = 0.1f),
-                            selectedBorderColor = cat.color.copy(alpha = 0.4f),
-                            enabled = true,
-                            selected = selected,
-                        ),
                     )
                 }
             }
@@ -284,7 +284,7 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                         onClick = { selectedSeverity = key },
                         label = {
                             Text(
-                                key.replaceFirstChar { it.uppercase() },
+                                key.replaceFirstChar { c -> c.uppercase() },
                                 fontSize = 12.sp,
                             )
                         },
@@ -293,12 +293,6 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                             selectedLabelColor = color,
                             containerColor = DarkBg3,
                             labelColor = Color.White.copy(alpha = 0.6f),
-                        ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            borderColor = Color.White.copy(alpha = 0.1f),
-                            selectedBorderColor = color.copy(alpha = 0.4f),
-                            enabled = true,
-                            selected = selected,
                         ),
                     )
                 }
@@ -348,7 +342,6 @@ fun CreateNoteScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(8.dp))
 
             if (photoUri != null) {
-                // Photo preview
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -366,7 +359,6 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop,
                     )
-                    // Delete button
                     IconButton(
                         onClick = { photoUri = null },
                         modifier = Modifier
@@ -387,12 +379,10 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                     }
                 }
             } else {
-                // Camera / Gallery buttons
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    // Camera button
                     GlassCard(
                         modifier = Modifier
                             .weight(1f)
@@ -406,9 +396,7 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                                     tempPhotoUri = uri
                                     cameraLauncher.launch(uri)
                                 } else {
-                                    permissionLauncher.launch(
-                                        Manifest.permission.CAMERA,
-                                    )
+                                    permissionLauncher.launch(Manifest.permission.CAMERA)
                                 }
                             },
                         cornerRadius = 14.dp,
@@ -424,21 +412,14 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                                 modifier = Modifier.size(32.dp),
                             )
                             Spacer(Modifier.height(6.dp))
-                            Text(
-                                "Cámara",
-                                fontSize = 12.sp,
-                                color = Color.White.copy(alpha = 0.7f),
-                            )
+                            Text("Cámara", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
                         }
                     }
 
-                    // Gallery button
                     GlassCard(
                         modifier = Modifier
                             .weight(1f)
-                            .clickable {
-                                galleryLauncher.launch("image/*")
-                            },
+                            .clickable { galleryLauncher.launch("image/*") },
                         cornerRadius = 14.dp,
                     ) {
                         Column(
@@ -452,11 +433,7 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                                 modifier = Modifier.size(32.dp),
                             )
                             Spacer(Modifier.height(6.dp))
-                            Text(
-                                "Galería",
-                                fontSize = 12.sp,
-                                color = Color.White.copy(alpha = 0.7f),
-                            )
+                            Text("Galería", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
                         }
                     }
                 }
@@ -464,7 +441,6 @@ fun CreateNoteScreen(onBack: () -> Unit) {
 
             Spacer(Modifier.height(12.dp))
 
-            // GPS info
             GlassCard(Modifier.fillMaxWidth(), cornerRadius = 12.dp) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
@@ -484,7 +460,6 @@ fun CreateNoteScreen(onBack: () -> Unit) {
 
             Spacer(Modifier.height(32.dp))
 
-            // ── Save button ──
             val canSave = description.isNotBlank()
                     && selectedCategory.isNotBlank()
                     && selectedParcel != null
@@ -540,14 +515,12 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                             Icon(
                                 Icons.Default.Save,
                                 null,
-                                tint = if (canSave) Color.White
-                                else Color.White.copy(alpha = 0.3f),
+                                tint = if (canSave) Color.White else Color.White.copy(alpha = 0.3f),
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(
                                 "Guardar Nota",
-                                color = if (canSave) Color.White
-                                else Color.White.copy(alpha = 0.3f),
+                                color = if (canSave) Color.White else Color.White.copy(alpha = 0.3f),
                                 fontWeight = FontWeight.SemiBold,
                             )
                         }
