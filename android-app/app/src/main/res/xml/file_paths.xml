@@ -1,10 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <!-- Directorio para fotos capturadas por la cámara -->
+    <!-- Directorio para fotos capturadas por la cámara (getExternalFilesDir) -->
+    <external-files-path
+        name="external_pictures"
+        path="Pictures/" />
+    <external-files-path
+        name="external_all"
+        path="." />
+    <!-- Fallback: directorio interno de la app -->
     <files-path
         name="field_photos"
         path="photos/" />
     <cache-path
         name="cache_photos"
-        path="photos/" />
+        path="." />
 </paths>

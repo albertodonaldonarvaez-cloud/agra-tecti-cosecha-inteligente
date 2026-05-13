@@ -1,10 +1,14 @@
 package com.agratec.fieldapp.ui.screens
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.pm.PackageManager
+import android.location.Location
 import android.net.Uri
 import android.os.Environment
+import android.os.Looper
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
@@ -37,6 +41,7 @@ import com.agratec.fieldapp.data.repository.ParcelRepository
 import com.agratec.fieldapp.sync.SyncWorker
 import com.agratec.fieldapp.ui.components.GlassCard
 import com.agratec.fieldapp.ui.theme.*
+import com.google.android.gms.location.*
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
@@ -94,6 +99,80 @@ fun CreateNoteScreen(onBack: () -> Unit) {
     var parcelExpanded by remember { mutableStateOf(false) }
     val parcels by parcelRepository.getAllParcels().collectAsState(initial = emptyList())
     var syncStatus by remember { mutableStateOf("") }
+
+    // ── GPS Location state ──
+    var currentLocation by remember { mutableStateOf<Location?>(null) }
+    var locationStatus by remember { mutableStateOf("Esperando permisos...") }
+    var locationAccuracy by remember { mutableStateOf<Float?>(null) }
+    val fusedLocationClient = remember {
+        LocationServices.getFusedLocationProviderClient(context)
+    }
+
+    // Location callback
+    val locationCallback = remember {
+        object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                val loc = result.lastLocation ?: return
+                locationAccuracy = loc.accuracy
+                if (loc.accuracy <= 10f) {
+                    // GPS con precisión menor a 10m — aceptar
+                    currentLocation = loc
+                    locationStatus = "GPS listo (±${loc.accuracy.toInt()}m)"
+                    // Stop updates once we have good accuracy
+                    fusedLocationClient.removeLocationUpdates(this)
+                } else {
+                    locationStatus = "Mejorando precisión (±${loc.accuracy.toInt()}m)..."
+                }
+            }
+        }
+    }
+
+    // Start GPS when location permission is granted
+    @SuppressLint("MissingPermission")
+    fun startGpsUpdates() {
+        locationStatus = "Obteniendo ubicación..."
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L)
+            .setMinUpdateIntervalMillis(500L)
+            .setMaxUpdates(60) // max 60 updates (1 min)
+            .build()
+        fusedLocationClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
+    }
+
+    // Location permission launcher
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val fine = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        if (fine) {
+            startGpsUpdates()
+        } else {
+            locationStatus = "Permiso de ubicación denegado"
+        }
+    }
+
+    // Request location permission on screen open
+    LaunchedEffect(Unit) {
+        val hasFine = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasFine) {
+            startGpsUpdates()
+        } else {
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                )
+            )
+        }
+    }
+
+    // Stop location updates when leaving screen
+    DisposableEffect(Unit) {
+        onDispose {
+            fusedLocationClient.removeLocationUpdates(locationCallback)
+        }
+    }
 
     // Sync parcels from server (background, non-blocking)
     LaunchedEffect(Unit) {
@@ -487,9 +566,14 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                                 Manifest.permission.CAMERA,
                             ) == PackageManager.PERMISSION_GRANTED
                             if (hasPerm) {
-                                val uri = createImageFile()
-                                tempPhotoUri = uri
-                                cameraLauncher.launch(uri)
+                                try {
+                                    val uri = createImageFile()
+                                    tempPhotoUri = uri
+                                    cameraLauncher.launch(uri)
+                                } catch (e: Exception) {
+                                    Log.e("CreateNote", "Error al abrir cámara", e)
+                                    Toast.makeText(context, "Error al abrir cámara: ${e.message}", Toast.LENGTH_LONG).show()
+                                }
                             } else {
                                 permissionLauncher.launch(Manifest.permission.CAMERA)
                             }
@@ -499,33 +583,59 @@ fun CreateNoteScreen(onBack: () -> Unit) {
 
                 Spacer(Modifier.height(14.dp))
 
-                // GPS info chip
+                // GPS status chip — live accuracy indicator
+                val gpsReady = currentLocation != null
+                val gpsColor = when {
+                    gpsReady -> AgraGreen
+                    locationAccuracy != null -> SeverityMedium
+                    else -> TextTertiary
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .background(AgraGreenSurface.copy(alpha = 0.5f))
+                        .background(
+                            if (gpsReady) AgraGreen.copy(alpha = 0.08f)
+                            else AgraGreenSurface.copy(alpha = 0.5f)
+                        )
                         .border(
                             0.5.dp,
-                            AgraGreen.copy(alpha = 0.1f),
+                            gpsColor.copy(alpha = 0.2f),
                             RoundedCornerShape(12.dp),
                         )
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
-                        Icons.Default.LocationOn,
-                        null,
-                        tint = AgraGreen.copy(alpha = 0.5f),
-                        modifier = Modifier.size(18.dp),
-                    )
+                    if (!gpsReady && locationAccuracy != null) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = gpsColor,
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Icon(
+                            if (gpsReady) Icons.Default.GpsFixed else Icons.Default.GpsNotFixed,
+                            null,
+                            tint = gpsColor,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                     Spacer(Modifier.width(8.dp))
-                    Text(
-                        "GPS se capturará automáticamente al guardar",
-                        fontSize = 12.sp,
-                        color = TextTertiary,
-                        fontWeight = FontWeight.Medium,
-                    )
+                    Column {
+                        Text(
+                            locationStatus,
+                            fontSize = 12.sp,
+                            color = if (gpsReady) AgraGreen else TextSecondary,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        if (currentLocation != null) {
+                            Text(
+                                "${String.format("%.6f", currentLocation!!.latitude)}, ${String.format("%.6f", currentLocation!!.longitude)}",
+                                fontSize = 10.sp,
+                                color = TextTertiary,
+                            )
+                        }
+                    }
                 }
 
                 Spacer(Modifier.height(32.dp))
@@ -534,6 +644,7 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                 val canSave = description.isNotBlank()
                         && selectedCategory.isNotBlank()
                         && selectedParcel != null
+                        && currentLocation != null
                         && !isSaving
 
                 Button(
@@ -545,6 +656,8 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                                 category = selectedCategory,
                                 severity = selectedSeverity,
                                 parcelId = selectedParcel?.serverId,
+                                latitude = currentLocation?.latitude,
+                                longitude = currentLocation?.longitude,
                                 photoUri = photoUri?.toString(),
                             )
                             SyncWorker.enqueueImmediateSync(context)
