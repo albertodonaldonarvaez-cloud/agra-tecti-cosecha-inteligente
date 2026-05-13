@@ -103,6 +103,17 @@ class SyncWorker(
         var photosSynced = 0
         var errors = 0
 
+        // ===== PASO 0: Sincronizar parcelas desde servidor =====
+        try {
+            val parcelRepo = com.agratec.fieldapp.data.repository.ParcelRepository(applicationContext)
+            val synced = parcelRepo.syncFromServer()
+            if (synced) {
+                Log.i(TAG, "Parcelas actualizadas desde servidor")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error sincronizando parcelas (no crítico)", e)
+        }
+
         // ===== PASO 1: Sincronizar notas de campo =====
         try {
             val unsyncedNotes = db.fieldNoteDao().getUnsyncedNotes(limit = 10)

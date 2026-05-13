@@ -5,25 +5,19 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.agratec.fieldapp.ui.theme.*
 
 /**
- * Liquid Glass Card — Componente glassmorphism premium.
- * Simula el efecto de cristal líquido con:
- * - Fondo semi-transparente con gradiente sutil
- * - Borde brillante translúcido
- * - Esquinas redondeadas suaves
- * - Resplandor verde Agra sutil en hover
+ * Light Glass Card — Componente con efecto sutil de elevación.
+ * Para modo claro usa sombras suaves y fondo blanco translúcido.
  */
 @Composable
 fun GlassCard(
@@ -35,57 +29,20 @@ fun GlassCard(
 ) {
     val shape = RoundedCornerShape(cornerRadius)
 
-    // Animación de brillo sutil
-    val infiniteTransition = rememberInfiniteTransition(label = "glow")
-    val glowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.05f,
-        targetValue = 0.15f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(3000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "glowAlpha"
-    )
-
     Column(
         modifier = modifier
+            .shadow(
+                elevation = 2.dp,
+                shape = shape,
+                ambientColor = Color.Black.copy(alpha = 0.06f),
+                spotColor = Color.Black.copy(alpha = 0.04f),
+            )
             .clip(shape)
-            .then(
-                if (showGlow) {
-                    Modifier.drawBehind {
-                        drawRect(
-                            brush = Brush.radialGradient(
-                                colors = listOf(
-                                    glowColor.copy(alpha = glowAlpha),
-                                    Color.Transparent
-                                ),
-                                center = Offset(size.width / 2, size.height / 2),
-                                radius = size.maxDimension * 0.8f
-                            )
-                        )
-                    }
-                } else Modifier
-            )
-            .background(
-                brush = Brush.linearGradient(
-                    colors = listOf(
-                        Color(0xFF0F172A).copy(alpha = 0.85f),
-                        Color(0xFF1E293B).copy(alpha = 0.6f),
-                    ),
-                    start = Offset.Zero,
-                    end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
-                )
-            )
+            .background(Color.White)
             .border(
                 width = 1.dp,
-                brush = Brush.linearGradient(
-                    colors = listOf(
-                        Color.White.copy(alpha = 0.15f),
-                        Color.White.copy(alpha = 0.05f),
-                        AgraGreen.copy(alpha = 0.1f),
-                    )
-                ),
-                shape = shape
+                color = CardBorder.copy(alpha = 0.6f),
+                shape = shape,
             )
             .padding(16.dp),
         content = content,
@@ -105,18 +62,11 @@ fun GlassSurface(
     Column(
         modifier = modifier
             .clip(shape)
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF1E293B).copy(alpha = 0.5f),
-                        Color(0xFF0F172A).copy(alpha = 0.3f),
-                    )
-                )
-            )
+            .background(LightBg2)
             .border(
                 width = 0.5.dp,
-                color = Color.White.copy(alpha = 0.08f),
-                shape = shape
+                color = CardBorder.copy(alpha = 0.4f),
+                shape = shape,
             )
             .padding(12.dp),
         content = content,

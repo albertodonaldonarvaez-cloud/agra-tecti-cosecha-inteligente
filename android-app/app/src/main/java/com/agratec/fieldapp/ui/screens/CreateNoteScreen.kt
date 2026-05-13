@@ -29,9 +29,9 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
-import com.agratec.fieldapp.data.remote.RetrofitClient
-import com.agratec.fieldapp.data.remote.dto.ParcelData
+import com.agratec.fieldapp.data.local.entity.ParcelEntity
 import com.agratec.fieldapp.data.repository.FieldNoteRepository
+import com.agratec.fieldapp.data.repository.ParcelRepository
 import com.agratec.fieldapp.sync.SyncWorker
 import com.agratec.fieldapp.ui.components.GlassCard
 import com.agratec.fieldapp.ui.theme.*
@@ -68,6 +68,7 @@ fun CreateNoteScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repository = remember { FieldNoteRepository(context) }
+    val parcelRepository = remember { ParcelRepository(context) }
 
     var description by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf("") }
@@ -78,37 +79,17 @@ fun CreateNoteScreen(onBack: () -> Unit) {
     var photoUri by remember { mutableStateOf<Uri?>(null) }
     var tempPhotoUri by remember { mutableStateOf<Uri?>(null) }
 
-    // Parcel state — fetched from server
-    var selectedParcel by remember { mutableStateOf<ParcelData?>(null) }
+    // Parcel state — offline-first from Room
+    var selectedParcel by remember { mutableStateOf<ParcelEntity?>(null) }
     var parcelExpanded by remember { mutableStateOf(false) }
-    var parcels by remember { mutableStateOf<List<ParcelData>>(emptyList()) }
-    var parcelsLoading by remember { mutableStateOf(true) }
-    var parcelsError by remember { mutableStateOf<String?>(null) }
+    val parcels by parcelRepository.getAllParcels().collectAsState(initial = emptyList())
+    var syncStatus by remember { mutableStateOf("") }
 
-    // Fetch parcels from server on mount
+    // Sync parcels from server (background, non-blocking)
     LaunchedEffect(Unit) {
-        try {
-            parcelsLoading = true
-            parcelsError = null
-            val api = RetrofitClient.getApiService(context)
-            val response = api.getParcels()
-            if (response.isSuccessful) {
-                val body = response.body()
-                if (body?.success == true && body.parcels != null) {
-                    parcels = body.parcels
-                    Log.i("CreateNote", "Parcelas cargadas: ${parcels.size}")
-                } else {
-                    parcelsError = body?.error ?: "Sin parcelas disponibles"
-                }
-            } else {
-                parcelsError = "Error ${response.code()}: ${response.message()}"
-            }
-        } catch (e: Exception) {
-            Log.e("CreateNote", "Error cargando parcelas", e)
-            parcelsError = "Sin conexión — parcelas no disponibles"
-        } finally {
-            parcelsLoading = false
-        }
+        syncStatus = "Sincronizando..."
+        val updated = parcelRepository.syncFromServer()
+        syncStatus = if (updated) "Actualizado" else ""
     }
 
     // Camera launcher
@@ -145,23 +126,23 @@ fun CreateNoteScreen(onBack: () -> Unit) {
     }
 
     Scaffold(
-        containerColor = DarkBg1,
+        containerColor = LightBg1,
         topBar = {
             TopAppBar(
                 title = {
                     Text(
                         "Nueva Nota de Campo",
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
+                        color = TextPrimary,
                     )
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Volver", tint = Color.White)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Volver", tint = TextPrimary)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent,
+                    containerColor = Color.White.copy(alpha = 0.9f),
                 ),
             )
         },
@@ -176,54 +157,60 @@ fun CreateNoteScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(8.dp))
 
             // ── Parcel selector ──
-            Text(
-                "Parcela",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White.copy(alpha = 0.7f),
-            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Parcela",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextSecondary,
+                )
+                if (parcels.isNotEmpty()) {
+                    Text(
+                        "${parcels.size} disponibles",
+                        fontSize = 11.sp,
+                        color = AgraGreen,
+                    )
+                }
+            }
             Spacer(Modifier.height(8.dp))
 
-            if (parcelsLoading) {
-                // Loading state
-                GlassCard(Modifier.fillMaxWidth(), cornerRadius = 14.dp) {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center,
-                    ) {
-                        CircularProgressIndicator(
-                            Modifier.size(20.dp),
-                            color = AgraGreenLight,
-                            strokeWidth = 2.dp,
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            "Cargando parcelas del servidor...",
-                            fontSize = 13.sp,
-                            color = Color.White.copy(alpha = 0.5f),
-                        )
-                    }
-                }
-            } else if (parcelsError != null && parcels.isEmpty()) {
-                // Error state
+            if (parcels.isEmpty()) {
+                // Empty state — no cached parcels
                 GlassCard(Modifier.fillMaxWidth(), cornerRadius = 14.dp) {
                     Row(
                         Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(
-                            Icons.Default.CloudOff,
-                            null,
-                            tint = SeverityMedium,
-                            modifier = Modifier.size(20.dp),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            parcelsError ?: "Error desconocido",
-                            fontSize = 12.sp,
-                            color = SeverityMedium,
-                        )
+                        if (syncStatus == "Sincronizando...") {
+                            CircularProgressIndicator(
+                                Modifier.size(18.dp),
+                                color = AgraGreen,
+                                strokeWidth = 2.dp,
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                "Descargando parcelas...",
+                                fontSize = 13.sp,
+                                color = TextSecondary,
+                            )
+                        } else {
+                            Icon(
+                                Icons.Default.CloudOff,
+                                null,
+                                tint = SeverityMedium,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Conéctate a internet para descargar parcelas",
+                                fontSize = 12.sp,
+                                color = TextSecondary,
+                            )
+                        }
                     }
                 }
             } else {
@@ -235,15 +222,15 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                         readOnly = true,
                         placeholder = {
                             Text(
-                                "Selecciona una parcela (${parcels.size})...",
-                                color = Color.White.copy(alpha = 0.3f),
+                                "Selecciona una parcela...",
+                                color = TextTertiary,
                             )
                         },
                         leadingIcon = {
                             Icon(
                                 Icons.Default.Map,
                                 null,
-                                tint = AgraGreenLight.copy(alpha = 0.6f),
+                                tint = AgraGreen.copy(alpha = 0.6f),
                             )
                         },
                         trailingIcon = {
@@ -252,16 +239,16 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                                     if (parcelExpanded) Icons.Default.ArrowDropUp
                                     else Icons.Default.ArrowDropDown,
                                     null,
-                                    tint = Color.White.copy(alpha = 0.6f),
+                                    tint = TextSecondary,
                                 )
                             }
                         },
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = AgraGreen,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
-                            cursorColor = AgraGreenLight,
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White.copy(alpha = 0.8f),
+                            unfocusedBorderColor = CardBorder,
+                            cursorColor = AgraGreen,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
                         ),
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
@@ -273,16 +260,16 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                         onDismissRequest = { parcelExpanded = false },
                         modifier = Modifier
                             .fillMaxWidth(0.9f)
-                            .background(DarkBg3),
+                            .background(Color.White),
                     ) {
                         parcels.forEach { parcel ->
                             DropdownMenuItem(
                                 text = {
                                     Column {
-                                        Text(parcel.name, color = Color.White, fontSize = 14.sp)
+                                        Text(parcel.name, color = TextPrimary, fontSize = 14.sp)
                                         Text(
                                             parcel.code,
-                                            color = Color.White.copy(alpha = 0.4f),
+                                            color = TextTertiary,
                                             fontSize = 11.sp,
                                         )
                                     }
@@ -291,10 +278,10 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                                     Icon(
                                         Icons.Default.Landscape,
                                         null,
-                                        tint = if (selectedParcel?.id == parcel.id)
-                                            AgraGreenLight
+                                        tint = if (selectedParcel?.serverId == parcel.serverId)
+                                            AgraGreen
                                         else
-                                            AgraGreenLight.copy(alpha = 0.3f),
+                                            AgraGreen.copy(alpha = 0.3f),
                                     )
                                 },
                                 onClick = {
@@ -314,7 +301,7 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                 "Categoría",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color.White.copy(alpha = 0.7f),
+                color = TextSecondary,
             )
             Spacer(Modifier.height(8.dp))
             FlowRow(
@@ -331,12 +318,12 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                             Icon(cat.icon, null, Modifier.size(16.dp))
                         },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = cat.color.copy(alpha = 0.2f),
+                            selectedContainerColor = cat.color.copy(alpha = 0.12f),
                             selectedLabelColor = cat.color,
                             selectedLeadingIconColor = cat.color,
-                            containerColor = DarkBg3,
-                            labelColor = Color.White.copy(alpha = 0.6f),
-                            iconColor = Color.White.copy(alpha = 0.4f),
+                            containerColor = Color.White,
+                            labelColor = TextSecondary,
+                            iconColor = TextTertiary,
                         ),
                     )
                 }
@@ -349,7 +336,7 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                 "Severidad",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color.White.copy(alpha = 0.7f),
+                color = TextSecondary,
             )
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -365,10 +352,10 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                             )
                         },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = color.copy(alpha = 0.2f),
+                            selectedContainerColor = color.copy(alpha = 0.12f),
                             selectedLabelColor = color,
-                            containerColor = DarkBg3,
-                            labelColor = Color.White.copy(alpha = 0.6f),
+                            containerColor = Color.White,
+                            labelColor = TextSecondary,
                         ),
                     )
                 }
@@ -381,7 +368,7 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                 "Descripción",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color.White.copy(alpha = 0.7f),
+                color = TextSecondary,
             )
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
@@ -390,7 +377,7 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                 placeholder = {
                     Text(
                         "Describe lo que observas en campo...",
-                        color = Color.White.copy(alpha = 0.3f),
+                        color = TextTertiary,
                     )
                 },
                 minLines = 4,
@@ -398,10 +385,10 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = AgraGreen,
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
-                    cursorColor = AgraGreenLight,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White.copy(alpha = 0.8f),
+                    unfocusedBorderColor = CardBorder,
+                    cursorColor = AgraGreen,
+                    focusedTextColor = TextPrimary,
+                    unfocusedTextColor = TextPrimary,
                 ),
                 shape = RoundedCornerShape(14.dp),
             )
@@ -413,7 +400,7 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                 "Foto",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color.White.copy(alpha = 0.7f),
+                color = TextSecondary,
             )
             Spacer(Modifier.height(8.dp))
 
@@ -484,11 +471,11 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                             Icon(
                                 Icons.Default.CameraAlt,
                                 null,
-                                tint = AgraGreenLight,
+                                tint = AgraGreen,
                                 modifier = Modifier.size(32.dp),
                             )
                             Spacer(Modifier.height(6.dp))
-                            Text("Cámara", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
+                            Text("Cámara", fontSize = 12.sp, color = TextSecondary)
                         }
                     }
 
@@ -505,11 +492,11 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                             Icon(
                                 Icons.Default.PhotoLibrary,
                                 null,
-                                tint = AgraGreenLight,
+                                tint = AgraGreen,
                                 modifier = Modifier.size(32.dp),
                             )
                             Spacer(Modifier.height(6.dp))
-                            Text("Galería", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
+                            Text("Galería", fontSize = 12.sp, color = TextSecondary)
                         }
                     }
                 }
@@ -522,14 +509,14 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                     Icon(
                         Icons.Default.LocationOn,
                         null,
-                        tint = AgraGreenLight.copy(alpha = 0.5f),
+                        tint = AgraGreen.copy(alpha = 0.5f),
                         modifier = Modifier.size(20.dp),
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
                         "GPS se capturará automáticamente al guardar",
                         fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.4f),
+                        color = TextTertiary,
                     )
                 }
             }
@@ -549,7 +536,7 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                             description = description,
                             category = selectedCategory,
                             severity = selectedSeverity,
-                            parcelId = selectedParcel?.id,
+                            parcelId = selectedParcel?.serverId,
                             photoUri = photoUri?.toString(),
                         )
                         SyncWorker.enqueueImmediateSync(context)
@@ -574,7 +561,7 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                         .background(
                             brush = Brush.horizontalGradient(
                                 colors = if (canSave) listOf(AgraGreen, AgraGreenLight)
-                                else listOf(DarkBg3, DarkBg3),
+                                else listOf(LightBg3, LightBg3),
                             ),
                             shape = RoundedCornerShape(14.dp),
                         ),
@@ -591,12 +578,12 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                             Icon(
                                 Icons.Default.Save,
                                 null,
-                                tint = if (canSave) Color.White else Color.White.copy(alpha = 0.3f),
+                                tint = if (canSave) Color.White else TextTertiary,
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(
                                 "Guardar Nota",
-                                color = if (canSave) Color.White else Color.White.copy(alpha = 0.3f),
+                                color = if (canSave) Color.White else TextTertiary,
                                 fontWeight = FontWeight.SemiBold,
                             )
                         }

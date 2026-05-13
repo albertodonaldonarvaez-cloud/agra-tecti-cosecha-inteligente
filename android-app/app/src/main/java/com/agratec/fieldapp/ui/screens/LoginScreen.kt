@@ -14,10 +14,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -38,11 +36,11 @@ import com.agratec.fieldapp.ui.theme.*
 import kotlinx.coroutines.launch
 
 /**
- * Pantalla de Login con estética Liquid Glass.
- * - Logo Agra Tec-Ti animado
- * - Campos de email y contraseña con glass borders
+ * Pantalla de Login — Modo Claro.
+ * - Logo Agra Tec-Ti
+ * - Campos de email y contraseña con bordes verdes
  * - Botón de login con gradiente verde
- * - Indicador de "sin conexión" adaptativo
+ * - Indicador offline
  */
 @Composable
 fun LoginScreen(
@@ -60,48 +58,18 @@ fun LoginScreen(
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    // Animated background particles
-    val infiniteTransition = rememberInfiniteTransition(label = "bg")
-    val bgOffset by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(20000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "bgRotation"
-    )
-
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 brush = Brush.verticalGradient(
                     colors = listOf(
-                        DarkBg1,
-                        Color(0xFF0B1520),
-                        DarkBg2,
+                        LightBg1,
+                        AgraGreenSurface,
+                        LightBg1,
                     )
                 )
-            )
-            // Subtle animated green glow in background
-            .drawBehind {
-                val radius = size.maxDimension * 0.6f
-                val x = size.width * 0.5f + (kotlin.math.cos(Math.toRadians(bgOffset.toDouble())) * size.width * 0.2f).toFloat()
-                val y = size.height * 0.3f + (kotlin.math.sin(Math.toRadians(bgOffset.toDouble())) * size.height * 0.1f).toFloat()
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            AgraGreen.copy(alpha = 0.06f),
-                            Color.Transparent,
-                        ),
-                        center = Offset(x, y),
-                        radius = radius,
-                    ),
-                    radius = radius,
-                    center = Offset(x, y),
-                )
-            },
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -128,23 +96,22 @@ fun LoginScreen(
             Text(
                 text = "Campo Inteligente",
                 fontSize = 14.sp,
-                color = AgraGreenLight.copy(alpha = 0.7f),
+                color = AgraGreenDark.copy(alpha = 0.7f),
                 letterSpacing = 2.sp,
             )
 
             Spacer(modifier = Modifier.height(48.dp))
 
-            // Login Card (Glass)
+            // Login Card
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
                 cornerRadius = 24.dp,
-                showGlow = true,
             ) {
                 Text(
                     text = "Iniciar Sesión",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White,
+                    color = TextPrimary,
                     modifier = Modifier.padding(bottom = 24.dp),
                 )
 
@@ -157,7 +124,7 @@ fun LoginScreen(
                         Icon(
                             Icons.Default.Email,
                             contentDescription = null,
-                            tint = AgraGreenLight.copy(alpha = 0.6f),
+                            tint = AgraGreen.copy(alpha = 0.6f),
                         )
                     },
                     singleLine = true,
@@ -170,12 +137,12 @@ fun LoginScreen(
                     ),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = AgraGreen,
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
-                        focusedLabelColor = AgraGreenLight,
-                        unfocusedLabelColor = Color.White.copy(alpha = 0.4f),
-                        cursorColor = AgraGreenLight,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White.copy(alpha = 0.8f),
+                        unfocusedBorderColor = CardBorder,
+                        focusedLabelColor = AgraGreen,
+                        unfocusedLabelColor = TextTertiary,
+                        cursorColor = AgraGreen,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
                     ),
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
@@ -192,7 +159,7 @@ fun LoginScreen(
                         Icon(
                             Icons.Default.Lock,
                             contentDescription = null,
-                            tint = AgraGreenLight.copy(alpha = 0.6f),
+                            tint = AgraGreen.copy(alpha = 0.6f),
                         )
                     },
                     trailingIcon = {
@@ -201,7 +168,7 @@ fun LoginScreen(
                                 if (passwordVisible) Icons.Default.VisibilityOff
                                 else Icons.Default.Visibility,
                                 contentDescription = "Toggle password",
-                                tint = Color.White.copy(alpha = 0.4f),
+                                tint = TextTertiary,
                             )
                         }
                     },
@@ -217,12 +184,12 @@ fun LoginScreen(
                     ),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = AgraGreen,
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
-                        focusedLabelColor = AgraGreenLight,
-                        unfocusedLabelColor = Color.White.copy(alpha = 0.4f),
-                        cursorColor = AgraGreenLight,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White.copy(alpha = 0.8f),
+                        unfocusedBorderColor = CardBorder,
+                        focusedLabelColor = AgraGreen,
+                        unfocusedLabelColor = TextTertiary,
+                        cursorColor = AgraGreen,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
                     ),
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier
@@ -259,7 +226,6 @@ fun LoginScreen(
                             isLoading = false
                             result.fold(
                                 onSuccess = {
-                                    // Start background sync
                                     SyncWorker.enqueuePeriodicSync(context)
                                     onLoginSuccess()
                                 },
@@ -308,11 +274,7 @@ fun LoginScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.Center,
                             ) {
-                                Icon(
-                                    Icons.Default.Login,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                )
+                                Icon(Icons.Default.Login, null, tint = Color.White)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     "Entrar",
@@ -337,14 +299,14 @@ fun LoginScreen(
                 Icon(
                     Icons.Default.CloudOff,
                     contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.3f),
+                    tint = TextTertiary,
                     modifier = Modifier.size(16.dp),
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = "Funciona sin internet después de iniciar sesión",
                     fontSize = 12.sp,
-                    color = Color.White.copy(alpha = 0.3f),
+                    color = TextTertiary,
                 )
             }
         }

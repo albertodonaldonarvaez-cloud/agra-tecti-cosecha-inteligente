@@ -16,7 +16,7 @@ import com.agratec.fieldapp.ui.screens.CreateNoteScreen
 import com.agratec.fieldapp.ui.screens.LoginScreen
 import com.agratec.fieldapp.ui.screens.NotesListScreen
 import com.agratec.fieldapp.ui.theme.AgraFieldTheme
-import com.agratec.fieldapp.ui.theme.DarkBg1
+import com.agratec.fieldapp.ui.theme.LightBg1
 
 /**
  * Activity principal con navegación simple entre:
@@ -33,7 +33,7 @@ class MainActivity : ComponentActivity() {
             AgraFieldTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = DarkBg1,
+                    color = LightBg1,
                 ) {
                     AppNavigation()
                 }
