@@ -200,6 +200,14 @@ async function startServer() {
       });
 
       res.json({ success: true, photoUrl, fieldNoteFolio, localPhotoId });
+
+      // Enviar foto al grupo de Telegram (fire-and-forget, no bloquea la respuesta)
+      try {
+        const { notifyGroupPhotoFromMobile } = await import("../telegramFieldNotesBot");
+        await notifyGroupPhotoFromMobile(fieldNoteFolio, destPath);
+      } catch (tgErr) {
+        console.error("[SyncPhoto] Error notificando foto al grupo Telegram:", tgErr);
+      }
     } catch (error: any) {
       console.error("[SyncPhoto] Error:", error);
       res.status(500).json({ error: error.message || "Error interno del servidor" });

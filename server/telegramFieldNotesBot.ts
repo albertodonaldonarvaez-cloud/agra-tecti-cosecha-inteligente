@@ -1213,6 +1213,59 @@ export async function notifyGroupNewNoteFromWeb(noteId: number, folio: string, d
 }
 
 // ============================================================
+// Notificar al grupo cuando se sube una foto desde la app móvil
+// (la foto llega por /api/sync/photo, separada de la nota)
+// ============================================================
+
+export async function notifyGroupPhotoFromMobile(folio: string, photoPath: string): Promise<boolean> {
+  console.log("[TG Bot] notifyGroupPhotoFromMobile llamada para folio:", folio, "path:", photoPath);
+
+  const botToken = await getBotToken();
+  if (!botToken) {
+    console.log("[TG Bot] notifyGroupPhotoFromMobile: No hay botToken");
+    return false;
+  }
+
+  const groupChatId = await getFieldNotesGroupChatId();
+  if (!groupChatId) {
+    console.log("[TG Bot] notifyGroupPhotoFromMobile: No hay groupChatId");
+    return false;
+  }
+
+  if (!fs.existsSync(photoPath)) {
+    console.log("[TG Bot] notifyGroupPhotoFromMobile: Archivo no existe:", photoPath);
+    return false;
+  }
+
+  try {
+    const photoBuffer = fs.readFileSync(photoPath);
+    const blob = new Blob([photoBuffer], { type: "image/jpeg" });
+    const formData = new globalThis.FormData();
+    formData.append("chat_id", groupChatId);
+    formData.append("photo", blob, "reporte.jpg");
+    formData.append("caption", `📸 Foto — ${folio}\n📱 Enviada desde app móvil`);
+
+    const result = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+      method: "POST",
+      body: formData,
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (!result.ok) {
+      const errText = await result.text();
+      console.error("[TG Bot] notifyGroupPhotoFromMobile: Error:", errText);
+      return false;
+    }
+
+    console.log("[TG Bot] notifyGroupPhotoFromMobile: Foto enviada OK para folio:", folio);
+    return true;
+  } catch (err) {
+    console.error("[TG Bot] notifyGroupPhotoFromMobile: Error enviando foto:", err);
+    return false;
+  }
+}
+
+// ============================================================
 // Polling de actualizaciones
 // ============================================================
 
