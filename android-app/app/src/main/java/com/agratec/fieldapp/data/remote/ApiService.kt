@@ -67,8 +67,8 @@ interface ApiService {
 
     /**
      * Obtener lista de parcelas activas.
-     * tRPC query: GET con input vacío.
+     * REST endpoint (no tRPC) — retorna { success, parcels: [...] }
      */
-    @GET("api/trpc/offlineSync.getParcels")
-    suspend fun getParcels(): Response<TrpcResponse<List<ParcelData>>>
+    @GET("api/mobile/parcels")
+    suspend fun getParcels(): Response<ParcelsResponse>
 }

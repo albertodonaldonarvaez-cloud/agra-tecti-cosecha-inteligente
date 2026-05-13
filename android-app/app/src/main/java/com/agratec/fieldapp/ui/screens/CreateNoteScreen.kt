@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Environment
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
@@ -28,6 +29,8 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
+import com.agratec.fieldapp.data.remote.RetrofitClient
+import com.agratec.fieldapp.data.remote.dto.ParcelData
 import com.agratec.fieldapp.data.repository.FieldNoteRepository
 import com.agratec.fieldapp.sync.SyncWorker
 import com.agratec.fieldapp.ui.components.GlassCard
@@ -38,7 +41,6 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 data class CategoryOption(val key: String, val label: String, val icon: ImageVector, val color: Color)
-data class ParcelOption(val id: Int, val name: String)
 
 private val categories = listOf(
     CategoryOption("plaga_enfermedad", "Plaga/Enfermedad", Icons.Default.BugReport, SeverityCritical),
@@ -76,17 +78,37 @@ fun CreateNoteScreen(onBack: () -> Unit) {
     var photoUri by remember { mutableStateOf<Uri?>(null) }
     var tempPhotoUri by remember { mutableStateOf<Uri?>(null) }
 
-    // Parcel state
-    var selectedParcel by remember { mutableStateOf<ParcelOption?>(null) }
+    // Parcel state — fetched from server
+    var selectedParcel by remember { mutableStateOf<ParcelData?>(null) }
     var parcelExpanded by remember { mutableStateOf(false) }
-    val parcels = remember {
-        listOf(
-            ParcelOption(1, "Parcela Norte - Higo"),
-            ParcelOption(2, "Parcela Sur - Higo"),
-            ParcelOption(3, "Parcela Este - Aguacate"),
-            ParcelOption(4, "Parcela Oeste - Nuez"),
-            ParcelOption(5, "Parcela Central - Manzana"),
-        )
+    var parcels by remember { mutableStateOf<List<ParcelData>>(emptyList()) }
+    var parcelsLoading by remember { mutableStateOf(true) }
+    var parcelsError by remember { mutableStateOf<String?>(null) }
+
+    // Fetch parcels from server on mount
+    LaunchedEffect(Unit) {
+        try {
+            parcelsLoading = true
+            parcelsError = null
+            val api = RetrofitClient.getApiService(context)
+            val response = api.getParcels()
+            if (response.isSuccessful) {
+                val body = response.body()
+                if (body?.success == true && body.parcels != null) {
+                    parcels = body.parcels
+                    Log.i("CreateNote", "Parcelas cargadas: ${parcels.size}")
+                } else {
+                    parcelsError = body?.error ?: "Sin parcelas disponibles"
+                }
+            } else {
+                parcelsError = "Error ${response.code()}: ${response.message()}"
+            }
+        } catch (e: Exception) {
+            Log.e("CreateNote", "Error cargando parcelas", e)
+            parcelsError = "Sin conexión — parcelas no disponibles"
+        } finally {
+            parcelsLoading = false
+        }
     }
 
     // Camera launcher
@@ -162,71 +184,125 @@ fun CreateNoteScreen(onBack: () -> Unit) {
             )
             Spacer(Modifier.height(8.dp))
 
-            // Simple parcel dropdown using Box + DropdownMenu
-            Box(modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(
-                    value = selectedParcel?.name ?: "",
-                    onValueChange = {},
-                    readOnly = true,
-                    placeholder = {
+            if (parcelsLoading) {
+                // Loading state
+                GlassCard(Modifier.fillMaxWidth(), cornerRadius = 14.dp) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        CircularProgressIndicator(
+                            Modifier.size(20.dp),
+                            color = AgraGreenLight,
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.width(12.dp))
                         Text(
-                            "Selecciona una parcela...",
-                            color = Color.White.copy(alpha = 0.3f),
+                            "Cargando parcelas del servidor...",
+                            fontSize = 13.sp,
+                            color = Color.White.copy(alpha = 0.5f),
                         )
-                    },
-                    leadingIcon = {
+                    }
+                }
+            } else if (parcelsError != null && parcels.isEmpty()) {
+                // Error state
+                GlassCard(Modifier.fillMaxWidth(), cornerRadius = 14.dp) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Icon(
-                            Icons.Default.Map,
+                            Icons.Default.CloudOff,
                             null,
-                            tint = AgraGreenLight.copy(alpha = 0.6f),
+                            tint = SeverityMedium,
+                            modifier = Modifier.size(20.dp),
                         )
-                    },
-                    trailingIcon = {
-                        IconButton(onClick = { parcelExpanded = !parcelExpanded }) {
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            parcelsError ?: "Error desconocido",
+                            fontSize = 12.sp,
+                            color = SeverityMedium,
+                        )
+                    }
+                }
+            } else {
+                // Parcel dropdown
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = selectedParcel?.let { "${it.code} — ${it.name}" } ?: "",
+                        onValueChange = {},
+                        readOnly = true,
+                        placeholder = {
+                            Text(
+                                "Selecciona una parcela (${parcels.size})...",
+                                color = Color.White.copy(alpha = 0.3f),
+                            )
+                        },
+                        leadingIcon = {
                             Icon(
-                                if (parcelExpanded) Icons.Default.ArrowDropUp
-                                else Icons.Default.ArrowDropDown,
+                                Icons.Default.Map,
                                 null,
-                                tint = Color.White.copy(alpha = 0.6f),
+                                tint = AgraGreenLight.copy(alpha = 0.6f),
+                            )
+                        },
+                        trailingIcon = {
+                            IconButton(onClick = { parcelExpanded = !parcelExpanded }) {
+                                Icon(
+                                    if (parcelExpanded) Icons.Default.ArrowDropUp
+                                    else Icons.Default.ArrowDropDown,
+                                    null,
+                                    tint = Color.White.copy(alpha = 0.6f),
+                                )
+                            }
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AgraGreen,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
+                            cursorColor = AgraGreenLight,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White.copy(alpha = 0.8f),
+                        ),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { parcelExpanded = true },
+                    )
+                    DropdownMenu(
+                        expanded = parcelExpanded,
+                        onDismissRequest = { parcelExpanded = false },
+                        modifier = Modifier
+                            .fillMaxWidth(0.9f)
+                            .background(DarkBg3),
+                    ) {
+                        parcels.forEach { parcel ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(parcel.name, color = Color.White, fontSize = 14.sp)
+                                        Text(
+                                            parcel.code,
+                                            color = Color.White.copy(alpha = 0.4f),
+                                            fontSize = 11.sp,
+                                        )
+                                    }
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Landscape,
+                                        null,
+                                        tint = if (selectedParcel?.id == parcel.id)
+                                            AgraGreenLight
+                                        else
+                                            AgraGreenLight.copy(alpha = 0.3f),
+                                    )
+                                },
+                                onClick = {
+                                    selectedParcel = parcel
+                                    parcelExpanded = false
+                                },
                             )
                         }
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AgraGreen,
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
-                        cursorColor = AgraGreenLight,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White.copy(alpha = 0.8f),
-                    ),
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { parcelExpanded = true },
-                )
-                DropdownMenu(
-                    expanded = parcelExpanded,
-                    onDismissRequest = { parcelExpanded = false },
-                    modifier = Modifier
-                        .fillMaxWidth(0.9f)
-                        .background(DarkBg3),
-                ) {
-                    parcels.forEach { parcel ->
-                        DropdownMenuItem(
-                            text = {
-                                Text(parcel.name, color = Color.White)
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.Default.Landscape,
-                                    null,
-                                    tint = AgraGreenLight.copy(alpha = 0.5f),
-                                )
-                            },
-                            onClick = {
-                                selectedParcel = parcel
-                                parcelExpanded = false
-                            },
-                        )
                     }
                 }
             }

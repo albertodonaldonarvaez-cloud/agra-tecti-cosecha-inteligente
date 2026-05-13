@@ -60,3 +60,10 @@ data class ParcelData(
     val code: String,
     val name: String,
 )
+
+/** Respuesta del endpoint REST /api/mobile/parcels */
+data class ParcelsResponse(
+    val success: Boolean,
+    val parcels: List<ParcelData>?,
+    val error: String?,
+)

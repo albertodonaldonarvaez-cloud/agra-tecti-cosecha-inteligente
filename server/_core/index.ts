@@ -208,6 +208,53 @@ async function startServer() {
   
   // Servir fotos estáticas desde /app/photos
   app.use("/app/photos", express.static("/app/photos"));
+
+  // ============================================
+  // MOBILE API — Parcelas activas para la app móvil
+  // Endpoint REST porque la app usa Retrofit, no tRPC
+  // ============================================
+  app.get("/api/mobile/parcels", async (req, res) => {
+    try {
+      // Verificar autenticación (Bearer token o cookie)
+      const { getUserFromToken } = await import("../auth");
+      let token = req.cookies?.auth_token;
+      if (!token) {
+        const authHeader = req.headers.authorization;
+        if (authHeader?.startsWith("Bearer ")) {
+          token = authHeader.slice(7);
+        }
+      }
+      if (!token) {
+        return res.status(401).json({ error: "No autenticado" });
+      }
+      const user = await getUserFromToken(token);
+      if (!user) {
+        return res.status(401).json({ error: "Token inválido o expirado" });
+      }
+
+      const { getDb } = await import("../db");
+      const { parcels } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      const drizzle = await getDb();
+      if (!drizzle) {
+        return res.status(503).json({ error: "Base de datos no disponible" });
+      }
+
+      const result = await drizzle.select({
+        id: parcels.id,
+        code: parcels.code,
+        name: parcels.name,
+      })
+        .from(parcels)
+        .where(eq(parcels.isActive, true))
+        .orderBy(parcels.name);
+
+      res.json({ success: true, parcels: result });
+    } catch (error: any) {
+      console.error("[MobileAPI] Error fetching parcels:", error);
+      res.status(500).json({ error: error.message || "Error interno del servidor" });
+    }
+  });
   
   // tRPC API
   app.use(
