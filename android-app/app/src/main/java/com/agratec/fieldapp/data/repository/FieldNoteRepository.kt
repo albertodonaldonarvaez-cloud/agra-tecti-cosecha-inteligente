@@ -44,6 +44,7 @@ class FieldNoteRepository(context: Context) {
         parcelId: Int? = null,
         latitude: Double? = null,
         longitude: Double? = null,
+        photoUri: String? = null,
     ): FieldNoteEntity {
         val note = FieldNoteEntity(
             folio = UUID.randomUUID().toString(),
@@ -58,6 +59,16 @@ class FieldNoteRepository(context: Context) {
         )
         noteDao.insert(note)
         Log.i(TAG, "Nota creada localmente: ${note.folio}")
+
+        // If a photo was captured, create the linked PhotoEntity
+        if (photoUri != null) {
+            addPhoto(
+                fieldNoteFolio = note.folio,
+                localFilePath = photoUri,
+                caption = "Foto de campo",
+            )
+        }
+
         return note
     }
 

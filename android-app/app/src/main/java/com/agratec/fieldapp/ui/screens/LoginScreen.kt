@@ -113,23 +113,18 @@ fun LoginScreen(
         ) {
             Spacer(modifier = Modifier.height(60.dp))
 
-            // Logo
+            // Logo PNG real
             Image(
-                painter = painterResource(id = R.drawable.ic_agra_logo),
+                painter = painterResource(id = R.drawable.agratectilogo),
                 contentDescription = "Agra Tec-Ti",
-                modifier = Modifier.size(120.dp),
+                modifier = Modifier
+                    .size(180.dp)
+                    .clip(RoundedCornerShape(20.dp)),
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // App Name
-            Text(
-                text = "AGRA TEC-TI",
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-                letterSpacing = 4.sp,
-            )
+            // Subtitle
             Text(
                 text = "Campo Inteligente",
                 fontSize = 14.sp,

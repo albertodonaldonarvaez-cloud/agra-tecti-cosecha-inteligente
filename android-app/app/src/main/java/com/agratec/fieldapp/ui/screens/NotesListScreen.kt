@@ -60,7 +60,7 @@ fun NotesListScreen(onCreateNote: () -> Unit, onLogout: () -> Unit) {
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Image(painter = painterResource(R.drawable.ic_agra_logo), contentDescription = null, modifier = Modifier.size(32.dp))
+                        Image(painter = painterResource(R.drawable.agratectilogo), contentDescription = null, modifier = Modifier.size(32.dp))
                         Spacer(Modifier.width(10.dp))
                         Column {
                             Text("Notas de Campo", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
