@@ -69,8 +69,9 @@ COPY package.json ./
 COPY tsconfig.json ./
 COPY drizzle.config.ts ./
 
-# Copiar entrypoint
+# Copiar entrypoint y script de migración
 COPY entrypoint.sh ./entrypoint.sh
+COPY migrate.cjs ./migrate.cjs
 RUN chmod +x ./entrypoint.sh
 
 # Crear directorios para fotos y uploads temporales
