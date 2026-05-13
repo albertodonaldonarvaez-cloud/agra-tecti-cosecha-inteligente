@@ -10,13 +10,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import com.agratec.fieldapp.data.remote.RetrofitClient
 import com.agratec.fieldapp.data.repository.AuthRepository
 import com.agratec.fieldapp.ui.screens.CreateNoteScreen
 import com.agratec.fieldapp.ui.screens.LoginScreen
 import com.agratec.fieldapp.ui.screens.NotesListScreen
 import com.agratec.fieldapp.ui.theme.AgraFieldTheme
-import com.agratec.fieldapp.ui.theme.LightBg1
 
 /**
  * Activity principal con navegación simple entre:
@@ -33,7 +31,7 @@ class MainActivity : ComponentActivity() {
             AgraFieldTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = LightBg1,
+                    color = androidx.compose.ui.graphics.Color.Transparent,
                 ) {
                     AppNavigation()
                 }

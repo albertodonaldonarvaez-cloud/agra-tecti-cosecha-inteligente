@@ -14,6 +14,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -27,7 +32,10 @@ import com.agratec.fieldapp.R
 import com.agratec.fieldapp.data.local.entity.FieldNoteEntity
 import com.agratec.fieldapp.data.repository.FieldNoteRepository
 import com.agratec.fieldapp.sync.SyncWorker
+import com.agratec.fieldapp.ui.components.AgraBottomBar
 import com.agratec.fieldapp.ui.components.GlassCard
+import com.agratec.fieldapp.ui.components.StatCard
+import com.agratec.fieldapp.ui.components.StatusBadge
 import com.agratec.fieldapp.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -41,10 +49,22 @@ fun NotesListScreen(onCreateNote: () -> Unit, onLogout: () -> Unit) {
 
     LaunchedEffect(notes) { unsyncedCount = repository.getUnsyncedNoteCount() }
 
+    // Compute stats from local notes
+    val syncedCount = notes.count { it.isSynced }
+    val pendingCount = notes.count { !it.isSynced }
+    val criticalCount = notes.count { it.severity == "critica" }
+    val highCount = notes.count { it.severity == "alta" }
+
     if (showLogoutDialog) {
         AlertDialog(
             onDismissRequest = { showLogoutDialog = false },
-            title = { Text("Cerrar Sesión", color = TextPrimary) },
+            title = {
+                Text(
+                    "Cerrar Sesión",
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold,
+                )
+            },
             text = {
                 Text(
                     if (unsyncedCount > 0) "Tienes $unsyncedCount nota(s) sin sincronizar. ¿Continuar?"
@@ -54,146 +74,257 @@ fun NotesListScreen(onCreateNote: () -> Unit, onLogout: () -> Unit) {
             },
             confirmButton = {
                 TextButton(onClick = { showLogoutDialog = false; onLogout() }) {
-                    Text("Salir", color = SeverityCritical)
+                    Text("Salir", color = SeverityCritical, fontWeight = FontWeight.SemiBold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showLogoutDialog = false }) {
-                    Text("Cancelar", color = AgraGreen)
+                    Text("Cancelar", color = AgraGreen, fontWeight = FontWeight.SemiBold)
                 }
             },
             containerColor = Color.White,
+            shape = RoundedCornerShape(20.dp),
         )
     }
 
-    Scaffold(
-        containerColor = LightBg1,
-        topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Image(
-                            painter = painterResource(R.drawable.agratectilogo),
-                            contentDescription = null,
-                            modifier = Modifier.size(32.dp),
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                "Notas de Campo",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary,
-                            )
-                            Text(
-                                "${notes.size} notas • $unsyncedCount pendientes",
-                                fontSize = 11.sp,
-                                color = AgraGreenDark.copy(alpha = 0.6f),
-                            )
-                        }
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { SyncWorker.enqueueImmediateSync(context) }) {
-                        BadgedBox(badge = {
-                            if (unsyncedCount > 0) Badge(
-                                containerColor = SyncPending,
-                                contentColor = Color.White,
-                            ) {
-                                Text("$unsyncedCount", fontSize = 10.sp)
-                            }
-                        }) {
-                            Icon(
-                                Icons.Default.CloudUpload,
-                                "Sincronizar",
-                                tint = if (unsyncedCount > 0) SyncPending else TextTertiary,
-                            )
-                        }
-                    }
-                    IconButton(onClick = { showLogoutDialog = true }) {
-                        Icon(Icons.Default.Logout, "Cerrar sesión", tint = TextTertiary)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.White.copy(alpha = 0.9f),
-                ),
-            )
-        },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = onCreateNote,
-                containerColor = AgraGreen,
-                contentColor = Color.White,
-                shape = RoundedCornerShape(16.dp),
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        AgraGreenSurface,
+                        AgraEmerald50,
+                        AgraTeal50,
+                    ),
+                    start = Offset(0f, 0f),
+                    end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
+                )
+            ),
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            // ── Top App Bar with glassmorphism ──
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .shadow(
+                        elevation = 2.dp,
+                        shape = RoundedCornerShape(0.dp),
+                        ambientColor = Color.Black.copy(alpha = 0.04f),
+                    )
+                    .background(Color.White.copy(alpha = 0.88f))
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
-                Icon(Icons.Default.Add, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Nueva Nota", fontWeight = FontWeight.SemiBold)
-            }
-        },
-    ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            if (notes.isEmpty()) {
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .padding(48.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
-                        Icons.Default.NoteAdd,
-                        null,
-                        Modifier.size(80.dp),
-                        tint = TextTertiary.copy(alpha = 0.3f),
+                    Image(
+                        painter = painterResource(R.drawable.agratectilogo),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp)),
                     )
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        "Sin notas de campo",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = TextTertiary,
-                    )
-                    Text(
-                        "Toca + para crear tu primera observación",
-                        fontSize = 13.sp,
-                        color = TextTertiary.copy(alpha = 0.5f),
-                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Notas de Campo",
+                            fontSize = 19.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                        )
+                        Text(
+                            "${notes.size} notas • $unsyncedCount pendientes",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = AgraGreen.copy(alpha = 0.7f),
+                        )
+                    }
                 }
-            } else {
-                LazyColumn(
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    items(notes, key = { it.id }) { note -> NoteCard(note) }
-                    item { Spacer(Modifier.height(80.dp)) }
+            }
+
+            // ── Content ──
+            LazyColumn(
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 12.dp,
+                    bottom = 100.dp, // space for bottom bar
+                ),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                // Stats row
+                item {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        StatCard(
+                            label = "Total",
+                            value = notes.size,
+                            icon = Icons.Default.Description,
+                            iconColor = AgraGreen,
+                            iconBgColor = AgraGreen.copy(alpha = 0.12f),
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatCard(
+                            label = "Pendientes",
+                            value = pendingCount,
+                            icon = Icons.Default.CloudUpload,
+                            iconColor = SyncPending,
+                            iconBgColor = SyncPending.copy(alpha = 0.12f),
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatCard(
+                            label = "Críticas",
+                            value = criticalCount + highCount,
+                            icon = Icons.Default.Warning,
+                            iconColor = SeverityCritical,
+                            iconBgColor = SeverityCritical.copy(alpha = 0.12f),
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+
+                // Empty state
+                if (notes.isEmpty()) {
+                    item {
+                        Column(
+                            Modifier
+                                .fillParentMaxHeight(0.6f)
+                                .fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(72.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(Color(0xFFF3F4F6)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.Default.NoteAdd,
+                                    null,
+                                    Modifier.size(36.dp),
+                                    tint = TextTertiary.copy(alpha = 0.4f),
+                                )
+                            }
+                            Spacer(Modifier.height(16.dp))
+                            Text(
+                                "No hay notas de campo",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextSecondary,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "Crea una nueva nota para reportar observaciones",
+                                fontSize = 13.sp,
+                                color = TextTertiary,
+                            )
+                        }
+                    }
+                }
+
+                // Note cards
+                items(notes, key = { it.id }) { note ->
+                    NoteCard(note)
                 }
             }
         }
+
+        // ── Floating bottom bar ──
+        AgraBottomBar(
+            unsyncedCount = unsyncedCount,
+            onSync = { SyncWorker.enqueueImmediateSync(context) },
+            onCreateNote = onCreateNote,
+            onLogout = { showLogoutDialog = true },
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
     }
 }
 
 @Composable
 private fun NoteCard(note: FieldNoteEntity) {
-    GlassCard(Modifier.fillMaxWidth(), cornerRadius = 16.dp) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+    val catColor = getCatColor(note.category)
+    val isHighPriority = note.severity == "critica" || note.severity == "alta"
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 3.dp,
+                shape = RoundedCornerShape(20.dp),
+                ambientColor = Color.Black.copy(alpha = 0.06f),
+            )
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.White.copy(alpha = 0.75f))
+            .border(
+                width = 0.5.dp,
+                color = CardBorder.copy(alpha = 0.4f),
+                shape = RoundedCornerShape(20.dp),
+            )
+            // Priority indicator bar on the left
+            .then(
+                if (isHighPriority) Modifier.drawBehind {
+                    val barColor = if (note.severity == "critica") Color(0xFFEF4444) else Color(0xFFF97316)
+                    drawRoundRect(
+                        color = barColor,
+                        topLeft = Offset.Zero,
+                        size = Size(4.dp.toPx(), size.height),
+                        cornerRadius = CornerRadius(4.dp.toPx()),
+                    )
+                } else Modifier
+            ),
+    ) {
+        // Glass shine
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.3f),
+                            Color.Transparent,
+                        ),
+                        start = Offset.Zero,
+                        end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
+                    )
+                )
+        )
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            // Category icon
             Box(
                 Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(getCatColor(note.category).copy(alpha = 0.1f)),
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(catColor.copy(alpha = 0.1f)),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     getCatIcon(note.category),
                     null,
-                    tint = getCatColor(note.category),
+                    tint = catColor,
                     modifier = Modifier.size(22.dp),
                 )
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // Top row: category label + badges
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     Text(
                         getCatLabel(note.category),
                         fontSize = 14.sp,
@@ -201,59 +332,68 @@ private fun NoteCard(note: FieldNoteEntity) {
                         color = TextPrimary,
                     )
                     Spacer(Modifier.width(8.dp))
-                    val sc = when (note.severity) {
-                        "critica" -> SeverityCritical
-                        "alta" -> SeverityHigh
-                        "media" -> SeverityMedium
-                        else -> SeverityLow
-                    }
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(sc.copy(alpha = 0.1f))
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                    ) {
-                        Text(
-                            note.severity.replaceFirstChar { c -> c.uppercase() },
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = sc,
-                        )
-                    }
+                    StatusBadge(
+                        text = note.severity.replaceFirstChar { c -> c.uppercase() },
+                        color = when (note.severity) {
+                            "critica" -> SeverityCritical
+                            "alta" -> SeverityHigh
+                            "media" -> SeverityMedium
+                            else -> SeverityLow
+                        },
+                        showDot = true,
+                    )
                 }
-                Spacer(Modifier.height(4.dp))
+
+                Spacer(Modifier.height(6.dp))
+
+                // Description
                 Text(
                     note.description,
                     fontSize = 13.sp,
                     color = TextSecondary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
+                    lineHeight = 18.sp,
                 )
-                Spacer(Modifier.height(8.dp))
+
+                Spacer(Modifier.height(10.dp))
+
+                // Footer: folio + sync status
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        note.folio.take(8) + "...",
-                        fontSize = 11.sp,
-                        color = TextTertiary,
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(if (note.isSynced) SyncOk else SyncPending),
+                    // Folio badge
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFFF3F4F6))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Default.Tag,
+                            null,
+                            tint = TextTertiary,
+                            modifier = Modifier.size(10.dp),
                         )
-                        Spacer(Modifier.width(4.dp))
+                        Spacer(Modifier.width(3.dp))
                         Text(
-                            if (note.isSynced) "Sincronizado" else "Pendiente",
-                            fontSize = 11.sp,
-                            color = if (note.isSynced) SyncOk else SyncPending,
+                            note.folio.take(8),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = TextTertiary,
                         )
                     }
+
+                    // Sync badge
+                    StatusBadge(
+                        text = if (note.isSynced) "Sincronizado" else "Pendiente",
+                        color = if (note.isSynced) SyncOk else SyncPending,
+                        showDot = true,
+                        backgroundColor = if (note.isSynced) SyncOk.copy(alpha = 0.06f) else SyncPending.copy(alpha = 0.06f),
+                    )
                 }
             }
         }
@@ -268,11 +408,11 @@ private fun getCatIcon(c: String): ImageVector = when (c) {
     "arboles_mal_plantados" -> Icons.Default.Forest; else -> Icons.Default.Notes
 }
 private fun getCatColor(c: String): Color = when (c) {
-    "plaga_enfermedad" -> SeverityCritical; "riego_drenaje" -> Color(0xFF3B82F6)
-    "dano_mecanico" -> SeverityHigh; "maleza" -> AgraGreenLight
-    "fertilizacion" -> Color(0xFF8B5CF6); "suelo" -> Color(0xFF92400E)
-    "infraestructura" -> Color(0xFF64748B); "fauna" -> Color(0xFFF59E0B)
-    "arboles_mal_plantados" -> AgraGreen; else -> Color(0xFF94A3B8)
+    "plaga_enfermedad" -> CatPlaga; "riego_drenaje" -> CatRiego
+    "dano_mecanico" -> CatDano; "maleza" -> CatMaleza
+    "fertilizacion" -> CatFertilizacion; "suelo" -> CatSuelo
+    "infraestructura" -> CatInfra; "fauna" -> CatFauna
+    "arboles_mal_plantados" -> CatArboles; else -> CatOtro
 }
 private fun getCatLabel(c: String): String = when (c) {
     "arboles_mal_plantados" -> "Árboles"; "plaga_enfermedad" -> "Plaga/Enfermedad"

@@ -5,7 +5,10 @@
         <item name="android:colorPrimary">#16a34a</item>
         <item name="android:colorPrimaryDark">#15803d</item>
         <item name="android:colorAccent">#22c55e</item>
-        <item name="android:statusBarColor">#0f172a</item>
-        <item name="android:navigationBarColor">#0f172a</item>
+        <!-- Edge-to-edge: transparent system bars for Compose to draw behind -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>

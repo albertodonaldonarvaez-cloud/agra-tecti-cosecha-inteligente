@@ -17,3 +17,7 @@
 -keep class * implements com.google.gson.TypeAdapterFactory
 -keep class * implements com.google.gson.JsonSerializer
 -keep class * implements com.google.gson.JsonDeserializer
+
+# Google Fonts (Downloadable Fonts for Compose)
+-keep class androidx.compose.ui.text.googlefonts.** { *; }
+-keep class com.google.android.gms.fonts.** { *; }

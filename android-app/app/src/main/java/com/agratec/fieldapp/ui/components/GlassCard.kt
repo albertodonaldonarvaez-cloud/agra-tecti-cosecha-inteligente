@@ -1,56 +1,83 @@
 package com.agratec.fieldapp.ui.components
 
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.agratec.fieldapp.ui.theme.*
 
 /**
- * Light Glass Card — Componente con efecto sutil de elevación.
- * Para modo claro usa sombras suaves y fondo blanco translúcido.
+ * Premium Glass Card — Glassmorphism component matching the frontend's
+ * `bg-white/40 backdrop-blur-xl shadow-xl border-green-200/30` aesthetic.
+ *
+ * Features:
+ * - Elevated shadow for depth
+ * - White translucent background
+ * - Subtle green-tinted border
+ * - Diagonal gradient overlay for "liquid glass" shine effect
  */
 @Composable
 fun GlassCard(
     modifier: Modifier = Modifier,
-    cornerRadius: Dp = 20.dp,
+    cornerRadius: Dp = 24.dp,
     glowColor: Color = AgraGreen,
     showGlow: Boolean = false,
+    elevation: Dp = 4.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(cornerRadius)
 
-    Column(
+    Box(
         modifier = modifier
             .shadow(
-                elevation = 2.dp,
+                elevation = elevation,
                 shape = shape,
-                ambientColor = Color.Black.copy(alpha = 0.06f),
-                spotColor = Color.Black.copy(alpha = 0.04f),
+                ambientColor = Color.Black.copy(alpha = 0.08f),
+                spotColor = Color.Black.copy(alpha = 0.05f),
             )
             .clip(shape)
-            .background(Color.White)
+            .background(Color.White.copy(alpha = 0.85f))
             .border(
                 width = 1.dp,
-                color = CardBorder.copy(alpha = 0.6f),
+                color = AgraGreenLight.copy(alpha = 0.15f),
                 shape = shape,
-            )
-            .padding(16.dp),
-        content = content,
-    )
+            ),
+    ) {
+        // Diagonal gradient overlay — "liquid glass" shine (matching frontend's from-white/50 via-transparent)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.45f),
+                            Color.Transparent,
+                            Color.Transparent,
+                        ),
+                        start = Offset.Zero,
+                        end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
+                    )
+                )
+        )
+        // Content
+        Column(
+            modifier = Modifier.padding(16.dp),
+            content = content,
+        )
+    }
 }
 
 /**
- * Glass Surface — Variante más sutil para backgrounds grandes
+ * Glass Surface — A more subtle variant for large background areas.
+ * Uses a lighter border and less pronounced shadow.
  */
 @Composable
 fun GlassSurface(
@@ -61,11 +88,16 @@ fun GlassSurface(
     val shape = RoundedCornerShape(cornerRadius)
     Column(
         modifier = modifier
+            .shadow(
+                elevation = 1.dp,
+                shape = shape,
+                ambientColor = Color.Black.copy(alpha = 0.04f),
+            )
             .clip(shape)
-            .background(LightBg2)
+            .background(Color.White.copy(alpha = 0.6f))
             .border(
                 width = 0.5.dp,
-                color = CardBorder.copy(alpha = 0.4f),
+                color = CardBorder.copy(alpha = 0.3f),
                 shape = shape,
             )
             .padding(12.dp),
