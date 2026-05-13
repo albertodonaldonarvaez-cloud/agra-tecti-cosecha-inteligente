@@ -114,8 +114,8 @@ fun CreateNoteScreen(onBack: () -> Unit) {
             override fun onLocationResult(result: LocationResult) {
                 val loc = result.lastLocation ?: return
                 locationAccuracy = loc.accuracy
-                if (loc.accuracy <= 10f) {
-                    // GPS con precisión menor a 10m — aceptar
+                if (loc.accuracy <= 5f) {
+                    // GPS con precisión menor a 5m — aceptar
                     currentLocation = loc
                     locationStatus = "GPS listo (±${loc.accuracy.toInt()}m)"
                     // Stop updates once we have good accuracy
