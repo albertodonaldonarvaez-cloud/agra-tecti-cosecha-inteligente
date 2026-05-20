@@ -83,4 +83,18 @@ interface PhotoDao {
         WHERE p.isSynced = 0 AND n.folio IS NULL
     """)
     suspend fun getOrphanedCount(): Int
+
+    // ===== LIMPIEZA =====
+
+    /** Obtener TODAS las fotos sin sync (para escaneo de limpieza) */
+    @Query("SELECT * FROM photos WHERE isSynced = 0")
+    suspend fun getAllUnsyncedPhotos(): List<PhotoEntity>
+
+    /** Eliminar foto por ID */
+    @Query("DELETE FROM photos WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    /** Obtener foto por folio de nota (para upload inmediato) */
+    @Query("SELECT * FROM photos WHERE fieldNoteFolio = :folio AND isSynced = 0 LIMIT 1")
+    suspend fun getUnsyncedByFolio(folio: String): PhotoEntity?
 }

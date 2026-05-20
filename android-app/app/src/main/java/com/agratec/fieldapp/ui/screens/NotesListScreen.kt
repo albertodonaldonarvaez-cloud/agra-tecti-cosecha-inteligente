@@ -181,6 +181,9 @@ fun NotesListScreen(onCreateNote: () -> Unit, onLogout: () -> Unit) {
             confirmButton = {
                 TextButton(onClick = {
                     scope.launch {
+                        // Primero limpiar fantasmas (archivos que no existen)
+                        val cleaned = repository.cleanupGhostPhotos()
+                        // Luego resetear errores de las que SÍ existen
                         repository.resetFailedPhotos()
                         SyncWorker.enqueueImmediateSync(context)
                         showDiagDialog = false
@@ -189,7 +192,7 @@ fun NotesListScreen(onCreateNote: () -> Unit, onLogout: () -> Unit) {
                         failedPhotoCount = repository.getFailedPhotoCount()
                     }
                 }) {
-                    Text("🔄 Reset + Sync", color = AgraGreen, fontWeight = FontWeight.SemiBold)
+                    Text("🧹 Limpiar + Sync", color = AgraGreen, fontWeight = FontWeight.SemiBold)
                 }
             },
             dismissButton = {

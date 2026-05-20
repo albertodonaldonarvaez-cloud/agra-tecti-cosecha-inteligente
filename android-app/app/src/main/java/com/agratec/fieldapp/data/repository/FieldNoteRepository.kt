@@ -6,6 +6,9 @@ import com.agratec.fieldapp.data.local.AppDatabase
 import com.agratec.fieldapp.data.local.entity.FieldNoteEntity
 import com.agratec.fieldapp.data.local.entity.PhotoEntity
 import kotlinx.coroutines.flow.Flow
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.time.Instant
 import java.util.UUID
 
@@ -19,7 +22,7 @@ import java.util.UUID
  * si están sincronizados o no. Esto garantiza una experiencia
  * fluida incluso sin internet.
  */
-class FieldNoteRepository(context: Context) {
+class FieldNoteRepository(private val context: Context) {
 
     companion object {
         private const val TAG = "FieldNoteRepository"
@@ -168,6 +171,100 @@ class FieldNoteRepository(context: Context) {
             failed = failed,
             fileChecks = fileChecks,
         )
+    }
+
+    // ============================================
+    // LIMPIEZA DE FOTOS FANTASMA
+    // ============================================
+
+    /**
+     * Eliminar de Room las entradas de fotos cuyos archivos ya no existen en disco.
+     * Retorna el número de fotos eliminadas.
+     */
+    suspend fun cleanupGhostPhotos(): Int {
+        val allUnsynced = photoDao.getAllUnsyncedPhotos()
+        var cleaned = 0
+        for (photo in allUnsynced) {
+            val file = java.io.File(photo.localFilePath)
+            if (!file.exists()) {
+                photoDao.deleteById(photo.id)
+                cleaned++
+            }
+        }
+        Log.i(TAG, "Limpieza: $cleaned fotos fantasma eliminadas de ${allUnsynced.size} revisadas")
+        return cleaned
+    }
+
+    // ============================================
+    // UPLOAD INMEDIATO (sin esperar SyncWorker)
+    // ============================================
+
+    /**
+     * Intentar sincronizar una nota y su foto INMEDIATAMENTE después de crearla.
+     * Si falla (sin internet, error), no pasa nada: el SyncWorker lo reintentará.
+     */
+    suspend fun uploadNoteAndPhotoNow(folio: String): Boolean {
+        try {
+            val apiService = com.agratec.fieldapp.data.remote.RetrofitClient.getApiService(context)
+            val note = noteDao.getByFolio(folio) ?: return false
+
+            // PASO 1: Sync la nota al servidor
+            if (!note.isSynced) {
+                val syncItem = com.agratec.fieldapp.data.remote.dto.SyncNoteItem(
+                    folio = note.folio,
+                    description = note.description,
+                    category = note.category,
+                    severity = note.severity,
+                    parcelId = note.parcelId,
+                    latitude = note.latitude,
+                    longitude = note.longitude,
+                    createdAtLocal = note.createdAtLocal,
+                )
+                val request = com.agratec.fieldapp.data.remote.dto.TrpcMutationRequest(
+                    com.agratec.fieldapp.data.remote.dto.SyncNotesRequest(notes = listOf(syncItem))
+                )
+                val response = apiService.syncFieldNotes(request)
+                if (response.isSuccessful && response.body()?.result?.data?.json?.success == true) {
+                    noteDao.markAsSynced(folio)
+                    Log.i(TAG, ">>> Nota $folio sincronizada inmediatamente ✅")
+                } else {
+                    Log.w(TAG, ">>> Nota $folio: sync inmediato falló HTTP ${response.code()}")
+                    return false
+                }
+            }
+
+            // PASO 2: Subir la foto
+            val photo = photoDao.getUnsyncedByFolio(folio) ?: return true // no hay foto
+            val file = java.io.File(photo.localFilePath)
+            if (!file.exists()) {
+                Log.w(TAG, ">>> Foto ${photo.localPhotoId}: archivo no existe")
+                return false
+            }
+
+            val requestFile = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
+            val photoPart = okhttp3.MultipartBody.Part.createFormData("photo", file.name, requestFile)
+            val folioPart = photo.fieldNoteFolio.toRequestBody("text/plain".toMediaTypeOrNull())
+            val photoIdPart = photo.localPhotoId.toRequestBody("text/plain".toMediaTypeOrNull())
+
+            val photoResponse = apiService.uploadPhoto(
+                photo = photoPart,
+                fieldNoteFolio = folioPart,
+                localPhotoId = photoIdPart,
+            )
+
+            if (photoResponse.isSuccessful && photoResponse.body()?.success == true) {
+                photoDao.markAsSynced(photo.localPhotoId)
+                Log.i(TAG, ">>> Foto ${photo.localPhotoId} subida inmediatamente ✅")
+                return true
+            } else {
+                val error = photoResponse.body()?.error ?: "HTTP ${photoResponse.code()}"
+                Log.w(TAG, ">>> Foto ${photo.localPhotoId}: upload inmediato falló: $error")
+                return false
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, ">>> Upload inmediato falló (se reintentará en SyncWorker): ${e.message}")
+            return false
+        }
     }
 }
 

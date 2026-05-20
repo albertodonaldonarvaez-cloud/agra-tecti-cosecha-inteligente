@@ -656,7 +656,7 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                     onClick = {
                         isSaving = true
                         scope.launch {
-                            repository.createNote(
+                            val note = repository.createNote(
                                 description = description,
                                 category = selectedCategory,
                                 severity = selectedSeverity,
@@ -665,7 +665,12 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                                 longitude = currentLocation?.longitude,
                                 photoUri = lastPhotoRealPath,
                             )
-                            SyncWorker.enqueueImmediateSync(context)
+                            // Intentar subir nota+foto INMEDIATAMENTE
+                            val uploaded = repository.uploadNoteAndPhotoNow(note.folio)
+                            if (!uploaded) {
+                                // Si falló, el SyncWorker lo reintentará
+                                SyncWorker.enqueueImmediateSync(context)
+                            }
                             isSaving = false
                             onBack()
                         }
