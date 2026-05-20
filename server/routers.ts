@@ -2414,15 +2414,57 @@ export const appRouter = router({
         if (input?.category) conditions.push(eq(fieldNotes.category, input.category as any));
         if (input?.severity) conditions.push(eq(fieldNotes.severity, input.severity as any));
         if (input?.parcelId) conditions.push(eq(fieldNotes.parcelId, input.parcelId));
+
+        // JOIN con users para obtener el nombre del reportero
+        const baseQuery = drizzle
+          .select({
+            id: fieldNotes.id,
+            folio: fieldNotes.folio,
+            description: fieldNotes.description,
+            category: fieldNotes.category,
+            severity: fieldNotes.severity,
+            status: fieldNotes.status,
+            syncSource: fieldNotes.syncSource,
+            parcelId: fieldNotes.parcelId,
+            latitude: fieldNotes.latitude,
+            longitude: fieldNotes.longitude,
+            resolvedLatitude: fieldNotes.resolvedLatitude,
+            resolvedLongitude: fieldNotes.resolvedLongitude,
+            reportedByUserId: fieldNotes.reportedByUserId,
+            reportedByName: users.name,
+            resolutionNotes: fieldNotes.resolutionNotes,
+            resolvedAt: fieldNotes.resolvedAt,
+            createdAt: fieldNotes.createdAt,
+            updatedAt: fieldNotes.updatedAt,
+          })
+          .from(fieldNotes)
+          .leftJoin(users, eq(fieldNotes.reportedByUserId, users.id))
+          .orderBy(desc(fieldNotes.createdAt));
+
         const notes = conditions.length > 0
-          ? await drizzle.select().from(fieldNotes).where(and(...conditions)).orderBy(desc(fieldNotes.createdAt))
-          : await drizzle.select().from(fieldNotes).orderBy(desc(fieldNotes.createdAt));
-        // Cargar fotos de cada nota
-        const notesWithPhotos = await Promise.all(notes.map(async (n) => {
-          const photos = await drizzle.select().from(fieldNotePhotos).where(eq(fieldNotePhotos.fieldNoteId, n.id));
-          return { ...n, photos };
+          ? await baseQuery.where(and(...conditions))
+          : await baseQuery;
+
+        // Cargar TODAS las fotos en una sola query (en vez de N+1)
+        const noteIds = notes.map(n => n.id);
+        let allPhotos: any[] = [];
+        if (noteIds.length > 0) {
+          allPhotos = await drizzle.select().from(fieldNotePhotos)
+            .where(inArray(fieldNotePhotos.fieldNoteId, noteIds));
+        }
+
+        // Agrupar fotos por noteId
+        const photosByNoteId = new Map<number, any[]>();
+        for (const photo of allPhotos) {
+          const list = photosByNoteId.get(photo.fieldNoteId) || [];
+          list.push(photo);
+          photosByNoteId.set(photo.fieldNoteId, list);
+        }
+
+        return notes.map(n => ({
+          ...n,
+          photos: photosByNoteId.get(n.id) || [],
         }));
-        return notesWithPhotos;
       }),
 
     getById: protectedProcedure
