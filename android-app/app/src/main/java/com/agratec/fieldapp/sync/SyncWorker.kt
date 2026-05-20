@@ -174,16 +174,29 @@ class SyncWorker(
 
         // ===== PASO 2: Sincronizar fotos (una por una) =====
         try {
+            val totalUnsyncedPhotos = db.photoDao().getUnsyncedCount()
+            Log.i(TAG, ">>> FOTOS: Total sin sync en Room = $totalUnsyncedPhotos")
+
             val unsyncedPhotos = db.photoDao().getUnsyncedPhotos(limit = 20)
+            Log.i(TAG, ">>> FOTOS: Query getUnsyncedPhotos retornó ${unsyncedPhotos.size} fotos (filtrada por notas sincronizadas)")
+
+            if (unsyncedPhotos.isEmpty() && totalUnsyncedPhotos > 0) {
+                Log.w(TAG, ">>> PROBLEMA: Hay $totalUnsyncedPhotos fotos sin sync, pero la query de JOIN con notas sincronizadas retornó 0. Verificar si las notas están marcadas como isSynced=1 en Room.")
+            }
 
             if (unsyncedPhotos.isNotEmpty()) {
                 Log.i(TAG, "Sincronizando ${unsyncedPhotos.size} fotos...")
 
-                for (photo in unsyncedPhotos) {
+                for ((index, photo) in unsyncedPhotos.withIndex()) {
                     try {
                         val file = File(photo.localFilePath)
+                        Log.d(TAG, ">>> Foto ${index+1}/${unsyncedPhotos.size}: ${photo.localPhotoId}")
+                        Log.d(TAG, "    Ruta: ${photo.localFilePath}")
+                        Log.d(TAG, "    Existe: ${file.exists()}")
+                        Log.d(TAG, "    Folio nota: ${photo.fieldNoteFolio}")
+
                         if (!file.exists()) {
-                            Log.w(TAG, "Archivo no encontrado: ${photo.localFilePath}")
+                            Log.w(TAG, ">>> Archivo NO encontrado: ${photo.localFilePath}")
                             db.photoDao().markSyncFailed(
                                 photo.localPhotoId,
                                 "Archivo local no encontrado"
@@ -191,6 +204,8 @@ class SyncWorker(
                             errors++
                             continue
                         }
+
+                        Log.d(TAG, "    Tamaño: ${file.length()} bytes (${file.length() / 1024}KB)")
 
                         // Construir request multipart
                         val requestFile = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
@@ -202,22 +217,25 @@ class SyncWorker(
                         val photoIdPart = photo.localPhotoId
                             .toRequestBody("text/plain".toMediaTypeOrNull())
 
+                        Log.d(TAG, "    Enviando a servidor...")
                         val response = apiService.uploadPhoto(
                             photo = photoPart,
                             fieldNoteFolio = folioPart,
                             localPhotoId = photoIdPart,
                         )
 
+                        Log.d(TAG, "    HTTP Status: ${response.code()}")
                         if (response.isSuccessful && response.body()?.success == true) {
                             db.photoDao().markAsSynced(photo.localPhotoId)
                             photosSynced++
-                            Log.d(TAG, "Foto ${photo.localPhotoId} sincronizada OK")
+                            Log.d(TAG, ">>> Foto ${photo.localPhotoId} sincronizada OK ✅")
                         } else {
                             val errorMsg = response.body()?.error
                                 ?: "HTTP ${response.code()}"
                             db.photoDao().markSyncFailed(photo.localPhotoId, errorMsg)
                             errors++
-                            Log.w(TAG, "Error al subir foto ${photo.localPhotoId}: $errorMsg")
+                            Log.w(TAG, ">>> Error al subir foto ${photo.localPhotoId}: $errorMsg")
+                            Log.w(TAG, "    Response body: ${response.errorBody()?.string()}")
                         }
                     } catch (e: Exception) {
                         db.photoDao().markSyncFailed(
@@ -225,7 +243,7 @@ class SyncWorker(
                             e.message ?: "Error desconocido"
                         )
                         errors++
-                        Log.e(TAG, "Excepción al subir foto ${photo.localPhotoId}", e)
+                        Log.e(TAG, ">>> Excepción al subir foto ${photo.localPhotoId}: ${e.message}", e)
                     }
                 }
             }
