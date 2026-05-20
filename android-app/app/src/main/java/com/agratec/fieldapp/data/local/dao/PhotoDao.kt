@@ -53,4 +53,34 @@ interface PhotoDao {
     /** Contar fotos fallidas (con errores de sync) */
     @Query("SELECT COUNT(*) FROM photos WHERE isSynced = 0 AND syncAttempts > 0")
     suspend fun getFailedCount(): Int
+
+    // ===== DIAGNÓSTICO =====
+
+    /** Obtener muestra de fotos sin sync para diagnóstico */
+    @Query("SELECT * FROM photos WHERE isSynced = 0 ORDER BY id ASC LIMIT 5")
+    suspend fun getSampleUnsyncedPhotos(): List<PhotoEntity>
+
+    /** Contar fotos sin sync cuya nota NO está sincronizada (bloqueadas por la nota) */
+    @Query("""
+        SELECT COUNT(*) FROM photos p
+        INNER JOIN field_notes n ON p.fieldNoteFolio = n.folio
+        WHERE p.isSynced = 0 AND n.isSynced = 0
+    """)
+    suspend fun getBlockedByNoteCount(): Int
+
+    /** Contar fotos sin sync cuya nota SÍ está sincronizada (listas para subir) */
+    @Query("""
+        SELECT COUNT(*) FROM photos p
+        INNER JOIN field_notes n ON p.fieldNoteFolio = n.folio
+        WHERE p.isSynced = 0 AND n.isSynced = 1
+    """)
+    suspend fun getReadyToUploadCount(): Int
+
+    /** Contar fotos huérfanas (sin nota asociada en Room) */
+    @Query("""
+        SELECT COUNT(*) FROM photos p
+        LEFT JOIN field_notes n ON p.fieldNoteFolio = n.folio
+        WHERE p.isSynced = 0 AND n.folio IS NULL
+    """)
+    suspend fun getOrphanedCount(): Int
 }

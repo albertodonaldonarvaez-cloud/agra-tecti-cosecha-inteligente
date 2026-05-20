@@ -133,7 +133,65 @@ class FieldNoteRepository(context: Context) {
 
     /** Contar fotos con errores de sync */
     suspend fun getFailedPhotoCount(): Int = photoDao.getFailedCount()
+
+    /**
+     * Ejecutar diagnóstico completo de fotos para la UI.
+     * Retorna un informe detallado de por qué las fotos no se suben.
+     */
+    suspend fun runPhotoDiagnostics(): PhotoDiagnostics {
+        val totalUnsynced = photoDao.getUnsyncedCount()
+        val readyToUpload = photoDao.getReadyToUploadCount()
+        val blockedByNote = photoDao.getBlockedByNoteCount()
+        val orphaned = photoDao.getOrphanedCount()
+        val failed = photoDao.getFailedCount()
+
+        // Verificar archivos locales de muestra
+        val samplePhotos = photoDao.getSampleUnsyncedPhotos()
+        val fileChecks = samplePhotos.map { photo ->
+            val file = java.io.File(photo.localFilePath)
+            PhotoFileCheck(
+                photoId = photo.localPhotoId.take(8),
+                folio = photo.fieldNoteFolio.take(8),
+                path = photo.localFilePath,
+                exists = file.exists(),
+                sizeKB = if (file.exists()) (file.length() / 1024).toInt() else 0,
+                syncAttempts = photo.syncAttempts,
+                lastError = photo.lastSyncError,
+            )
+        }
+
+        return PhotoDiagnostics(
+            totalUnsynced = totalUnsynced,
+            readyToUpload = readyToUpload,
+            blockedByNote = blockedByNote,
+            orphaned = orphaned,
+            failed = failed,
+            fileChecks = fileChecks,
+        )
+    }
 }
+
+data class PhotoDiagnostics(
+    val totalUnsynced: Int,
+    val readyToUpload: Int,
+    val blockedByNote: Int,
+    val orphaned: Int,
+    val failed: Int,
+    val fileChecks: List<PhotoFileCheck>,
+) {
+    val filesExist: Int get() = fileChecks.count { it.exists }
+    val filesMissing: Int get() = fileChecks.count { !it.exists }
+}
+
+data class PhotoFileCheck(
+    val photoId: String,
+    val folio: String,
+    val path: String,
+    val exists: Boolean,
+    val sizeKB: Int,
+    val syncAttempts: Int,
+    val lastError: String?,
+)
 
 data class SyncStatus(
     val totalNotes: Int,

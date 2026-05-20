@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import com.agratec.fieldapp.R
 import com.agratec.fieldapp.data.local.entity.FieldNoteEntity
 import com.agratec.fieldapp.data.repository.FieldNoteRepository
+import com.agratec.fieldapp.data.repository.PhotoDiagnostics
 import com.agratec.fieldapp.sync.SyncWorker
 import com.agratec.fieldapp.ui.components.AgraBottomBar
 import com.agratec.fieldapp.ui.components.GlassCard
@@ -49,6 +50,9 @@ fun NotesListScreen(onCreateNote: () -> Unit, onLogout: () -> Unit) {
     var unsyncedPhotoCount by remember { mutableIntStateOf(0) }
     var failedPhotoCount by remember { mutableIntStateOf(0) }
     var showLogoutDialog by remember { mutableStateOf(false) }
+    var showDiagDialog by remember { mutableStateOf(false) }
+    var diagnostics by remember { mutableStateOf<PhotoDiagnostics?>(null) }
+    var diagLoading by remember { mutableStateOf(false) }
     var isRetrying by remember { mutableStateOf(false) }
 
     LaunchedEffect(notes) {
@@ -88,6 +92,109 @@ fun NotesListScreen(onCreateNote: () -> Unit, onLogout: () -> Unit) {
             dismissButton = {
                 TextButton(onClick = { showLogoutDialog = false }) {
                     Text("Cancelar", color = AgraGreen, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            containerColor = Color.White,
+            shape = RoundedCornerShape(20.dp),
+        )
+    }
+
+    // ===== DIÁLOGO DE DIAGNÓSTICO DE FOTOS =====
+    if (showDiagDialog) {
+        val scope = rememberCoroutineScope()
+
+        // Lanzar diagnóstico al abrir
+        LaunchedEffect(showDiagDialog) {
+            diagLoading = true
+            diagnostics = repository.runPhotoDiagnostics()
+            diagLoading = false
+        }
+
+        AlertDialog(
+            onDismissRequest = { showDiagDialog = false },
+            title = {
+                Text(
+                    "🔍 Diagnóstico de Fotos",
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                )
+            },
+            text = {
+                if (diagLoading) {
+                    Column(
+                        Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        CircularProgressIndicator(color = AgraGreen)
+                        Spacer(Modifier.height(8.dp))
+                        Text("Analizando...", color = TextSecondary, fontSize = 13.sp)
+                    }
+                } else {
+                    val d = diagnostics
+                    if (d != null) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            DiagRow("📷 Total sin sync", "${d.totalUnsynced}")
+                            DiagRow("✅ Listas para subir", "${d.readyToUpload}",
+                                if (d.readyToUpload > 0) AgraGreen else TextTertiary)
+                            DiagRow("⏳ Bloqueadas (nota no sync)", "${d.blockedByNote}",
+                                if (d.blockedByNote > 0) Color(0xFFF59E0B) else TextTertiary)
+                            DiagRow("👻 Huérfanas (sin nota)", "${d.orphaned}",
+                                if (d.orphaned > 0) Color(0xFFEF4444) else TextTertiary)
+                            DiagRow("❌ Con error", "${d.failed}",
+                                if (d.failed > 0) Color(0xFFEF4444) else TextTertiary)
+
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Archivos locales (muestra de ${d.fileChecks.size}):",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextPrimary,
+                            )
+                            d.fileChecks.forEach { fc ->
+                                val icon = if (fc.exists) "✅" else "❌"
+                                val sizeText = if (fc.exists) "${fc.sizeKB}KB" else "NO EXISTE"
+                                val errorText = if (fc.lastError != null) "\n   Error: ${fc.lastError}" else ""
+                                Text(
+                                    "$icon ${fc.photoId}… → $sizeText (intentos: ${fc.syncAttempts})$errorText",
+                                    fontSize = 11.sp,
+                                    color = if (fc.exists) TextSecondary else Color(0xFFEF4444),
+                                    lineHeight = 14.sp,
+                                )
+                            }
+
+                            if (d.readyToUpload == 0 && d.totalUnsynced > 0) {
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    "⚠️ Las fotos NO se suben porque las notas no están marcadas como sincronizadas en la DB local, o son huérfanas.",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFFEF4444),
+                                    fontWeight = FontWeight.Medium,
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        repository.resetFailedPhotos()
+                        SyncWorker.enqueueImmediateSync(context)
+                        showDiagDialog = false
+                        // Refresh counts
+                        unsyncedPhotoCount = repository.getUnsyncedPhotoCount()
+                        failedPhotoCount = repository.getFailedPhotoCount()
+                    }
+                }) {
+                    Text("🔄 Reset + Sync", color = AgraGreen, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiagDialog = false }) {
+                    Text("Cerrar", color = TextSecondary)
                 }
             },
             containerColor = Color.White,
@@ -164,12 +271,13 @@ fun NotesListScreen(onCreateNote: () -> Unit, onLogout: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                // Banner de fotos fallidas / pendientes
+                // Banner de fotos — CLICKEABLE para diagnóstico
                 if (unsyncedPhotoCount > 0 || failedPhotoCount > 0) {
                     item {
-                        val scope = rememberCoroutineScope()
                         Card(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showDiagDialog = true },
                             shape = RoundedCornerShape(16.dp),
                             colors = CardDefaults.cardColors(
                                 containerColor = if (failedPhotoCount > 0)
@@ -200,41 +308,17 @@ fun NotesListScreen(onCreateNote: () -> Unit, onLogout: () -> Unit) {
                                         color = TextPrimary,
                                     )
                                     Text(
-                                        if (failedPhotoCount > 0) "Toca reintentar para volver a enviarlas"
-                                        else "Se subirán automáticamente con conexión",
+                                        "Toca para ver diagnóstico",
                                         fontSize = 11.sp,
                                         color = TextSecondary,
                                     )
                                 }
-                                if (failedPhotoCount > 0) {
-                                    TextButton(
-                                        onClick = {
-                                            isRetrying = true
-                                            scope.launch {
-                                                repository.resetFailedPhotos()
-                                                SyncWorker.enqueueImmediateSync(context)
-                                                failedPhotoCount = 0
-                                                unsyncedPhotoCount = repository.getUnsyncedPhotoCount()
-                                                isRetrying = false
-                                            }
-                                        },
-                                        enabled = !isRetrying,
-                                    ) {
-                                        if (isRetrying) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(16.dp),
-                                                strokeWidth = 2.dp,
-                                            )
-                                        } else {
-                                            Text(
-                                                "Reintentar",
-                                                color = AgraGreen,
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 13.sp,
-                                            )
-                                        }
-                                    }
-                                }
+                                Icon(
+                                    Icons.Default.ChevronRight,
+                                    contentDescription = null,
+                                    tint = TextTertiary,
+                                    modifier = Modifier.size(20.dp),
+                                )
                             }
                         }
                     }
@@ -503,4 +587,21 @@ private fun getCatLabel(c: String): String = when (c) {
     "riego_drenaje" -> "Riego/Drenaje"; "dano_mecanico" -> "Daño Mecánico"
     "maleza" -> "Maleza"; "fertilizacion" -> "Fertilización"; "suelo" -> "Suelo"
     "infraestructura" -> "Infraestructura"; "fauna" -> "Fauna"; else -> "Otro"
+}
+
+@Composable
+private fun DiagRow(label: String, value: String, valueColor: Color = TextPrimary) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, fontSize = 12.sp, color = TextSecondary)
+        Text(
+            value,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = valueColor,
+        )
+    }
 }
