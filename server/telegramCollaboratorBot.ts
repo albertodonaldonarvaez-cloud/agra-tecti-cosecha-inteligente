@@ -1053,12 +1053,14 @@ async function finishNote(botToken: string, chatId: string, conv: CollabConversa
     const noteId = result.insertId;
 
     // Guardar foto si existe
+    let savedPhotoPath: string | undefined;
     if (conv.data.photoBuffer) {
       const dir = `/app/photos/field-notes/${folio}`;
       fs.mkdirSync(dir, { recursive: true });
       const filename = `reporte-${Date.now()}.jpg`;
       const filepath = path.join(dir, filename);
       fs.writeFileSync(filepath, conv.data.photoBuffer);
+      savedPhotoPath = filepath;
       await db.insert(fieldNotePhotos).values({
         fieldNoteId: noteId,
         photoPath: filepath,
@@ -1105,7 +1107,7 @@ async function finishNote(botToken: string, chatId: string, conv: CollabConversa
         conv.data.priority || "media",
         parcelName || undefined,
         collab?.name ? `${collab.name} (colaborador)` : "Colaborador",
-        conv.data.photoBuffer ? `/app/photos/field-notes/${folio}/reporte-${Date.now()}.jpg` : undefined,
+        savedPhotoPath,
       );
     } catch (err) {
       console.error("[Collab Bot] Error notificando al grupo:", err);

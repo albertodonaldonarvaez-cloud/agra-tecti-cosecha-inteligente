@@ -6,6 +6,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import cookieParser from "cookie-parser";
 import multer from "multer";
 import path from "path";
+import sharp from "sharp";
 import { appRouter } from "../routers";
 import { createContext } from "./authContext";
 import { serveStatic, setupVite } from "./vite";
@@ -174,12 +175,21 @@ async function startServer() {
       const dir = `/app/photos/field-notes/${fieldNoteFolio}`;
       fs.mkdirSync(dir, { recursive: true });
       
-      const ext = pathModule.extname(req.file.originalname) || ".jpg";
-      const fileName = `mobile-${localPhotoId}${ext}`;
+      const fileName = `mobile-${localPhotoId}.jpg`;
       const destPath = pathModule.join(dir, fileName);
       
-      // Mover archivo de /tmp/uploads a destino final
-      fs.copyFileSync(req.file.path, destPath);
+      // Comprimir y redimensionar la foto antes de guardar (max 1920px, JPEG 80%)
+      try {
+        const compressed = await sharp(req.file.path)
+          .resize(1920, 1920, { fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 80 })
+          .toBuffer();
+        fs.writeFileSync(destPath, compressed);
+      } catch (sharpErr) {
+        // Fallback: copiar sin comprimir si sharp falla
+        console.warn("[SyncPhoto] Sharp falló, copiando sin comprimir:", sharpErr);
+        fs.copyFileSync(req.file.path, destPath);
+      }
       fs.unlinkSync(req.file.path); // Limpiar temporal
       
       const photoUrl = `/app/photos/field-notes/${fieldNoteFolio}/${fileName}`;
@@ -206,8 +216,12 @@ async function startServer() {
     }
   });
   
-  // Servir fotos estáticas desde /app/photos
-  app.use("/app/photos", express.static("/app/photos"));
+  // Servir fotos estáticas desde /app/photos con cache de 7 días
+  app.use("/app/photos", express.static("/app/photos", {
+    maxAge: "7d",
+    immutable: true,
+    etag: true,
+  }));
 
   // ============================================
   // MOBILE API — Parcelas activas para la app móvil

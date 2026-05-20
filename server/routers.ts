@@ -2952,6 +2952,13 @@ export const appRouter = router({
 
         for (const note of input.notes) {
           try {
+            // Verificar si la nota ya existe ANTES del upsert para saber si es nueva
+            const [existingBefore] = await drizzle.select({ id: fieldNotes.id })
+              .from(fieldNotes)
+              .where(eq(fieldNotes.folio, note.folio))
+              .limit(1);
+            const isNew = !existingBefore;
+
             await drizzle.insert(fieldNotes).values({
               folio: note.folio,
               description: note.description,
@@ -2972,13 +2979,8 @@ export const appRouter = router({
                 longitude: note.longitude ? String(note.longitude) : null,
               },
             });
-            
-            // Verificar si fue insert o update
-            const [existing] = await drizzle.select({ id: fieldNotes.id })
-              .from(fieldNotes)
-              .where(eq(fieldNotes.folio, note.folio))
-              .limit(1);
-            results.push({ folio: note.folio, status: existing ? "created" : "updated" });
+
+            results.push({ folio: note.folio, status: isNew ? "created" : "updated" });
           } catch (error: any) {
             console.error(`[OfflineSync] Error syncing folio ${note.folio}:`, error.message);
             results.push({ folio: note.folio, status: "error", error: error.message });
