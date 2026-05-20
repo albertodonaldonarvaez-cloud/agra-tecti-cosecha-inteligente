@@ -120,14 +120,26 @@ class FieldNoteRepository(context: Context) {
             totalNotes = noteDao.getTotalCount(),
             unsyncedNotes = noteDao.getUnsyncedCount(),
             unsyncedPhotos = photoDao.getUnsyncedCount(),
+            failedPhotos = photoDao.getFailedCount(),
         )
     }
+
+    /** Resetear fotos fallidas para reintentar subida */
+    suspend fun resetFailedPhotos(): Int {
+        val count = photoDao.resetAllFailed()
+        Log.i(TAG, "Reseteadas $count fotos fallidas para reintento")
+        return count
+    }
+
+    /** Contar fotos con errores de sync */
+    suspend fun getFailedPhotoCount(): Int = photoDao.getFailedCount()
 }
 
 data class SyncStatus(
     val totalNotes: Int,
     val unsyncedNotes: Int,
     val unsyncedPhotos: Int,
+    val failedPhotos: Int = 0,
 ) {
     val hasPendingSync: Boolean get() = unsyncedNotes > 0 || unsyncedPhotos > 0
     val allSynced: Boolean get() = unsyncedNotes == 0 && unsyncedPhotos == 0

@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -45,9 +46,16 @@ fun NotesListScreen(onCreateNote: () -> Unit, onLogout: () -> Unit) {
     val repository = remember { FieldNoteRepository(context) }
     val notes by repository.getAllNotes().collectAsState(initial = emptyList())
     var unsyncedCount by remember { mutableIntStateOf(0) }
+    var unsyncedPhotoCount by remember { mutableIntStateOf(0) }
+    var failedPhotoCount by remember { mutableIntStateOf(0) }
     var showLogoutDialog by remember { mutableStateOf(false) }
+    var isRetrying by remember { mutableStateOf(false) }
 
-    LaunchedEffect(notes) { unsyncedCount = repository.getUnsyncedNoteCount() }
+    LaunchedEffect(notes) {
+        unsyncedCount = repository.getUnsyncedNoteCount()
+        unsyncedPhotoCount = repository.getUnsyncedPhotoCount()
+        failedPhotoCount = repository.getFailedPhotoCount()
+    }
 
     // Compute stats from local notes
     val syncedCount = notes.count { it.isSynced }
@@ -156,6 +164,82 @@ fun NotesListScreen(onCreateNote: () -> Unit, onLogout: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
+                // Banner de fotos fallidas / pendientes
+                if (unsyncedPhotoCount > 0 || failedPhotoCount > 0) {
+                    item {
+                        val scope = rememberCoroutineScope()
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (failedPhotoCount > 0)
+                                    Color(0xFFFEF2F2) else Color(0xFFFFFBEB)
+                            ),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    if (failedPhotoCount > 0) Icons.Default.ErrorOutline
+                                    else Icons.Default.PhotoCamera,
+                                    contentDescription = null,
+                                    tint = if (failedPhotoCount > 0) Color(0xFFEF4444)
+                                    else Color(0xFFF59E0B),
+                                    modifier = Modifier.size(24.dp),
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        if (failedPhotoCount > 0) "$failedPhotoCount fotos fallidas"
+                                        else "$unsyncedPhotoCount fotos pendientes",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = TextPrimary,
+                                    )
+                                    Text(
+                                        if (failedPhotoCount > 0) "Toca reintentar para volver a enviarlas"
+                                        else "Se subirán automáticamente con conexión",
+                                        fontSize = 11.sp,
+                                        color = TextSecondary,
+                                    )
+                                }
+                                if (failedPhotoCount > 0) {
+                                    TextButton(
+                                        onClick = {
+                                            isRetrying = true
+                                            scope.launch {
+                                                repository.resetFailedPhotos()
+                                                SyncWorker.enqueueImmediateSync(context)
+                                                failedPhotoCount = 0
+                                                unsyncedPhotoCount = repository.getUnsyncedPhotoCount()
+                                                isRetrying = false
+                                            }
+                                        },
+                                        enabled = !isRetrying,
+                                    ) {
+                                        if (isRetrying) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(16.dp),
+                                                strokeWidth = 2.dp,
+                                            )
+                                        } else {
+                                            Text(
+                                                "Reintentar",
+                                                color = AgraGreen,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 13.sp,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Stats row
                 item {
                     Row(

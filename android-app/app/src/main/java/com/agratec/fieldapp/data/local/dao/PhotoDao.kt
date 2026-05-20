@@ -45,4 +45,12 @@ interface PhotoDao {
     /** Contar fotos de una nota */
     @Query("SELECT COUNT(*) FROM photos WHERE fieldNoteFolio = :folio")
     suspend fun getPhotoCountForNote(folio: String): Int
+
+    /** Resetear errores de sync para reintentar subida de TODAS las fotos fallidas */
+    @Query("UPDATE photos SET syncAttempts = 0, lastSyncError = NULL WHERE isSynced = 0 AND syncAttempts > 0")
+    suspend fun resetAllFailed(): Int
+
+    /** Contar fotos fallidas (con errores de sync) */
+    @Query("SELECT COUNT(*) FROM photos WHERE isSynced = 0 AND syncAttempts > 0")
+    suspend fun getFailedCount(): Int
 }

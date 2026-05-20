@@ -174,7 +174,7 @@ class SyncWorker(
 
         // ===== PASO 2: Sincronizar fotos (una por una) =====
         try {
-            val unsyncedPhotos = db.photoDao().getUnsyncedPhotos(limit = 5)
+            val unsyncedPhotos = db.photoDao().getUnsyncedPhotos(limit = 20)
 
             if (unsyncedPhotos.isNotEmpty()) {
                 Log.i(TAG, "Sincronizando ${unsyncedPhotos.size} fotos...")
