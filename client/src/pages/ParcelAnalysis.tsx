@@ -1,4 +1,4 @@
-import { useAuth } from "@/_core/hooks/useAuth";
+﻿import { useAuth } from "@/_core/hooks/useAuth";
 import { GlassCard } from "@/components/GlassCard";
 import { ProtectedPage } from "@/components/ProtectedPage";
 import { APP_LOGO } from "@/const";
@@ -1839,11 +1839,12 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings }: { parcel: any; mappi
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [filterSeverity, setFilterSeverity] = useState<string>("all");
   const [filterNoPhoto, setFilterNoPhoto] = useState(false);
+  const [hoveredNoteId, setHoveredNoteId] = useState<number | null>(null);
 
-  // Cargar notas de campo para esta parcela
-  const { data: notes, isLoading: notesLoading } = trpc.fieldNotes.list.useQuery(
-    { parcelId: parcel?.id },
-    { enabled: !!parcel?.id, staleTime: 30 * 1000 }
+  // Cargar TODAS las notas de campo (no filtrar por parcelId para que funcione en todas las parcelas)
+  const { data: allNotes, isLoading: notesLoading } = trpc.fieldNotes.list.useQuery(
+    {},
+    { enabled: !!user, staleTime: 30 * 1000 }
   );
 
   // Cargar tareas ODM para la ortofoto de fondo
@@ -1852,9 +1853,45 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings }: { parcel: any; mappi
     { enabled: !!mapping?.odmProjectId, staleTime: 2 * 60 * 1000 }
   );
 
-  // Filtrar notas con GPS
+  // Calcular el bounding box de la parcela para filtrar notas geográficamente
+  const parcelBounds = useMemo(() => {
+    if (!parcel?.polygon) return null;
+    try {
+      const poly = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
+      if (!poly.coordinates?.[0]?.length) return null;
+      const coords = poly.coordinates[0];
+      let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+      for (const [lng, lat] of coords) {
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+      }
+      // Expandir 20% para captar notas cercanas al borde
+      const latPad = (maxLat - minLat) * 0.2 || 0.002;
+      const lngPad = (maxLng - minLng) * 0.2 || 0.002;
+      return { minLat: minLat - latPad, maxLat: maxLat + latPad, minLng: minLng - lngPad, maxLng: maxLng + lngPad };
+    } catch { return null; }
+  }, [parcel?.polygon]);
+
+  // Filtrar notas: primero por parcelId, luego por ubicación geográfica, y luego los filtros del UI
+  const notes = useMemo(() => {
+    if (!allNotes) return [];
+    return allNotes.filter((n: any) => {
+      // Si tiene parcelId y coincide → incluir
+      if (n.parcelId === parcel?.id) return true;
+      // Si no tiene parcelId pero tiene GPS y cae dentro del bounding box → incluir
+      if (!n.parcelId && n.latitude && n.longitude && parcelBounds) {
+        const lat = parseFloat(n.latitude);
+        const lng = parseFloat(n.longitude);
+        return lat >= parcelBounds.minLat && lat <= parcelBounds.maxLat &&
+               lng >= parcelBounds.minLng && lng <= parcelBounds.maxLng;
+      }
+      return false;
+    });
+  }, [allNotes, parcel?.id, parcelBounds]);
+
   const filteredNotes = useMemo(() => {
-    if (!notes) return [];
     return notes.filter((n: any) => {
       if (!n.latitude || !n.longitude) return false;
       if (filterCategory !== "all" && n.category !== filterCategory) return false;
@@ -1867,56 +1904,81 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings }: { parcel: any; mappi
   // Stats
   const stats = useMemo(() => {
     if (!notes) return { total: 0, withGps: 0, withPhoto: 0, withoutPhoto: 0, critical: 0 };
-    const withGps = notes.filter((n: any) => n.latitude && n.longitude);
     return {
       total: notes.length,
-      withGps: withGps.length,
-      withPhoto: notes.filter((n: any) => n.photos && n.photos.length > 0).length,
+      withGps: notes.filter((n: any) => n.latitude && n.longitude).length,
+      withPhoto: notes.filter((n: any) => n.photos?.length > 0).length,
       withoutPhoto: notes.filter((n: any) => !n.photos || n.photos.length === 0).length,
       critical: notes.filter((n: any) => n.severity === "critica" || n.severity === "alta").length,
     };
   }, [notes]);
 
-  // Encontrar el último vuelo RGB completado para la ortofoto de fondo
-  const rgbTaskUuid = useMemo(() => {
+  // Encontrar el último vuelo completado para ortofoto de fondo
+  const bestTaskUuid = useMemo(() => {
     if (!tasks) return null;
     const completed = tasks.filter((t: any) => t.status === 40);
+    if (completed.length === 0) return null;
     const sorted = [...completed].sort((a: any, b: any) =>
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
-    // Preferir vuelos RGB
+    // Preferir vuelos marcados como RGB manualmente
     const rgbFlight = sorted.find((t: any) => isRGBTask(t) === true);
     if (rgbFlight) return rgbFlight.uuid || String(rgbFlight.id);
-    // Si no hay RGB explícito, usar el último completado (que no sea multiespectral)
+    // Usar el más reciente que no sea explícitamente multiespectral
     const nonMulti = sorted.find((t: any) => isRGBTask(t) !== false);
-    return nonMulti ? (nonMulti.uuid || String(nonMulti.id)) : null;
+    return nonMulti ? (nonMulti.uuid || String(nonMulti.id)) : (sorted[0].uuid || String(sorted[0].id));
   }, [tasks]);
 
-  // Crear estilo de pin para una nota
-  const createNoteStyle = useCallback((note: any) => {
+  // Crear estilo de pin
+  const createNoteStyle = useCallback((note: any, isHighlighted = false) => {
     const severityColor = SEVERITY_COLORS[note.severity] || "#6b7280";
     const cat = NOTE_CATEGORIES[note.category] || NOTE_CATEGORIES.otro;
-    const hasPhoto = note.photos && note.photos.length > 0;
+    const hasPhoto = note.photos?.length > 0;
+    const radius = isHighlighted ? 18 : 14;
 
     return new Style({
       image: new CircleStyle({
-        radius: 14,
+        radius,
         fill: new Fill({ color: severityColor }),
         stroke: new Stroke({
           color: hasPhoto ? "#ffffff" : "#000000",
-          width: 2.5,
+          width: isHighlighted ? 3.5 : 2.5,
           lineDash: hasPhoto ? undefined : [4, 4],
         }),
       }),
       text: new OlText({
         text: cat.emoji,
-        font: "14px sans-serif",
-        offsetY: 0,
+        font: `${isHighlighted ? 18 : 14}px sans-serif`,
         fill: new Fill({ color: "#ffffff" }),
         stroke: new Stroke({ color: "rgba(0,0,0,0.5)", width: 1 }),
       }),
+      zIndex: isHighlighted ? 100 : 1,
     });
   }, []);
+
+  // Función para ir a una nota en el mapa
+  const flyToNote = useCallback((note: any) => {
+    if (!mapInstanceRef.current) return;
+    const lat = parseFloat(note.latitude);
+    const lng = parseFloat(note.longitude);
+    if (isNaN(lat) || isNaN(lng)) return;
+
+    const coords = fromLonLat([lng, lat]);
+    mapInstanceRef.current.getView().animate({ center: coords, zoom: 20, duration: 600 });
+
+    // Mostrar popup
+    setSelectedNote(note);
+    overlayRef.current?.setPosition(coords);
+
+    // Resaltar el pin
+    if (notesLayerRef.current) {
+      const source = notesLayerRef.current.getSource();
+      source?.getFeatures().forEach(f => {
+        const nd = f.get("noteData");
+        f.setStyle(createNoteStyle(nd, nd?.id === note.id));
+      });
+    }
+  }, [createNoteStyle]);
 
   // Inicializar mapa
   useEffect(() => {
@@ -1950,7 +2012,6 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings }: { parcel: any; mappi
     const orthoTileLayer = new TileLayer({ visible: false, opacity: 0.9, zIndex: 10 });
     orthoLayerRef.current = orthoTileLayer;
 
-    // Polígono de parcela
     const polyFeatures: Feature[] = [];
     if (parcel?.polygon) {
       try {
@@ -1968,8 +2029,7 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings }: { parcel: any; mappi
     }
 
     const polygonLayer = new VectorLayer({ source: new VectorSource({ features: polyFeatures }), zIndex: 5 });
-    const notesVectorSource = new VectorSource();
-    const notesVectorLayer = new VectorLayer({ source: notesVectorSource, zIndex: 25 });
+    const notesVectorLayer = new VectorLayer({ source: new VectorSource(), zIndex: 25 });
     notesLayerRef.current = notesVectorLayer;
 
     const map = new Map({
@@ -1979,21 +2039,28 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings }: { parcel: any; mappi
       view: new View({ center, zoom, maxZoom: 24 }),
     });
 
-    // Click en feature → mostrar popup
     map.on("click", (evt) => {
       const feature = map.forEachFeatureAtPixel(evt.pixel, (f) => f);
-      if (feature && feature.get("noteData")) {
-        const noteData = feature.get("noteData");
-        setSelectedNote(noteData);
+      if (feature?.get("noteData")) {
+        const nd = feature.get("noteData");
+        setSelectedNote(nd);
         const geom = feature.getGeometry();
         if (geom) overlay.setPosition((geom as Point).getCoordinates());
+        // Resaltar
+        notesVectorLayer.getSource()?.getFeatures().forEach(f => {
+          const d = f.get("noteData");
+          f.setStyle(createNoteStyle(d, d?.id === nd?.id));
+        });
       } else {
         setSelectedNote(null);
         overlay.setPosition(undefined);
+        // Quitar resaltado
+        notesVectorLayer.getSource()?.getFeatures().forEach(f => {
+          f.setStyle(createNoteStyle(f.get("noteData"), false));
+        });
       }
     });
 
-    // Cursor pointer
     map.on("pointermove", (evt) => {
       const hit = map.forEachFeatureAtPixel(evt.pixel, (f) => !!f.get("noteData"));
       const el = map.getTargetElement();
@@ -2001,27 +2068,18 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings }: { parcel: any; mappi
     });
 
     mapInstanceRef.current = map;
-
-    return () => {
-      map.setTarget(undefined);
-      mapInstanceRef.current = null;
-      notesLayerRef.current = null;
-      orthoLayerRef.current = null;
-      overlayRef.current = null;
-    };
+    return () => { map.setTarget(undefined); mapInstanceRef.current = null; };
   }, [parcel?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Cargar ortofoto RGB de fondo
+  // Cargar ortofoto de fondo
   useEffect(() => {
-    if (!mapInstanceRef.current || !orthoLayerRef.current || !rgbTaskUuid || !mapping?.odmProjectId) return;
+    if (!mapInstanceRef.current || !orthoLayerRef.current || !bestTaskUuid || !mapping?.odmProjectId) return;
 
-    const proxyUrl = `/api/odm-tiles/${mapping.odmProjectId}/${rgbTaskUuid}/orthophoto/{z}/{x}/{y}.png`;
-    fetch(`/api/odm-bounds/${mapping.odmProjectId}/${rgbTaskUuid}`)
+    const proxyUrl = `/api/odm-tiles/${mapping.odmProjectId}/${bestTaskUuid}/orthophoto/{z}/{x}/{y}.png`;
+    fetch(`/api/odm-bounds/${mapping.odmProjectId}/${bestTaskUuid}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        const maxZoom = data?.maxzoom || 24;
-        const tileSource = new XYZ({ url: proxyUrl, minZoom: 0, maxZoom, tileSize: 256, crossOrigin: "anonymous" });
-
+        const tileSource = new XYZ({ url: proxyUrl, minZoom: 0, maxZoom: data?.maxzoom || 24, tileSize: 256, crossOrigin: "anonymous" });
         if (orthoLayerRef.current && mapInstanceRef.current) {
           orthoLayerRef.current.setSource(tileSource);
           orthoLayerRef.current.setVisible(true);
@@ -2033,33 +2091,29 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings }: { parcel: any; mappi
         }
       })
       .catch(() => {});
-  }, [rgbTaskUuid, mapping?.odmProjectId]);
+  }, [bestTaskUuid, mapping?.odmProjectId]);
 
-  // Actualizar pines cuando cambian las notas filtradas
+  // Actualizar pines
   useEffect(() => {
     if (!notesLayerRef.current) return;
     const source = notesLayerRef.current.getSource();
     if (!source) return;
     source.clear();
 
-    const noteFeatures: Feature[] = [];
     for (const note of filteredNotes) {
       const lat = parseFloat(note.latitude);
       const lng = parseFloat(note.longitude);
       if (isNaN(lat) || isNaN(lng)) continue;
-
       const feature = new Feature({ geometry: new Point(fromLonLat([lng, lat])), noteData: note });
-      feature.setStyle(createNoteStyle(note));
-      noteFeatures.push(feature);
+      feature.setStyle(createNoteStyle(note, false));
+      source.addFeature(feature);
     }
-    source.addFeatures(noteFeatures);
 
-    // Ajustar vista si hay notas y no hay ortofoto
-    if (noteFeatures.length > 0 && !rgbTaskUuid && mapInstanceRef.current) {
+    if (filteredNotes.length > 0 && !bestTaskUuid && mapInstanceRef.current) {
       const extent = source.getExtent();
       mapInstanceRef.current.getView().fit(extent, { padding: [60, 60, 60, 60], maxZoom: 18, duration: 500 });
     }
-  }, [filteredNotes, createNoteStyle, rgbTaskUuid]);
+  }, [filteredNotes, createNoteStyle, bestTaskUuid]);
 
   if (notesLoading) {
     return (
@@ -2080,7 +2134,7 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings }: { parcel: any; mappi
             </div>
             <div>
               <h3 className="text-sm font-semibold text-green-900">Notas en Mapa</h3>
-              <p className="text-[10px] text-green-500">{stats.withGps} de {stats.total} con GPS</p>
+              <p className="text-[10px] text-green-500">{stats.withGps} de {stats.total} con GPS · {parcel?.name || parcel?.code}</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2 ml-auto">
@@ -2101,90 +2155,170 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings }: { parcel: any; mappi
 
       {/* Filtros */}
       <div className="flex flex-wrap gap-2">
-        <select
-          value={filterCategory}
-          onChange={(e) => setFilterCategory(e.target.value)}
-          className="text-xs bg-white/60 border border-green-200/50 rounded-xl px-3 py-1.5 text-green-700 focus:outline-none focus:ring-1 focus:ring-green-400"
-        >
+        <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}
+          className="text-xs bg-white/60 border border-green-200/50 rounded-xl px-3 py-1.5 text-green-700 focus:outline-none focus:ring-1 focus:ring-green-400">
           <option value="all">Todas las categorías</option>
           {Object.entries(NOTE_CATEGORIES).map(([key, { label, emoji }]) => (
             <option key={key} value={key}>{emoji} {label}</option>
           ))}
         </select>
-        <select
-          value={filterSeverity}
-          onChange={(e) => setFilterSeverity(e.target.value)}
-          className="text-xs bg-white/60 border border-green-200/50 rounded-xl px-3 py-1.5 text-green-700 focus:outline-none focus:ring-1 focus:ring-green-400"
-        >
+        <select value={filterSeverity} onChange={(e) => setFilterSeverity(e.target.value)}
+          className="text-xs bg-white/60 border border-green-200/50 rounded-xl px-3 py-1.5 text-green-700 focus:outline-none focus:ring-1 focus:ring-green-400">
           <option value="all">Todas las prioridades</option>
           <option value="baja">🔵 Baja</option>
           <option value="media">🟡 Media</option>
           <option value="alta">🟠 Alta</option>
           <option value="critica">🔴 Crítica</option>
         </select>
-        <button
-          onClick={() => setFilterNoPhoto(!filterNoPhoto)}
+        <button onClick={() => setFilterNoPhoto(!filterNoPhoto)}
           className={`text-xs px-3 py-1.5 rounded-xl font-medium transition-all flex items-center gap-1 ${
-            filterNoPhoto
-              ? "bg-amber-500 text-white shadow-sm"
-              : "bg-white/60 text-green-700 border border-green-200/50 hover:bg-amber-50"
-          }`}
-        >
+            filterNoPhoto ? "bg-amber-500 text-white shadow-sm" : "bg-white/60 text-green-700 border border-green-200/50 hover:bg-amber-50"
+          }`}>
           <CameraOff className="h-3 w-3" /> Solo sin foto
         </button>
       </div>
 
-      {/* Mapa */}
-      <GlassCard className="overflow-hidden" hover={false}>
-        <div className="relative">
-          <div
-            ref={mapRef}
-            className="w-full h-[350px] sm:h-[450px] md:h-[550px] lg:h-[650px]"
-            style={{ background: "#f0f9f0" }}
-          />
-          {/* Leyenda */}
-          <div className="absolute bottom-3 right-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-lg border border-green-200/50 p-2.5 z-20 text-[10px] space-y-1.5 max-w-[180px]">
-            <div className="font-semibold text-green-800 text-xs mb-1">Prioridad</div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-full bg-blue-500 border-2 border-white shadow-sm" /> Baja
-              <span className="w-3 h-3 rounded-full bg-amber-500 border-2 border-white shadow-sm ml-2" /> Media
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-full bg-orange-500 border-2 border-white shadow-sm" /> Alta
-              <span className="w-3 h-3 rounded-full bg-red-500 border-2 border-white shadow-sm ml-2" /> Crítica
-            </div>
-            <div className="border-t border-green-200/30 pt-1 mt-1">
+      {/* Mapa + Lista */}
+      <div className="flex flex-col lg:flex-row gap-4">
+        {/* Mapa */}
+        <GlassCard className="overflow-hidden flex-1 lg:min-w-0" hover={false}>
+          <div className="relative">
+            <div ref={mapRef} className="w-full h-[350px] sm:h-[450px] md:h-[500px] lg:h-[600px]" style={{ background: "#f0f9f0" }} />
+            {/* Leyenda */}
+            <div className="absolute bottom-3 right-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-lg border border-green-200/50 p-2.5 z-20 text-[10px] space-y-1.5 max-w-[160px]">
+              <div className="font-semibold text-green-800 text-xs mb-1">Prioridad</div>
               <div className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-full border-2 border-black" style={{ borderStyle: "dashed" }} /> Sin foto
+                <span className="w-3 h-3 rounded-full bg-blue-500 border-2 border-white shadow-sm" /> Baja
+                <span className="w-3 h-3 rounded-full bg-amber-500 border-2 border-white shadow-sm ml-2" /> Media
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-full bg-orange-500 border-2 border-white shadow-sm" /> Alta
+                <span className="w-3 h-3 rounded-full bg-red-500 border-2 border-white shadow-sm ml-2" /> Crítica
+              </div>
+              <div className="border-t border-green-200/30 pt-1 mt-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-full border-2 border-black" style={{ borderStyle: "dashed" }} /> Sin foto
+                </div>
               </div>
             </div>
+            {filteredNotes.length === 0 && !notesLoading && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/5 z-10">
+                <div className="bg-white/90 backdrop-blur-sm px-6 py-4 rounded-2xl shadow-lg text-center">
+                  <ClipboardList className="h-8 w-8 mx-auto text-green-300 mb-2" />
+                  <p className="text-sm text-green-700 font-medium">
+                    {notes.length === 0 ? "Sin notas en esta parcela" : "Sin notas que coincidan con los filtros"}
+                  </p>
+                  <p className="text-xs text-green-500 mt-1">
+                    {notes.length === 0 ? "Crea notas desde la app móvil con GPS activo" : "Ajusta los filtros"}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
-          {/* Indicador sin notas */}
-          {filteredNotes.length === 0 && !notesLoading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/5 z-10">
-              <div className="bg-white/90 backdrop-blur-sm px-6 py-4 rounded-2xl shadow-lg text-center">
-                <ClipboardList className="h-8 w-8 mx-auto text-green-300 mb-2" />
-                <p className="text-sm text-green-700 font-medium">
-                  {notes?.length === 0 ? "Sin notas en esta parcela" : "Sin notas con GPS que coincidan"}
-                </p>
-                <p className="text-xs text-green-500 mt-1">
-                  {notes?.length === 0 ? "Crea notas desde la app móvil" : "Ajusta los filtros"}
-                </p>
-              </div>
+        </GlassCard>
+
+        {/* Lista de notas (lado derecho) */}
+        <div className="lg:w-[320px] xl:w-[360px] flex-shrink-0">
+          <GlassCard className="p-0 overflow-hidden" hover={false}>
+            <div className="p-3 border-b border-green-200/30 bg-white/30">
+              <h4 className="text-sm font-semibold text-green-800 flex items-center gap-2">
+                <ClipboardList className="h-4 w-4" />
+                Notas ({filteredNotes.length})
+              </h4>
+              <p className="text-[10px] text-green-500 mt-0.5">Toca una nota para ir a su ubicación</p>
             </div>
-          )}
+            <div className="max-h-[350px] sm:max-h-[400px] lg:max-h-[540px] overflow-y-auto divide-y divide-green-100/50">
+              {filteredNotes.length === 0 && (
+                <div className="p-6 text-center text-green-400 text-xs">Sin notas</div>
+              )}
+              {filteredNotes.map((note: any) => {
+                const cat = NOTE_CATEGORIES[note.category] || NOTE_CATEGORIES.otro;
+                const hasPhoto = note.photos?.length > 0;
+                const isActive = selectedNote?.id === note.id;
+                return (
+                  <div
+                    key={note.id}
+                    onClick={() => flyToNote(note)}
+                    onMouseEnter={() => setHoveredNoteId(note.id)}
+                    onMouseLeave={() => setHoveredNoteId(null)}
+                    className={`flex items-start gap-2.5 p-3 cursor-pointer transition-all ${
+                      isActive ? "bg-green-50 border-l-4 border-l-green-500" :
+                      hoveredNoteId === note.id ? "bg-green-25 bg-green-50/50" : "hover:bg-white/40"
+                    }`}
+                  >
+                    {/* Icono categoría + severidad */}
+                    <div className="flex-shrink-0 relative">
+                      <div
+                        className="w-9 h-9 rounded-full flex items-center justify-center text-sm shadow-sm"
+                        style={{ backgroundColor: SEVERITY_COLORS[note.severity] || "#6b7280" }}
+                      >
+                        {cat.emoji}
+                      </div>
+                      {!hasPhoto && (
+                        <div className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-amber-500 rounded-full flex items-center justify-center">
+                          <CameraOff className="h-2.5 w-2.5 text-white" />
+                        </div>
+                      )}
+                    </div>
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-semibold text-green-900 truncate">{cat.label}</span>
+                        <span
+                          className="text-[9px] px-1 py-0.5 rounded-full font-bold text-white flex-shrink-0"
+                          style={{ backgroundColor: SEVERITY_COLORS[note.severity] || "#6b7280" }}
+                        >
+                          {note.severity}
+                        </span>
+                        <span className={`text-[9px] px-1 py-0.5 rounded-full flex-shrink-0 ${
+                          note.status === "resuelta" ? "bg-green-100 text-green-700" :
+                          note.status === "abierta" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"
+                        }`}>
+                          {note.status}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-green-600 mt-0.5 line-clamp-2">{note.description}</p>
+                      <div className="flex items-center gap-2 mt-1 text-[9px] text-green-400">
+                        <span>{note.reportedByName || "Usuario"}</span>
+                        <span>·</span>
+                        <span>{formatDate(note.createdAt)}</span>
+                        {hasPhoto && (
+                          <>
+                            <span>·</span>
+                            <span className="flex items-center gap-0.5 text-green-500">
+                              <Camera className="h-2.5 w-2.5" /> {note.photos.length}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    {/* Thumbnail */}
+                    {hasPhoto && (
+                      <div className="flex-shrink-0 w-12 h-12 rounded-lg overflow-hidden border border-green-200/50">
+                        <img
+                          src={note.photos[0].photoPath}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </GlassCard>
         </div>
-      </GlassCard>
+      </div>
 
       {/* Popup overlay */}
       <div ref={popupRef} className="absolute z-50" style={{ display: selectedNote ? undefined : "none" }}>
         {selectedNote && (
           <div className="bg-white rounded-2xl shadow-2xl border border-green-200/60 w-[280px] sm:w-[320px] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            {/* Photo */}
             {selectedNote.photos?.length > 0 && (
-              <div className="h-32 overflow-hidden">
+              <div className="h-36 overflow-hidden">
                 <img
-                  src={`/api/field-note-photos/${selectedNote.photos[0].photoPath}`}
+                  src={selectedNote.photos[0].photoPath}
                   alt="Foto"
                   className="w-full h-full object-cover"
                   onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
@@ -2197,7 +2331,6 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings }: { parcel: any; mappi
                 <span className="text-sm font-medium">Sin foto</span>
               </div>
             )}
-            {/* Content */}
             <div className="p-3">
               <div className="flex items-start gap-2 mb-2">
                 <span className="text-lg">{NOTE_CATEGORIES[selectedNote.category]?.emoji || "📝"}</span>
@@ -2206,10 +2339,8 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings }: { parcel: any; mappi
                     <span className="text-xs font-semibold text-green-900">
                       {NOTE_CATEGORIES[selectedNote.category]?.label || selectedNote.category}
                     </span>
-                    <span
-                      className="text-[9px] px-1.5 py-0.5 rounded-full font-bold text-white"
-                      style={{ backgroundColor: SEVERITY_COLORS[selectedNote.severity] || "#6b7280" }}
-                    >
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold text-white"
+                      style={{ backgroundColor: SEVERITY_COLORS[selectedNote.severity] || "#6b7280" }}>
                       {selectedNote.severity}
                     </span>
                   </div>
@@ -2223,15 +2354,13 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings }: { parcel: any; mappi
               <div className="flex items-center justify-between text-[10px] mt-1">
                 <span className={`px-1.5 py-0.5 rounded-full ${
                   selectedNote.status === "resuelta" ? "bg-green-100 text-green-700" :
-                  selectedNote.status === "abierta" ? "bg-amber-100 text-amber-700" :
-                  "bg-blue-100 text-blue-700"
+                  selectedNote.status === "abierta" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"
                 }`}>
                   {selectedNote.status}
                 </span>
-                <button
-                  onClick={() => { setSelectedNote(null); overlayRef.current?.setPosition(undefined); }}
-                  className="text-green-400 hover:text-green-600 p-0.5"
-                >
+                <button onClick={() => { setSelectedNote(null); overlayRef.current?.setPosition(undefined);
+                  notesLayerRef.current?.getSource()?.getFeatures().forEach(f => f.setStyle(createNoteStyle(f.get("noteData"), false)));
+                }} className="text-green-400 hover:text-green-600 p-0.5">
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
