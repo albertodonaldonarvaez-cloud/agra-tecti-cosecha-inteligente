@@ -615,7 +615,7 @@ function FieldNotesContent() {
                               <ImageIcon className="w-3 h-3" />{photos.length}
                             </span>
                           )}
-                          {note.reportedByName && (
+                          {user?.role === "admin" && note.reportedByName && (
                             <span className="inline-flex items-center gap-1 text-[11px] text-gray-500">
                               <User className="w-3 h-3" />{note.reportedByName}
                             </span>
