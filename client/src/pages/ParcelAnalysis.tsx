@@ -6,7 +6,9 @@ import { trpc } from "@/lib/trpc";
 import {
   MapPin, TreePine, Ruler, Sprout, Package, TrendingUp, Calendar,
   ChevronDown, ChevronUp, Edit3, Save, X, Layers, Eye,
-  Plane, Clock, ImageIcon, BarChart3, Leaf, ArrowUpDown, ArrowLeft, Activity
+  Plane, Clock, ImageIcon, BarChart3, Leaf, ArrowUpDown, ArrowLeft, Activity,
+  ClipboardList, Bug, Droplets, AlertTriangle, Construction, Fence,
+  FlaskConical, Mountain, PawPrint, FileText, Camera, CameraOff, Filter
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
@@ -21,8 +23,10 @@ import XYZ from "ol/source/XYZ";
 import OSM from "ol/source/OSM";
 import Feature from "ol/Feature";
 import Polygon from "ol/geom/Polygon";
-import { fromLonLat, transformExtent } from "ol/proj";
-import { Style, Fill, Stroke, Text as OlText } from "ol/style";
+import Point from "ol/geom/Point";
+import Overlay from "ol/Overlay";
+import { fromLonLat, transformExtent, toLonLat } from "ol/proj";
+import { Style, Fill, Stroke, Text as OlText, Circle as CircleStyle, Icon } from "ol/style";
 import { boundingExtent } from "ol/extent";
 import "ol/ol.css";
 
@@ -44,17 +48,53 @@ const STATUS_MAP: Record<number, { label: string; color: string; bg: string }> =
 };
 
 const LAYER_TYPES = [
-  { key: "orthophoto", label: "Ortofoto", shortLabel: "Orto", color: "from-green-500 to-emerald-600" },
-  { key: "vari", label: "VARI (RGB)", shortLabel: "VARI", color: "from-teal-500 to-cyan-600" },
-  { key: "ndvi", label: "NDVI", shortLabel: "NDVI", color: "from-lime-500 to-green-600" },
-  { key: "exg", label: "Exceso Verde", shortLabel: "EXG", color: "from-emerald-500 to-green-600" },
-  { key: "gli", label: "Hoja Verde", shortLabel: "GLI", color: "from-green-400 to-lime-500" },
-  { key: "endvi", label: "ENDVI", shortLabel: "ENDVI", color: "from-yellow-500 to-amber-600" },
-  { key: "dsm", label: "DSM", shortLabel: "DSM", color: "from-blue-500 to-indigo-600" },
-  { key: "dtm", label: "DTM", shortLabel: "DTM", color: "from-purple-500 to-violet-600" },
+  { key: "orthophoto", label: "Ortofoto", shortLabel: "Orto", color: "from-green-500 to-emerald-600", rgbOnly: false },
+  { key: "vari", label: "VARI (RGB)", shortLabel: "VARI", color: "from-teal-500 to-cyan-600", rgbOnly: false },
+  { key: "ndvi", label: "NDVI", shortLabel: "NDVI", color: "from-lime-500 to-green-600", rgbOnly: false },
+  { key: "exg", label: "Exceso Verde", shortLabel: "EXG", color: "from-emerald-500 to-green-600", rgbOnly: false },
+  { key: "gli", label: "Hoja Verde", shortLabel: "GLI", color: "from-green-400 to-lime-500", rgbOnly: false },
+  { key: "endvi", label: "ENDVI", shortLabel: "ENDVI", color: "from-yellow-500 to-amber-600", rgbOnly: false },
+  { key: "dsm", label: "DSM", shortLabel: "DSM", color: "from-blue-500 to-indigo-600", rgbOnly: false },
+  { key: "dtm", label: "DTM", shortLabel: "DTM", color: "from-purple-500 to-violet-600", rgbOnly: false },
 ] as const;
 
 type LayerType = typeof LAYER_TYPES[number]["key"];
+
+// Análisis que REQUIEREN sensor multiespectral (no son fiables con RGB)
+const MULTIESPECTRAL_ONLY_LAYERS: LayerType[] = ["ndvi", "endvi"];
+// Análisis que funcionan con RGB (basados en bandas visibles)
+const RGB_COMPATIBLE_LAYERS: LayerType[] = ["orthophoto", "vari", "exg", "gli", "dsm", "dtm"];
+
+/** Detectar si una tarea de WebODM es RGB o Multiespectral por su nombre */
+function isRGBTask(task: any): boolean | null {
+  const name = (task?.name || "").toLowerCase();
+  const rgbKeywords = ["rgb", "true", "color", "jpeg", "jpg", "visible", "ortofoto", "ortomosaico"];
+  const multiKeywords = ["multi", "ms", "nir", "rededge", "spectral", "espectral", "infrarrojo"];
+  if (rgbKeywords.some(k => name.includes(k))) return true;
+  if (multiKeywords.some(k => name.includes(k))) return false;
+  return null; // No se puede determinar
+}
+
+// ============ CATEGORÍAS DE NOTAS DE CAMPO (para pines) ============
+const NOTE_CATEGORIES: Record<string, { label: string; emoji: string; color: string }> = {
+  plaga_enfermedad: { label: "Plaga", emoji: "🐛", color: "#dc2626" },
+  riego_drenaje: { label: "Riego", emoji: "💧", color: "#2563eb" },
+  arboles_mal_plantados: { label: "Árboles", emoji: "🌳", color: "#16a34a" },
+  dano_mecanico: { label: "Daño", emoji: "⚠️", color: "#ea580c" },
+  maleza: { label: "Maleza", emoji: "🌿", color: "#65a30d" },
+  fertilizacion: { label: "Fertilización", emoji: "🧪", color: "#7c3aed" },
+  suelo: { label: "Suelo", emoji: "⛰️", color: "#92400e" },
+  infraestructura: { label: "Infraestructura", emoji: "🏗️", color: "#475569" },
+  fauna: { label: "Fauna", emoji: "🐾", color: "#0d9488" },
+  otro: { label: "Otro", emoji: "📝", color: "#6b7280" },
+};
+
+const SEVERITY_COLORS: Record<string, string> = {
+  baja: "#3b82f6",     // blue
+  media: "#f59e0b",    // amber
+  alta: "#f97316",     // orange
+  critica: "#ef4444",  // red
+};
 
 function formatDate(dateStr: string) {
   if (!dateStr) return "-";
@@ -86,10 +126,10 @@ function ParcelAnalysisContent() {
   // Leer query params para navegación directa desde otras páginas
   const urlParams = new URLSearchParams(window.location.search);
   const initialParcelId = urlParams.get("parcelId") ? Number(urlParams.get("parcelId")) : null;
-  const initialTab = (urlParams.get("tab") as "map" | "details" | "harvest") || "map";
+  const initialTab = (urlParams.get("tab") as "map" | "details" | "harvest" | "notes") || "map";
 
   const [selectedParcelId, setSelectedParcelId] = useState<number | null>(initialParcelId);
-  const [activeTab, setActiveTab] = useState<"map" | "details" | "harvest">(initialTab);
+  const [activeTab, setActiveTab] = useState<"map" | "details" | "harvest" | "notes">(initialTab);
 
   // Cargar parcelas (solo activas)
   const { data: allParcels, isLoading: parcelsLoading } = trpc.parcels.listActive.useQuery(undefined, {
@@ -221,11 +261,12 @@ function ParcelAnalysisContent() {
                 { key: "map" as const, icon: Layers, label: "Mapa & Vuelos", shortLabel: "Mapa" },
                 { key: "details" as const, icon: TreePine, label: "Detalles de Parcela", shortLabel: "Detalles" },
                 { key: "harvest" as const, icon: Package, label: "Cosecha", shortLabel: "Cosecha" },
+                { key: "notes" as const, icon: ClipboardList, label: "Notas de Campo", shortLabel: "Notas" },
               ].map(({ key, icon: Icon, label, shortLabel }) => (
                 <button
                   key={key}
                   onClick={() => setActiveTab(key)}
-                  className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                  className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl text-sm font-medium transition-all ${
                     activeTab === key
                       ? "bg-green-600 text-white shadow-md"
                       : "text-green-700 hover:bg-green-100"
@@ -247,6 +288,9 @@ function ParcelAnalysisContent() {
             )}
             {activeTab === "harvest" && (
               <HarvestTab key={`harvest-${selectedParcel?.id}`} parcel={selectedParcel} />
+            )}
+            {activeTab === "notes" && (
+              <FieldNotesMapTab key={`notes-${selectedParcel?.id}`} parcel={selectedParcel} mapping={selectedMapping} odmMappings={odmMappings || []} />
             )}
           </>
         )}
@@ -794,32 +838,58 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
               <h3 className="text-base md:text-lg font-semibold text-green-800 flex items-center gap-2">
                 <Layers className="h-5 w-5" />
                 Ortomosaico
-                {selectedTaskUuid && (
-                  <span className="text-xs font-normal text-green-500 bg-green-50 px-2 py-0.5 rounded-full">
-                    {sortedTasks.find((t: any) => (t.uuid || String(t.id)) === selectedTaskUuid)?.name || "Tarea"}
-                  </span>
-                )}
+                {selectedTaskUuid && (() => {
+                  const currentTask = sortedTasks.find((t: any) => (t.uuid || String(t.id)) === selectedTaskUuid);
+                  const taskType = isRGBTask(currentTask);
+                  return (
+                    <>
+                      <span className="text-xs font-normal text-green-500 bg-green-50 px-2 py-0.5 rounded-full">
+                        {currentTask?.name || "Tarea"}
+                      </span>
+                      {taskType !== null && (
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                          taskType ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                        }`}>
+                          {taskType ? "RGB" : "Multi"}
+                        </span>
+                      )}
+                    </>
+                  );
+                })()}
               </h3>
             </div>
-            {/* Selector de capas */}
-            {selectedTaskUuid && (
-              <div className="flex flex-wrap gap-1.5">
-                {LAYER_TYPES.map(({ key, label, shortLabel }) => (
-                  <button
-                    key={key}
-                    onClick={() => setSelectedLayerType(key)}
-                    className={`px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all ${
-                      selectedLayerType === key
-                        ? "bg-green-600 text-white shadow-sm"
-                        : "bg-white/60 text-green-700 hover:bg-green-100 border border-green-200/40"
-                    }`}
-                  >
-                    <span className="hidden sm:inline">{label}</span>
-                    <span className="sm:hidden">{shortLabel}</span>
-                  </button>
-                ))}
-              </div>
-            )}
+            {/* Selector de capas — filtrado por tipo de vuelo */}
+            {selectedTaskUuid && (() => {
+              const currentTask = sortedTasks.find((t: any) => (t.uuid || String(t.id)) === selectedTaskUuid);
+              const taskType = isRGBTask(currentTask);
+              // Si es RGB, ocultar capas que requieren multiespectral (NDVI, ENDVI)
+              const visibleLayers = taskType === true
+                ? LAYER_TYPES.filter(l => RGB_COMPATIBLE_LAYERS.includes(l.key))
+                : LAYER_TYPES;
+              return (
+                <div className="flex flex-wrap gap-1.5">
+                  {visibleLayers.map(({ key, label, shortLabel }) => (
+                    <button
+                      key={key}
+                      onClick={() => setSelectedLayerType(key)}
+                      className={`px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all ${
+                        selectedLayerType === key
+                          ? "bg-green-600 text-white shadow-sm"
+                          : "bg-white/60 text-green-700 hover:bg-green-100 border border-green-200/40"
+                      }`}
+                    >
+                      <span className="hidden sm:inline">{label}</span>
+                      <span className="sm:hidden">{shortLabel}</span>
+                    </button>
+                  ))}
+                  {taskType === true && (
+                    <span className="flex items-center text-[10px] text-amber-600 bg-amber-50 px-2 py-1 rounded-full">
+                      NDVI/ENDVI ocultos (requieren multiespectral)
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
         <div className="relative">
@@ -961,6 +1031,17 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${status.bg} ${status.color} w-fit`}>
                           {status.label}
                         </span>
+                        {(() => {
+                          const taskType = isRGBTask(task);
+                          if (taskType === null) return null;
+                          return (
+                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold w-fit ${
+                              taskType ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                            }`}>
+                              {taskType ? "RGB" : "Multi"}
+                            </span>
+                          );
+                        })()}
                       </div>
                       <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-green-600">
                         <span className="flex items-center gap-1">
@@ -1740,6 +1821,424 @@ function HarvestTab({ parcel }: { parcel: any }) {
           </div>
         </GlassCard>
       )}
+    </div>
+  );
+}
+
+// ============ TAB 4: NOTAS DE CAMPO EN MAPA ============
+function FieldNotesMapTab({ parcel, mapping, odmMappings }: { parcel: any; mapping: any; odmMappings: any[] }) {
+  const { user } = useAuth();
+  const mapRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<Map | null>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<Overlay | null>(null);
+  const notesLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  const orthoLayerRef = useRef<TileLayer<XYZ> | null>(null);
+
+  const [selectedNote, setSelectedNote] = useState<any>(null);
+  const [filterCategory, setFilterCategory] = useState<string>("all");
+  const [filterSeverity, setFilterSeverity] = useState<string>("all");
+  const [filterNoPhoto, setFilterNoPhoto] = useState(false);
+
+  // Cargar notas de campo para esta parcela
+  const { data: notes, isLoading: notesLoading } = trpc.fieldNotes.list.useQuery(
+    { parcelId: parcel?.id },
+    { enabled: !!parcel?.id, staleTime: 30 * 1000 }
+  );
+
+  // Cargar tareas ODM para la ortofoto de fondo
+  const { data: tasks } = trpc.webodm.getProjectTasks.useQuery(
+    { projectId: mapping?.odmProjectId || 0 },
+    { enabled: !!mapping?.odmProjectId, staleTime: 2 * 60 * 1000 }
+  );
+
+  // Filtrar notas con GPS
+  const filteredNotes = useMemo(() => {
+    if (!notes) return [];
+    return notes.filter((n: any) => {
+      if (!n.latitude || !n.longitude) return false;
+      if (filterCategory !== "all" && n.category !== filterCategory) return false;
+      if (filterSeverity !== "all" && n.severity !== filterSeverity) return false;
+      if (filterNoPhoto && n.photos && n.photos.length > 0) return false;
+      return true;
+    });
+  }, [notes, filterCategory, filterSeverity, filterNoPhoto]);
+
+  // Stats
+  const stats = useMemo(() => {
+    if (!notes) return { total: 0, withGps: 0, withPhoto: 0, withoutPhoto: 0, critical: 0 };
+    const withGps = notes.filter((n: any) => n.latitude && n.longitude);
+    return {
+      total: notes.length,
+      withGps: withGps.length,
+      withPhoto: notes.filter((n: any) => n.photos && n.photos.length > 0).length,
+      withoutPhoto: notes.filter((n: any) => !n.photos || n.photos.length === 0).length,
+      critical: notes.filter((n: any) => n.severity === "critica" || n.severity === "alta").length,
+    };
+  }, [notes]);
+
+  // Encontrar el último vuelo RGB completado para la ortofoto de fondo
+  const rgbTaskUuid = useMemo(() => {
+    if (!tasks) return null;
+    const completed = tasks.filter((t: any) => t.status === 40);
+    const sorted = [...completed].sort((a: any, b: any) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+    // Preferir vuelos RGB
+    const rgbFlight = sorted.find((t: any) => isRGBTask(t) === true);
+    if (rgbFlight) return rgbFlight.uuid || String(rgbFlight.id);
+    // Si no hay RGB explícito, usar el último completado (que no sea multiespectral)
+    const nonMulti = sorted.find((t: any) => isRGBTask(t) !== false);
+    return nonMulti ? (nonMulti.uuid || String(nonMulti.id)) : null;
+  }, [tasks]);
+
+  // Crear estilo de pin para una nota
+  const createNoteStyle = useCallback((note: any) => {
+    const severityColor = SEVERITY_COLORS[note.severity] || "#6b7280";
+    const cat = NOTE_CATEGORIES[note.category] || NOTE_CATEGORIES.otro;
+    const hasPhoto = note.photos && note.photos.length > 0;
+
+    return new Style({
+      image: new CircleStyle({
+        radius: 14,
+        fill: new Fill({ color: severityColor }),
+        stroke: new Stroke({
+          color: hasPhoto ? "#ffffff" : "#000000",
+          width: 2.5,
+          lineDash: hasPhoto ? undefined : [4, 4],
+        }),
+      }),
+      text: new OlText({
+        text: cat.emoji,
+        font: "14px sans-serif",
+        offsetY: 0,
+        fill: new Fill({ color: "#ffffff" }),
+        stroke: new Stroke({ color: "rgba(0,0,0,0.5)", width: 1 }),
+      }),
+    });
+  }, []);
+
+  // Inicializar mapa
+  useEffect(() => {
+    if (!mapRef.current || mapInstanceRef.current) return;
+
+    const overlay = new Overlay({
+      element: popupRef.current || undefined,
+      autoPan: { animation: { duration: 250 } } as any,
+      positioning: "bottom-center" as any,
+      offset: [0, -20],
+    });
+    overlayRef.current = overlay;
+
+    let center = fromLonLat([-105.0, 23.0]);
+    let zoom = 5;
+
+    if (parcel?.polygon) {
+      try {
+        const poly = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
+        if (poly.coordinates?.[0]?.length > 0) {
+          const coords = poly.coordinates[0];
+          const avgLon = coords.reduce((s: number, c: number[]) => s + c[0], 0) / coords.length;
+          const avgLat = coords.reduce((s: number, c: number[]) => s + c[1], 0) / coords.length;
+          center = fromLonLat([avgLon, avgLat]);
+          zoom = 16;
+        }
+      } catch { /* ignore */ }
+    }
+
+    const baseLayer = new TileLayer({ source: new OSM() });
+    const orthoTileLayer = new TileLayer({ visible: false, opacity: 0.9, zIndex: 10 });
+    orthoLayerRef.current = orthoTileLayer;
+
+    // Polígono de parcela
+    const polyFeatures: Feature[] = [];
+    if (parcel?.polygon) {
+      try {
+        const poly = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
+        if (poly.coordinates?.[0]) {
+          const coords = poly.coordinates[0].map((c: number[]) => fromLonLat([c[0], c[1]]));
+          const feature = new Feature({ geometry: new Polygon([coords]) });
+          feature.setStyle(new Style({
+            fill: new Fill({ color: "rgba(16, 185, 129, 0.06)" }),
+            stroke: new Stroke({ color: "#10b981", width: 2, lineDash: [8, 4] }),
+          }));
+          polyFeatures.push(feature);
+        }
+      } catch { /* ignore */ }
+    }
+
+    const polygonLayer = new VectorLayer({ source: new VectorSource({ features: polyFeatures }), zIndex: 5 });
+    const notesVectorSource = new VectorSource();
+    const notesVectorLayer = new VectorLayer({ source: notesVectorSource, zIndex: 25 });
+    notesLayerRef.current = notesVectorLayer;
+
+    const map = new Map({
+      target: mapRef.current,
+      layers: [baseLayer, orthoTileLayer, polygonLayer, notesVectorLayer],
+      overlays: [overlay],
+      view: new View({ center, zoom, maxZoom: 24 }),
+    });
+
+    // Click en feature → mostrar popup
+    map.on("click", (evt) => {
+      const feature = map.forEachFeatureAtPixel(evt.pixel, (f) => f);
+      if (feature && feature.get("noteData")) {
+        const noteData = feature.get("noteData");
+        setSelectedNote(noteData);
+        const geom = feature.getGeometry();
+        if (geom) overlay.setPosition((geom as Point).getCoordinates());
+      } else {
+        setSelectedNote(null);
+        overlay.setPosition(undefined);
+      }
+    });
+
+    // Cursor pointer
+    map.on("pointermove", (evt) => {
+      const hit = map.forEachFeatureAtPixel(evt.pixel, (f) => !!f.get("noteData"));
+      const el = map.getTargetElement();
+      if (el) (el as HTMLElement).style.cursor = hit ? "pointer" : "";
+    });
+
+    mapInstanceRef.current = map;
+
+    return () => {
+      map.setTarget(undefined);
+      mapInstanceRef.current = null;
+      notesLayerRef.current = null;
+      orthoLayerRef.current = null;
+      overlayRef.current = null;
+    };
+  }, [parcel?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cargar ortofoto RGB de fondo
+  useEffect(() => {
+    if (!mapInstanceRef.current || !orthoLayerRef.current || !rgbTaskUuid || !mapping?.odmProjectId) return;
+
+    const proxyUrl = `/api/odm-tiles/${mapping.odmProjectId}/${rgbTaskUuid}/orthophoto/{z}/{x}/{y}.png`;
+    fetch(`/api/odm-bounds/${mapping.odmProjectId}/${rgbTaskUuid}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        const maxZoom = data?.maxzoom || 24;
+        const tileSource = new XYZ({ url: proxyUrl, minZoom: 0, maxZoom, tileSize: 256, crossOrigin: "anonymous" });
+
+        if (orthoLayerRef.current && mapInstanceRef.current) {
+          orthoLayerRef.current.setSource(tileSource);
+          orthoLayerRef.current.setVisible(true);
+          if (data?.bounds) {
+            const [minLon, minLat, maxLon, maxLat] = data.bounds;
+            const extent = transformExtent([minLon, minLat, maxLon, maxLat], "EPSG:4326", "EPSG:3857");
+            mapInstanceRef.current.getView().fit(extent, { padding: [50, 50, 50, 50], maxZoom: 19, duration: 800 });
+          }
+        }
+      })
+      .catch(() => {});
+  }, [rgbTaskUuid, mapping?.odmProjectId]);
+
+  // Actualizar pines cuando cambian las notas filtradas
+  useEffect(() => {
+    if (!notesLayerRef.current) return;
+    const source = notesLayerRef.current.getSource();
+    if (!source) return;
+    source.clear();
+
+    const noteFeatures: Feature[] = [];
+    for (const note of filteredNotes) {
+      const lat = parseFloat(note.latitude);
+      const lng = parseFloat(note.longitude);
+      if (isNaN(lat) || isNaN(lng)) continue;
+
+      const feature = new Feature({ geometry: new Point(fromLonLat([lng, lat])), noteData: note });
+      feature.setStyle(createNoteStyle(note));
+      noteFeatures.push(feature);
+    }
+    source.addFeatures(noteFeatures);
+
+    // Ajustar vista si hay notas y no hay ortofoto
+    if (noteFeatures.length > 0 && !rgbTaskUuid && mapInstanceRef.current) {
+      const extent = source.getExtent();
+      mapInstanceRef.current.getView().fit(extent, { padding: [60, 60, 60, 60], maxZoom: 18, duration: 500 });
+    }
+  }, [filteredNotes, createNoteStyle, rgbTaskUuid]);
+
+  if (notesLoading) {
+    return (
+      <GlassCard className="p-8 text-center" hover={false}>
+        <div className="animate-pulse text-green-600">Cargando notas de campo...</div>
+      </GlassCard>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Header con stats */}
+      <GlassCard className="p-3 md:p-4" hover={false}>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-green-400 to-emerald-600 shadow">
+              <ClipboardList className="h-4 w-4 text-white" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-green-900">Notas en Mapa</h3>
+              <p className="text-[10px] text-green-500">{stats.withGps} de {stats.total} con GPS</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 ml-auto">
+            <span className="text-[10px] bg-green-50 text-green-700 px-2 py-1 rounded-full flex items-center gap-1">
+              <Camera className="h-3 w-3" /> {stats.withPhoto} con foto
+            </span>
+            <span className="text-[10px] bg-amber-50 text-amber-700 px-2 py-1 rounded-full flex items-center gap-1">
+              <CameraOff className="h-3 w-3" /> {stats.withoutPhoto} sin foto
+            </span>
+            {stats.critical > 0 && (
+              <span className="text-[10px] bg-red-50 text-red-700 px-2 py-1 rounded-full flex items-center gap-1">
+                <AlertTriangle className="h-3 w-3" /> {stats.critical} urgentes
+              </span>
+            )}
+          </div>
+        </div>
+      </GlassCard>
+
+      {/* Filtros */}
+      <div className="flex flex-wrap gap-2">
+        <select
+          value={filterCategory}
+          onChange={(e) => setFilterCategory(e.target.value)}
+          className="text-xs bg-white/60 border border-green-200/50 rounded-xl px-3 py-1.5 text-green-700 focus:outline-none focus:ring-1 focus:ring-green-400"
+        >
+          <option value="all">Todas las categorías</option>
+          {Object.entries(NOTE_CATEGORIES).map(([key, { label, emoji }]) => (
+            <option key={key} value={key}>{emoji} {label}</option>
+          ))}
+        </select>
+        <select
+          value={filterSeverity}
+          onChange={(e) => setFilterSeverity(e.target.value)}
+          className="text-xs bg-white/60 border border-green-200/50 rounded-xl px-3 py-1.5 text-green-700 focus:outline-none focus:ring-1 focus:ring-green-400"
+        >
+          <option value="all">Todas las prioridades</option>
+          <option value="baja">🔵 Baja</option>
+          <option value="media">🟡 Media</option>
+          <option value="alta">🟠 Alta</option>
+          <option value="critica">🔴 Crítica</option>
+        </select>
+        <button
+          onClick={() => setFilterNoPhoto(!filterNoPhoto)}
+          className={`text-xs px-3 py-1.5 rounded-xl font-medium transition-all flex items-center gap-1 ${
+            filterNoPhoto
+              ? "bg-amber-500 text-white shadow-sm"
+              : "bg-white/60 text-green-700 border border-green-200/50 hover:bg-amber-50"
+          }`}
+        >
+          <CameraOff className="h-3 w-3" /> Solo sin foto
+        </button>
+      </div>
+
+      {/* Mapa */}
+      <GlassCard className="overflow-hidden" hover={false}>
+        <div className="relative">
+          <div
+            ref={mapRef}
+            className="w-full h-[350px] sm:h-[450px] md:h-[550px] lg:h-[650px]"
+            style={{ background: "#f0f9f0" }}
+          />
+          {/* Leyenda */}
+          <div className="absolute bottom-3 right-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-lg border border-green-200/50 p-2.5 z-20 text-[10px] space-y-1.5 max-w-[180px]">
+            <div className="font-semibold text-green-800 text-xs mb-1">Prioridad</div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-full bg-blue-500 border-2 border-white shadow-sm" /> Baja
+              <span className="w-3 h-3 rounded-full bg-amber-500 border-2 border-white shadow-sm ml-2" /> Media
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-full bg-orange-500 border-2 border-white shadow-sm" /> Alta
+              <span className="w-3 h-3 rounded-full bg-red-500 border-2 border-white shadow-sm ml-2" /> Crítica
+            </div>
+            <div className="border-t border-green-200/30 pt-1 mt-1">
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-full border-2 border-black" style={{ borderStyle: "dashed" }} /> Sin foto
+              </div>
+            </div>
+          </div>
+          {/* Indicador sin notas */}
+          {filteredNotes.length === 0 && !notesLoading && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/5 z-10">
+              <div className="bg-white/90 backdrop-blur-sm px-6 py-4 rounded-2xl shadow-lg text-center">
+                <ClipboardList className="h-8 w-8 mx-auto text-green-300 mb-2" />
+                <p className="text-sm text-green-700 font-medium">
+                  {notes?.length === 0 ? "Sin notas en esta parcela" : "Sin notas con GPS que coincidan"}
+                </p>
+                <p className="text-xs text-green-500 mt-1">
+                  {notes?.length === 0 ? "Crea notas desde la app móvil" : "Ajusta los filtros"}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </GlassCard>
+
+      {/* Popup overlay */}
+      <div ref={popupRef} className="absolute z-50" style={{ display: selectedNote ? undefined : "none" }}>
+        {selectedNote && (
+          <div className="bg-white rounded-2xl shadow-2xl border border-green-200/60 w-[280px] sm:w-[320px] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Photo */}
+            {selectedNote.photos?.length > 0 && (
+              <div className="h-32 overflow-hidden">
+                <img
+                  src={`/api/field-note-photos/${selectedNote.photos[0].photoPath}`}
+                  alt="Foto"
+                  className="w-full h-full object-cover"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                />
+              </div>
+            )}
+            {(!selectedNote.photos || selectedNote.photos.length === 0) && (
+              <div className="h-14 bg-amber-50 flex items-center justify-center gap-2 text-amber-600">
+                <CameraOff className="h-5 w-5" />
+                <span className="text-sm font-medium">Sin foto</span>
+              </div>
+            )}
+            {/* Content */}
+            <div className="p-3">
+              <div className="flex items-start gap-2 mb-2">
+                <span className="text-lg">{NOTE_CATEGORIES[selectedNote.category]?.emoji || "📝"}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-semibold text-green-900">
+                      {NOTE_CATEGORIES[selectedNote.category]?.label || selectedNote.category}
+                    </span>
+                    <span
+                      className="text-[9px] px-1.5 py-0.5 rounded-full font-bold text-white"
+                      style={{ backgroundColor: SEVERITY_COLORS[selectedNote.severity] || "#6b7280" }}
+                    >
+                      {selectedNote.severity}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-green-700 mt-0.5 line-clamp-3">{selectedNote.description}</p>
+                </div>
+              </div>
+              <div className="flex items-center justify-between text-[10px] text-green-500 border-t border-green-100 pt-1.5">
+                <span>{selectedNote.reportedByName || "Usuario"}</span>
+                <span>{formatDate(selectedNote.createdAt)}</span>
+              </div>
+              <div className="flex items-center justify-between text-[10px] mt-1">
+                <span className={`px-1.5 py-0.5 rounded-full ${
+                  selectedNote.status === "resuelta" ? "bg-green-100 text-green-700" :
+                  selectedNote.status === "abierta" ? "bg-amber-100 text-amber-700" :
+                  "bg-blue-100 text-blue-700"
+                }`}>
+                  {selectedNote.status}
+                </span>
+                <button
+                  onClick={() => { setSelectedNote(null); overlayRef.current?.setPosition(undefined); }}
+                  className="text-green-400 hover:text-green-600 p-0.5"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
