@@ -1,20 +1,43 @@
 -- =============================================
 -- 0018: Índices de rendimiento para notas de campo
--- Mejora la velocidad de consultas frecuentes
+-- Compatible con MySQL 8.0
 -- =============================================
 
--- Notas de campo: filtros por estado, reportero y parcela
-ALTER TABLE `fieldNotes` ADD INDEX IF NOT EXISTS `idx_fn_status` (`status`);
-ALTER TABLE `fieldNotes` ADD INDEX IF NOT EXISTS `idx_fn_reportedBy` (`reportedByUserId`);
-ALTER TABLE `fieldNotes` ADD INDEX IF NOT EXISTS `idx_fn_parcelId` (`parcelId`);
-ALTER TABLE `fieldNotes` ADD INDEX IF NOT EXISTS `idx_fn_createdAt` (`createdAt`);
+-- Helper: procedimiento para crear índice solo si no existe
+DELIMITER //
+CREATE PROCEDURE IF NOT EXISTS add_index_if_not_exists(
+  IN p_table VARCHAR(128),
+  IN p_index VARCHAR(128),
+  IN p_columns VARCHAR(255)
+)
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM INFORMATION_SCHEMA.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_table AND INDEX_NAME = p_index
+  ) THEN
+    SET @sql = CONCAT('ALTER TABLE `', p_table, '` ADD INDEX `', p_index, '` (', p_columns, ')');
+    PREPARE stmt FROM @sql;
+    EXECUTE stmt;
+    DEALLOCATE PREPARE stmt;
+  END IF;
+END //
+DELIMITER ;
 
--- Fotos de notas: JOIN por fieldNoteId (se consulta en CADA listado de notas)
-ALTER TABLE `fieldNotePhotos` ADD INDEX IF NOT EXISTS `idx_fnp_fieldNoteId` (`fieldNoteId`);
+-- Notas de campo
+CALL add_index_if_not_exists('fieldNotes', 'idx_fn_status', '`status`');
+CALL add_index_if_not_exists('fieldNotes', 'idx_fn_reportedBy', '`reportedByUserId`');
+CALL add_index_if_not_exists('fieldNotes', 'idx_fn_parcelId', '`parcelId`');
+CALL add_index_if_not_exists('fieldNotes', 'idx_fn_createdAt', '`createdAt`');
 
--- Asignaciones de colaboradores: consultas por colaborador y actividad
-ALTER TABLE `fieldActivityAssignments` ADD INDEX IF NOT EXISTS `idx_faa_collaboratorId` (`collaboratorId`);
-ALTER TABLE `fieldActivityAssignments` ADD INDEX IF NOT EXISTS `idx_faa_activityId` (`activityId`);
+-- Fotos de notas
+CALL add_index_if_not_exists('fieldNotePhotos', 'idx_fnp_fieldNoteId', '`fieldNoteId`');
 
--- Parcelas de actividades: JOIN por activityId
-ALTER TABLE `fieldActivityParcels` ADD INDEX IF NOT EXISTS `idx_fap_activityId` (`activityId`);
+-- Asignaciones de colaboradores
+CALL add_index_if_not_exists('fieldActivityAssignments', 'idx_faa_collaboratorId', '`collaboratorId`');
+CALL add_index_if_not_exists('fieldActivityAssignments', 'idx_faa_activityId', '`activityId`');
+
+-- Parcelas de actividades
+CALL add_index_if_not_exists('fieldActivityParcels', 'idx_fap_activityId', '`activityId`');
+
+-- Limpiar el procedimiento temporal
+DROP PROCEDURE IF EXISTS add_index_if_not_exists;
