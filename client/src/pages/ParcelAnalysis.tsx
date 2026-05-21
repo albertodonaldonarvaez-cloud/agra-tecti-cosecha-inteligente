@@ -1,4 +1,4 @@
-import { useAuth } from "@/_core/hooks/useAuth";
+﻿import { useAuth } from "@/_core/hooks/useAuth";
 import { GlassCard } from "@/components/GlassCard";
 import { ProtectedPage } from "@/components/ProtectedPage";
 import { APP_LOGO } from "@/const";
@@ -2183,12 +2183,105 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings, allParcels, onSelectPa
     </div>
   );
 }
+// ============ SATELLITE TAB — Agricultura de Precisión Multiespectral ============
 
-// ============ SATELLITE TAB ============
+/** Configuración de UI por índice espectral */
+const INDEX_UI: Record<string, {
+  label: string; shortLabel: string; emoji: string; description: string;
+  unit: string; gradient: string; headerGradient: string;
+  colorStops: Array<{ color: string; label: string; desc: string }>;
+  getStatus: (v: number) => { label: string; color: string; bg: string; emoji: string };
+  chartColor: string; optimalLine: number; stressLine: number;
+  optimalLabel: string; stressLabel: string;
+}> = {
+  NDVI: {
+    label: "NDVI — Vigor Vegetativo",
+    shortLabel: "Biomasa",
+    emoji: "🌿",
+    description: "(B08-B04)/(B08+B04) · Sentinel-2 Bandas NIR + Red",
+    unit: "NDVI",
+    gradient: "from-green-500 to-emerald-600",
+    headerGradient: "from-green-400 to-emerald-600",
+    chartColor: "#16a34a",
+    optimalLine: 0.6, stressLine: 0.3,
+    optimalLabel: "Óptimo", stressLabel: "Estrés",
+    colorStops: [
+      { color: "#004D00", label: "0.8–1.0", desc: "Muy densa" },
+      { color: "#228B22", label: "0.6–0.8", desc: "Densa" },
+      { color: "#7CFC00", label: "0.4–0.6", desc: "Moderada" },
+      { color: "#FFD700", label: "0.2–0.4", desc: "Escasa" },
+      { color: "#8B4513", label: "0.0–0.2", desc: "Suelo" },
+      { color: "#0000FF", label: "< 0.0", desc: "Agua" },
+    ],
+    getStatus: (v) => {
+      if (v >= 0.6) return { label: "Excelente", color: "text-green-600", bg: "bg-green-100", emoji: "🌿" };
+      if (v >= 0.4) return { label: "Bueno", color: "text-lime-600", bg: "bg-lime-100", emoji: "🌱" };
+      if (v >= 0.2) return { label: "Moderado", color: "text-yellow-600", bg: "bg-yellow-100", emoji: "⚠️" };
+      return { label: "Bajo", color: "text-red-600", bg: "bg-red-100", emoji: "🔴" };
+    },
+  },
+  NDRE: {
+    label: "NDRE — Nitrógeno / Clorofila",
+    shortLabel: "Nitrógeno",
+    emoji: "🧪",
+    description: "(B08-B05)/(B08+B05) · Sentinel-2 Bandas NIR + Red Edge",
+    unit: "NDRE",
+    gradient: "from-purple-500 to-violet-600",
+    headerGradient: "from-purple-400 to-violet-600",
+    chartColor: "#7c3aed",
+    optimalLine: 0.5, stressLine: 0.2,
+    optimalLabel: "Alto N", stressLabel: "Deficiencia",
+    colorStops: [
+      { color: "#155724", label: "0.8–1.0", desc: "Óptimo N" },
+      { color: "#28A745", label: "0.6–0.8", desc: "Alto N" },
+      { color: "#82D656", label: "0.4–0.6", desc: "Bueno" },
+      { color: "#F7DC6F", label: "0.2–0.4", desc: "Moderado" },
+      { color: "#DB5C4C", label: "0.0–0.2", desc: "Deficiente" },
+      { color: "#2C105A", label: "< 0.0", desc: "Sin clorofila" },
+    ],
+    getStatus: (v) => {
+      if (v >= 0.5) return { label: "Óptimo N", color: "text-purple-600", bg: "bg-purple-100", emoji: "🧪" };
+      if (v >= 0.3) return { label: "Bueno", color: "text-violet-600", bg: "bg-violet-100", emoji: "🌱" };
+      if (v >= 0.15) return { label: "Moderado", color: "text-amber-600", bg: "bg-amber-100", emoji: "⚠️" };
+      return { label: "Deficiente", color: "text-red-600", bg: "bg-red-100", emoji: "🔴" };
+    },
+  },
+  NDMI: {
+    label: "NDMI — Estrés Hídrico",
+    shortLabel: "Humedad",
+    emoji: "💧",
+    description: "(B08-B11)/(B08+B11) · Sentinel-2 Bandas NIR + SWIR",
+    unit: "NDMI",
+    gradient: "from-blue-500 to-cyan-600",
+    headerGradient: "from-blue-400 to-cyan-600",
+    chartColor: "#2563eb",
+    optimalLine: 0.4, stressLine: 0.0,
+    optimalLabel: "Húmedo", stressLabel: "Seco",
+    colorStops: [
+      { color: "#00008B", label: "0.7–1.0", desc: "Saturado" },
+      { color: "#4169E1", label: "0.4–0.7", desc: "Húmedo" },
+      { color: "#87CEEB", label: "0.2–0.4", desc: "Normal" },
+      { color: "#FFD700", label: "0.0–0.2", desc: "Seco" },
+      { color: "#FF6347", label: "-0.3–0.0", desc: "Estrés" },
+      { color: "#8B0000", label: "< -0.3", desc: "Severo" },
+    ],
+    getStatus: (v) => {
+      if (v >= 0.4) return { label: "Húmedo", color: "text-blue-600", bg: "bg-blue-100", emoji: "💧" };
+      if (v >= 0.2) return { label: "Normal", color: "text-cyan-600", bg: "bg-cyan-100", emoji: "🌱" };
+      if (v >= 0.0) return { label: "Seco", color: "text-amber-600", bg: "bg-amber-100", emoji: "⚠️" };
+      return { label: "Estrés Hídrico", color: "text-red-600", bg: "bg-red-100", emoji: "🔴" };
+    },
+  },
+};
+
 function SatelliteTab({ parcel }: { parcel: any }) {
-  const [mapMode, setMapMode] = useState<"ndvi" | "truecolor">("ndvi");
+  // Estado: índice activo y modo de mapa
+  const [activeIndex, setActiveIndex] = useState<"NDVI" | "NDRE" | "NDMI">("NDVI");
+  const [mapMode, setMapMode] = useState<"index" | "truecolor">("index");
   const [hoverInfo, setHoverInfo] = useState<{ x: number; y: number; visible: boolean }>({ x: 0, y: 0, visible: false });
   const imgRef = useRef<HTMLImageElement>(null);
+
+  const ui = INDEX_UI[activeIndex];
 
   const hasPolygon = useMemo(() => {
     if (!parcel?.polygon) return false;
@@ -2199,45 +2292,37 @@ function SatelliteTab({ parcel }: { parcel: any }) {
     } catch { return false; }
   }, [parcel]);
 
-  const { data: ndviData, isLoading: ndviLoading, error: ndviError } = trpc.copernicus.getNDVI.useQuery(
-    { parcelId: parcel?.id },
+  // ===== Queries dinámicas por índice =====
+  const { data: statsData, isLoading: statsLoading, error: statsError } = trpc.copernicus.getIndexStats.useQuery(
+    { parcelId: parcel?.id, indexType: activeIndex },
     { enabled: !!parcel?.id && hasPolygon, staleTime: 10 * 60 * 1000, retry: 1 }
   );
 
-  const { data: trueColorData, isLoading: tcLoading, error: tcError } = trpc.copernicus.getTrueColor.useQuery(
+  const { data: trueColorData, isLoading: tcLoading } = trpc.copernicus.getTrueColor.useQuery(
     { parcelId: parcel?.id },
-    { enabled: !!parcel?.id && hasPolygon, staleTime: 10 * 60 * 1000, retry: 1 }
+    { enabled: !!parcel?.id && hasPolygon && mapMode === "truecolor", staleTime: 10 * 60 * 1000, retry: 1 }
   );
 
-  const { data: ndviMapData, isLoading: ndviMapLoading, error: ndviMapError } = trpc.copernicus.getNDVIMap.useQuery(
-    { parcelId: parcel?.id },
-    { enabled: !!parcel?.id && hasPolygon, staleTime: 10 * 60 * 1000, retry: 1 }
+  const { data: indexMapData, isLoading: indexMapLoading, error: indexMapError } = trpc.copernicus.getIndexMap.useQuery(
+    { parcelId: parcel?.id, indexType: activeIndex },
+    { enabled: !!parcel?.id && hasPolygon && mapMode === "index", staleTime: 10 * 60 * 1000, retry: 1 }
   );
 
-  // Calcular NDVI en posición del cursor basado en el color del pixel
+  // Hover handlers
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    setHoverInfo({ x, y, visible: true });
+    setHoverInfo({ x: e.clientX - rect.left, y: e.clientY - rect.top, visible: true });
   }, []);
+  const handleMouseLeave = useCallback(() => setHoverInfo(p => ({ ...p, visible: false })), []);
 
-  const handleMouseLeave = useCallback(() => {
-    setHoverInfo(prev => ({ ...prev, visible: false }));
-  }, []);
+  // Clasificación por posición de hover (aproximación visual)
+  const getZoneFromPosition = useCallback((_x: number, y: number, _w: number, h: number) => {
+    const stops = ui.colorStops;
+    const idx = Math.min(Math.floor((y / h) * stops.length), stops.length - 1);
+    return stops[idx];
+  }, [ui]);
 
-  // Obtener clasificación NDVI para el tooltip basado en posición relativa
-  const getZoneFromPosition = useCallback((x: number, y: number, width: number, height: number) => {
-    // Usar la posición relativa para mostrar la zona de la leyenda NDVI
-    const relY = y / height;
-    if (relY < 0.15) return { ndvi: "0.8-1.0", label: "Vegetación Muy Densa", color: "#004D00" };
-    if (relY < 0.3) return { ndvi: "0.6-0.8", label: "Vegetación Densa", color: "#228B22" };
-    if (relY < 0.5) return { ndvi: "0.4-0.6", label: "Vegetación Moderada", color: "#7CFC00" };
-    if (relY < 0.7) return { ndvi: "0.2-0.4", label: "Vegetación Escasa", color: "#FFD700" };
-    if (relY < 0.85) return { ndvi: "0.0-0.2", label: "Suelo Desnudo", color: "#8B4513" };
-    return { ndvi: "<0.0", label: "Agua", color: "#0000FF" };
-  }, []);
-
+  // ===== Sin polígono =====
   if (!hasPolygon) {
     return (
       <GlassCard className="p-6 text-center">
@@ -2247,57 +2332,72 @@ function SatelliteTab({ parcel }: { parcel: any }) {
           </div>
           <h3 className="text-lg font-bold text-amber-900">Polígono Requerido</h3>
           <p className="text-sm text-amber-700 max-w-md">
-            Dibuja el polígono de esta parcela en el mapa para activar la telemetría satelital de Copernicus.
+            Dibuja el polígono de esta parcela en el mapa para activar la telemetría satelital multiespectral.
           </p>
         </div>
       </GlassCard>
     );
   }
 
+  // ===== Chart data =====
   const chartData = useMemo(() => {
-    if (!ndviData?.data) return [];
-    return ndviData.data.map((d: any) => ({
+    if (!statsData?.data) return [];
+    return statsData.data.map((d: any) => ({
       date: d.date,
       dateLabel: new Date(d.date + "T12:00:00Z").toLocaleDateString("es-MX", { day: "2-digit", month: "short" }),
-      mean: d.mean,
-      min: d.min,
-      max: d.max,
+      mean: d.mean, min: d.min, max: d.max,
     }));
-  }, [ndviData]);
+  }, [statsData]);
 
-  const lastNDVI = chartData.length > 0 ? chartData[chartData.length - 1] : null;
+  const lastVal = chartData.length > 0 ? chartData[chartData.length - 1] : null;
 
-  const getNDVIStatus = (val: number) => {
-    if (val >= 0.6) return { label: "Excelente", color: "text-green-600", bg: "bg-green-100", emoji: "🌿" };
-    if (val >= 0.4) return { label: "Bueno", color: "text-lime-600", bg: "bg-lime-100", emoji: "🌱" };
-    if (val >= 0.2) return { label: "Moderado", color: "text-yellow-600", bg: "bg-yellow-100", emoji: "⚠️" };
-    return { label: "Bajo / Estrés", color: "text-red-600", bg: "bg-red-100", emoji: "🔴" };
-  };
-
-  // Datos del mapa actual según el modo
-  const currentMapImage = mapMode === "ndvi" ? ndviMapData?.image : trueColorData?.image;
-  const currentMapLoading = mapMode === "ndvi" ? ndviMapLoading : tcLoading;
-  const currentMapError = mapMode === "ndvi" ? ndviMapError : tcError;
+  // Mapa actual
+  const currentMapImage = mapMode === "index" ? indexMapData?.image : trueColorData?.image;
+  const currentMapLoading = mapMode === "index" ? indexMapLoading : tcLoading;
+  const currentMapError = mapMode === "index" ? indexMapError : null;
 
   return (
     <div className="space-y-4">
-      {/* Header con status */}
+      {/* ===== SELECTOR MULTIESPECTRAL ===== */}
+      <div className="flex gap-1.5 bg-white/50 backdrop-blur-sm rounded-2xl p-1.5 border border-gray-200/50 shadow-sm">
+        {(["NDVI", "NDRE", "NDMI"] as const).map((idx) => {
+          const cfg = INDEX_UI[idx];
+          const isActive = activeIndex === idx;
+          return (
+            <button
+              key={idx}
+              onClick={() => { setActiveIndex(idx); setMapMode("index"); }}
+              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
+                isActive
+                  ? `bg-gradient-to-r ${cfg.gradient} text-white shadow-md scale-[1.02]`
+                  : "text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+              }`}
+            >
+              <span className="text-base">{cfg.emoji}</span>
+              <span className="hidden sm:inline">{cfg.label.split("—")[0].trim()}</span>
+              <span className="sm:hidden">{cfg.shortLabel}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ===== HEADER con status ===== */}
       <GlassCard className="p-4" hover={false}>
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-400 to-purple-600 shadow">
+          <div className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${ui.headerGradient} shadow`}>
             <Satellite className="h-5 w-5 text-white" />
           </div>
-          <div>
-            <h2 className="text-lg font-bold text-indigo-900">Telemetría Satelital</h2>
-            <p className="text-xs text-indigo-600">Sentinel-2 L2A · Copernicus CDSE · 10m resolución</p>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-lg font-bold text-gray-900">{ui.label}</h2>
+            <p className="text-[11px] text-gray-500 truncate">{ui.description}</p>
           </div>
-          {lastNDVI && (() => {
-            const status = getNDVIStatus(lastNDVI.mean);
+          {lastVal && (() => {
+            const status = ui.getStatus(lastVal.mean);
             return (
-              <div className={`ml-auto ${status.bg} px-3 py-1.5 rounded-xl flex items-center gap-2`}>
+              <div className={`${status.bg} px-3 py-1.5 rounded-xl flex items-center gap-2 flex-shrink-0`}>
                 <span className="text-lg">{status.emoji}</span>
                 <div>
-                  <p className={`text-xs font-bold ${status.color}`}>NDVI: {lastNDVI.mean.toFixed(3)}</p>
+                  <p className={`text-xs font-bold ${status.color}`}>{ui.unit}: {lastVal.mean.toFixed(3)}</p>
                   <p className="text-[10px] text-gray-500">{status.label}</p>
                 </div>
               </div>
@@ -2307,64 +2407,61 @@ function SatelliteTab({ parcel }: { parcel: any }) {
       </GlassCard>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Mapa satelital con simbología */}
+        {/* ===== MAPA con toggle ===== */}
         <GlassCard className="p-4 lg:col-span-1" hover={false}>
-          {/* Toggle NDVI / True Color */}
           <div className="flex items-center gap-1 mb-3 bg-gray-100 rounded-lg p-0.5">
             <button
-              onClick={() => setMapMode("ndvi")}
-              className={`flex-1 text-xs py-1.5 px-2 rounded-md font-medium transition-all ${mapMode === "ndvi" ? "bg-white shadow text-green-700" : "text-gray-500 hover:text-gray-700"}`}
+              onClick={() => setMapMode("index")}
+              className={`flex-1 text-xs py-1.5 px-2 rounded-md font-medium transition-all ${mapMode === "index" ? "bg-white shadow text-gray-800" : "text-gray-500"}`}
             >
-              🗺️ Mapa NDVI
+              🗺️ {activeIndex}
             </button>
             <button
               onClick={() => setMapMode("truecolor")}
-              className={`flex-1 text-xs py-1.5 px-2 rounded-md font-medium transition-all ${mapMode === "truecolor" ? "bg-white shadow text-indigo-700" : "text-gray-500 hover:text-gray-700"}`}
+              className={`flex-1 text-xs py-1.5 px-2 rounded-md font-medium transition-all ${mapMode === "truecolor" ? "bg-white shadow text-indigo-700" : "text-gray-500"}`}
             >
               📷 True Color
             </button>
           </div>
 
-          {/* Imagen del mapa con hover */}
+          {/* Imagen */}
           {currentMapLoading ? (
             <div className="flex items-center justify-center h-52 bg-gray-50 rounded-xl">
-              <Loader2 className="w-6 h-6 animate-spin text-indigo-400" />
-              <span className="ml-2 text-sm text-gray-500">Descargando...</span>
+              <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+              <span className="ml-2 text-sm text-gray-500">Cargando {mapMode === "index" ? activeIndex : "RGB"}...</span>
             </div>
           ) : currentMapError ? (
             <div className="flex flex-col items-center justify-center h-52 bg-red-50 rounded-xl p-4">
               <AlertTriangle className="w-6 h-6 text-red-400 mb-2" />
               <p className="text-xs text-red-600 text-center">
                 {(currentMapError as any)?.message?.includes("Credenciales")
-                  ? "Configura credenciales en Ajustes → API Copernicus"
-                  : "Error al cargar imagen satelital"}
+                  ? "Configura credenciales en Ajustes → Copernicus"
+                  : "Error al cargar imagen"}
               </p>
             </div>
           ) : currentMapImage ? (
             <div
-              className="relative rounded-xl overflow-hidden border border-indigo-200/50 shadow-sm cursor-crosshair"
-              onMouseMove={mapMode === "ndvi" ? handleMouseMove : undefined}
-              onMouseLeave={mapMode === "ndvi" ? handleMouseLeave : undefined}
+              className="relative rounded-xl overflow-hidden border border-gray-200/50 shadow-sm cursor-crosshair"
+              onMouseMove={mapMode === "index" ? handleMouseMove : undefined}
+              onMouseLeave={mapMode === "index" ? handleMouseLeave : undefined}
             >
-              <img ref={imgRef} src={currentMapImage} alt={mapMode === "ndvi" ? "Mapa NDVI" : "True Color"} className="w-full h-auto" />
+              <img ref={imgRef} src={currentMapImage} alt={mapMode === "index" ? `Mapa ${activeIndex}` : "True Color"} className="w-full h-auto" />
 
-              {/* Hover tooltip */}
-              {mapMode === "ndvi" && hoverInfo.visible && imgRef.current && (() => {
+              {mapMode === "index" && hoverInfo.visible && imgRef.current && (() => {
                 const zone = getZoneFromPosition(hoverInfo.x, hoverInfo.y, imgRef.current!.clientWidth, imgRef.current!.clientHeight);
                 return (
                   <div
-                    className="absolute pointer-events-none bg-black/80 text-white text-[10px] px-2 py-1 rounded-lg shadow-lg z-10 whitespace-nowrap"
-                    style={{ left: Math.min(hoverInfo.x + 12, (imgRef.current?.clientWidth || 200) - 120), top: hoverInfo.y - 30 }}
+                    className="absolute pointer-events-none bg-black/85 text-white text-[10px] px-2.5 py-1.5 rounded-lg shadow-xl z-10 whitespace-nowrap backdrop-blur"
+                    style={{ left: Math.min(hoverInfo.x + 12, (imgRef.current?.clientWidth || 200) - 140), top: hoverInfo.y - 35 }}
                   >
-                    <span style={{ color: zone.color }}>●</span> NDVI {zone.ndvi} · {zone.label}
+                    <span style={{ color: zone.color }}>●</span> {activeIndex} {zone.label} · {zone.desc}
                   </div>
                 );
               })()}
 
-              {/* Label overlay */}
               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
                 <p className="text-[10px] text-white/90">
-                  {mapMode === "ndvi" ? "NDVI Simbología" : "RGB Natural"} · Sentinel-2 · Últimos 15 días
+                  {mapMode === "index" ? `${activeIndex} Simbología` : "RGB Natural"} · Sentinel-2 · Últimos 15 días
                 </p>
               </div>
             </div>
@@ -2375,19 +2472,12 @@ function SatelliteTab({ parcel }: { parcel: any }) {
             </div>
           )}
 
-          {/* Leyenda de simbología NDVI */}
-          {mapMode === "ndvi" && (
+          {/* Leyenda dinámica */}
+          {mapMode === "index" && (
             <div className="mt-3 p-2 bg-gray-50 rounded-lg">
-              <p className="text-[10px] font-bold text-gray-600 mb-1.5 uppercase">Simbología NDVI</p>
+              <p className="text-[10px] font-bold text-gray-600 mb-1.5 uppercase">Simbología {activeIndex}</p>
               <div className="space-y-1">
-                {[
-                  { color: "#004D00", label: "0.8 – 1.0", desc: "Muy densa" },
-                  { color: "#228B22", label: "0.6 – 0.8", desc: "Densa" },
-                  { color: "#7CFC00", label: "0.4 – 0.6", desc: "Moderada" },
-                  { color: "#FFD700", label: "0.2 – 0.4", desc: "Escasa" },
-                  { color: "#8B4513", label: "0.0 – 0.2", desc: "Suelo" },
-                  { color: "#0000FF", label: "< 0.0", desc: "Agua" },
-                ].map((item) => (
+                {ui.colorStops.map((item) => (
                   <div key={item.label} className="flex items-center gap-2">
                     <div className="w-4 h-3 rounded-sm border border-gray-200" style={{ backgroundColor: item.color }} />
                     <span className="text-[10px] text-gray-600 font-medium w-14">{item.label}</span>
@@ -2398,95 +2488,101 @@ function SatelliteTab({ parcel }: { parcel: any }) {
             </div>
           )}
 
-          {/* Estadísticas rápidas */}
-          {lastNDVI && (
+          {/* Stats rápidos */}
+          {lastVal && (
             <div className="grid grid-cols-3 gap-2 mt-3">
-              <div className="bg-green-50 rounded-lg p-2 text-center">
+              <div className="bg-gray-50 rounded-lg p-2 text-center">
                 <p className="text-[10px] text-gray-500 uppercase">Prom.</p>
-                <p className="text-sm font-bold text-green-700">{lastNDVI.mean.toFixed(3)}</p>
+                <p className="text-sm font-bold" style={{ color: ui.chartColor }}>{lastVal.mean.toFixed(3)}</p>
               </div>
-              <div className="bg-lime-50 rounded-lg p-2 text-center">
+              <div className="bg-gray-50 rounded-lg p-2 text-center">
                 <p className="text-[10px] text-gray-500 uppercase">Máx.</p>
-                <p className="text-sm font-bold text-lime-700">{lastNDVI.max.toFixed(3)}</p>
+                <p className="text-sm font-bold text-gray-700">{lastVal.max.toFixed(3)}</p>
               </div>
-              <div className="bg-amber-50 rounded-lg p-2 text-center">
+              <div className="bg-gray-50 rounded-lg p-2 text-center">
                 <p className="text-[10px] text-gray-500 uppercase">Mín.</p>
-                <p className="text-sm font-bold text-amber-700">{lastNDVI.min.toFixed(3)}</p>
+                <p className="text-sm font-bold text-gray-700">{lastVal.min.toFixed(3)}</p>
               </div>
             </div>
           )}
         </GlassCard>
 
-        {/* NDVI Chart */}
+        {/* ===== GRÁFICA HISTÓRICA ===== */}
         <GlassCard className="p-4 lg:col-span-2" hover={false}>
           <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
-            <Activity className="w-4 h-4 text-green-500" />
-            Histórico NDVI Satelital
-            {ndviData && <span className="text-[10px] text-gray-400 font-normal ml-auto">{ndviData.fromDate} → {ndviData.toDate}</span>}
+            <Activity className="w-4 h-4" style={{ color: ui.chartColor }} />
+            Histórico {ui.unit} Satelital
+            {statsData && <span className="text-[10px] text-gray-400 font-normal ml-auto">{statsData.fromDate} → {statsData.toDate}</span>}
           </h3>
-          {ndviLoading ? (
+
+          {statsLoading ? (
             <div className="flex items-center justify-center h-64 bg-gray-50 rounded-xl">
-              <Loader2 className="w-6 h-6 animate-spin text-green-400" />
-              <span className="ml-2 text-sm text-gray-500">Consultando Copernicus...</span>
+              <Loader2 className="w-6 h-6 animate-spin" style={{ color: ui.chartColor }} />
+              <span className="ml-2 text-sm text-gray-500">Consultando {activeIndex}...</span>
             </div>
-          ) : ndviError ? (
+          ) : statsError ? (
             <div className="flex flex-col items-center justify-center h-64 bg-red-50 rounded-xl p-4">
               <AlertTriangle className="w-6 h-6 text-red-400 mb-2" />
               <p className="text-xs text-red-600 text-center">
-                {(ndviError as any)?.message?.includes("Credenciales")
-                  ? "Configura las credenciales de Copernicus en Configuración → API Copernicus (CDSE)"
-                  : (ndviError as any)?.message || "Error al obtener datos NDVI"}
+                {(statsError as any)?.message?.includes("Credenciales")
+                  ? "Configura credenciales en Configuración → API Copernicus (CDSE)"
+                  : (statsError as any)?.message || `Error al obtener ${activeIndex}`}
               </p>
             </div>
           ) : chartData.length > 0 ? (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
-                  <ReferenceArea y1={0} y2={0.2} fill="#fecaca" fillOpacity={0.3} />
-                  <ReferenceArea y1={0.2} y2={0.4} fill="#fef08a" fillOpacity={0.3} />
-                  <ReferenceArea y1={0.4} y2={0.6} fill="#bbf7d0" fillOpacity={0.3} />
-                  <ReferenceArea y1={0.6} y2={1} fill="#86efac" fillOpacity={0.3} />
+                  <ReferenceArea y1={-0.2} y2={0.2} fill="#fecaca" fillOpacity={0.2} />
+                  <ReferenceArea y1={0.2} y2={0.4} fill="#fef08a" fillOpacity={0.2} />
+                  <ReferenceArea y1={0.4} y2={0.6} fill="#bbf7d0" fillOpacity={0.2} />
+                  <ReferenceArea y1={0.6} y2={1} fill="#86efac" fillOpacity={0.2} />
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="dateLabel" tick={{ fontSize: 10 }} />
-                  <YAxis domain={[0, 1]} tick={{ fontSize: 10 }} tickFormatter={(v: number) => v.toFixed(1)} />
+                  <YAxis domain={[-0.2, 1]} tick={{ fontSize: 10 }} tickFormatter={(v: number) => v.toFixed(1)} />
                   <Tooltip
                     contentStyle={{ borderRadius: 12, border: "1px solid #e5e7eb", fontSize: 12 }}
-                    formatter={(value: any, name: string) => [Number(value).toFixed(3), name === "mean" ? "NDVI Promedio" : name === "max" ? "NDVI Máximo" : "NDVI Mínimo"]}
+                    formatter={(value: any, name: string) => [
+                      Number(value).toFixed(3),
+                      name === "mean" ? `${ui.unit} Promedio` : name === "max" ? `${ui.unit} Máximo` : `${ui.unit} Mínimo`
+                    ]}
                     labelFormatter={(label: string) => `Fecha: ${label}`}
                   />
-                  <Legend formatter={(value: string) => value === "mean" ? "Promedio NDVI Satelital" : value === "max" ? "Máximo" : "Mínimo"} />
-                  <Line type="monotone" dataKey="max" stroke="#86efac" strokeWidth={1} dot={false} strokeDasharray="4 2" />
-                  <Line type="monotone" dataKey="mean" stroke="#16a34a" strokeWidth={2.5} dot={{ r: 3, fill: "#16a34a" }} activeDot={{ r: 5 }} />
+                  <Legend formatter={(value: string) => value === "mean" ? `Promedio ${ui.unit}` : value === "max" ? "Máximo" : "Mínimo"} />
+                  <Line type="monotone" dataKey="max" stroke={`${ui.chartColor}50`} strokeWidth={1} dot={false} strokeDasharray="4 2" />
+                  <Line type="monotone" dataKey="mean" stroke={ui.chartColor} strokeWidth={2.5} dot={{ r: 3, fill: ui.chartColor }} activeDot={{ r: 5 }} />
                   <Line type="monotone" dataKey="min" stroke="#fbbf24" strokeWidth={1} dot={false} strokeDasharray="4 2" />
-                  <ReferenceLine y={0.6} stroke="#16a34a" strokeDasharray="8 4" label={{ value: "Óptimo", position: "right", fontSize: 9, fill: "#16a34a" }} />
-                  <ReferenceLine y={0.3} stroke="#dc2626" strokeDasharray="8 4" label={{ value: "Estrés", position: "right", fontSize: 9, fill: "#dc2626" }} />
+                  <ReferenceLine y={ui.optimalLine} stroke={ui.chartColor} strokeDasharray="8 4" label={{ value: ui.optimalLabel, position: "right", fontSize: 9, fill: ui.chartColor }} />
+                  <ReferenceLine y={ui.stressLine} stroke="#dc2626" strokeDasharray="8 4" label={{ value: ui.stressLabel, position: "right", fontSize: 9, fill: "#dc2626" }} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center h-64 bg-gray-50 rounded-xl p-4">
               <Info className="w-6 h-6 text-gray-300 mb-2" />
-              <p className="text-xs text-gray-500">Sin datos NDVI para este período</p>
+              <p className="text-xs text-gray-500">Sin datos {activeIndex} para este período</p>
             </div>
           )}
 
-          {/* Leyenda inline */}
-          <div className="flex items-center gap-4 mt-3 justify-center flex-wrap">
-            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-red-200" /><span className="text-[10px] text-gray-500">&lt;0.2 Estrés</span></div>
-            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-yellow-200" /><span className="text-[10px] text-gray-500">0.2-0.4 Moderado</span></div>
-            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-green-200" /><span className="text-[10px] text-gray-500">0.4-0.6 Bueno</span></div>
-            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-green-300" /><span className="text-[10px] text-gray-500">&gt;0.6 Excelente</span></div>
+          {/* Mini-leyenda inline */}
+          <div className="flex items-center gap-3 mt-3 justify-center flex-wrap">
+            {ui.colorStops.slice(0, 4).map((s) => (
+              <div key={s.label} className="flex items-center gap-1">
+                <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: s.color }} />
+                <span className="text-[10px] text-gray-500">{s.label} {s.desc}</span>
+              </div>
+            ))}
           </div>
         </GlassCard>
       </div>
 
-      {/* Info footer */}
+      {/* ===== INFO FOOTER ===== */}
       <div className="flex items-start gap-2 p-3 bg-indigo-50/50 rounded-xl border border-indigo-100/50">
         <Info className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" />
         <div className="text-[11px] text-indigo-700 space-y-0.5">
-          <p><strong>Fuente:</strong> Sentinel-2 L2A (10m) vía Copernicus Data Space Ecosystem</p>
-          <p><strong>Mapa NDVI:</strong> Simbología con ColorMapVisualizer — Azul=Agua, Café=Suelo, Naranja→Amarillo=Escasa, Verde claro→oscuro=Vegetación densa</p>
-          <p><strong>Actualización:</strong> Cada 5 días (revisita Sentinel-2) · Filtrado &lt;30% nubes</p>
+          <p><strong>Fuente:</strong> Sentinel-2 L2A vía Copernicus Data Space Ecosystem</p>
+          <p><strong>Índices:</strong> NDVI (Vigor, 10m) · NDRE (Nitrógeno/Red Edge, 20m) · NDMI (Humedad/SWIR, 20m)</p>
+          <p><strong>Actualización:</strong> Cada 5 días (revisita Sentinel-2) · Filtrado &lt;30% nubes · ColorMapVisualizer</p>
         </div>
       </div>
     </div>

@@ -101,9 +101,33 @@ export const appRouter = router({
       return { success: true, message: "Conexión exitosa con Copernicus CDSE" };
     }),
 
-    getNDVI: protectedProcedure
+    // Helper: parsear polígono de parcela a GeoJSON
+    _parsePolygon: protectedProcedure
+      .input(z.object({ parcelId: z.number() }))
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const [parcel] = await drizzle.select({ polygon: parcels.polygon }).from(parcels).where(eq(parcels.id, input.parcelId));
+        if (!parcel?.polygon) throw new TRPCError({ code: "BAD_REQUEST", message: "La parcela no tiene polígono definido" });
+        const polyData = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
+        if (Array.isArray(polyData)) {
+          const ring = polyData.map((p: any) => [p.lng || p.longitude || p[1], p.lat || p.latitude || p[0]]);
+          if (ring.length > 0 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])) ring.push([...ring[0]]);
+          return { type: "Polygon", coordinates: [ring] };
+        } else if (polyData.type === "Polygon") {
+          return polyData;
+        }
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Formato de polígono no reconocido" });
+      }),
+
+    /**
+     * Histórico de índice espectral (NDVI, NDRE, NDMI).
+     * Retorna serie de tiempo con mean/min/max/stDev.
+     */
+    getIndexStats: protectedProcedure
       .input(z.object({
         parcelId: z.number(),
+        indexType: z.enum(["NDVI", "NDRE", "NDMI"]).default("NDVI"),
         fromDate: z.string().optional(),
         toDate: z.string().optional(),
       }))
@@ -114,37 +138,62 @@ export const appRouter = router({
         const [parcel] = await drizzle.select({ polygon: parcels.polygon }).from(parcels).where(eq(parcels.id, input.parcelId));
         if (!parcel?.polygon) throw new TRPCError({ code: "BAD_REQUEST", message: "La parcela no tiene polígono definido" });
 
-        // Parsear polígono almacenado a GeoJSON
         let geoPolygon: any;
         try {
           const polyData = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
-          // El polígono en BD es un array de {lat, lng} — convertir a GeoJSON [lng, lat]
           if (Array.isArray(polyData)) {
             const ring = polyData.map((p: any) => [p.lng || p.longitude || p[1], p.lat || p.latitude || p[0]]);
-            // Cerrar el anillo si no está cerrado
-            if (ring.length > 0 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])) {
-              ring.push([...ring[0]]);
-            }
+            if (ring.length > 0 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])) ring.push([...ring[0]]);
             geoPolygon = { type: "Polygon", coordinates: [ring] };
           } else if (polyData.type === "Polygon") {
             geoPolygon = polyData;
           } else {
-            throw new Error("Formato de polígono no reconocido");
+            throw new Error("Formato no reconocido");
           }
         } catch (e) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Error al parsear el polígono de la parcela" });
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Error al parsear el polígono" });
         }
 
-        // Rango de fechas: por defecto últimos 6 meses
         const to = input.toDate || new Date().toISOString().split("T")[0];
-        const defaultFrom = new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0];
-        const from = input.fromDate || defaultFrom;
+        const from = input.fromDate || new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0];
 
+        const { getIndexHistory } = await import("./copernicusService");
+        const data = await getIndexHistory(geoPolygon, from, to, input.indexType as any);
+        return { data, fromDate: from, toDate: to, indexType: input.indexType };
+      }),
+
+    // Backward compat: getNDVI → getIndexStats with NDVI
+    getNDVI: protectedProcedure
+      .input(z.object({
+        parcelId: z.number(),
+        fromDate: z.string().optional(),
+        toDate: z.string().optional(),
+      }))
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const [parcel] = await drizzle.select({ polygon: parcels.polygon }).from(parcels).where(eq(parcels.id, input.parcelId));
+        if (!parcel?.polygon) throw new TRPCError({ code: "BAD_REQUEST", message: "La parcela no tiene polígono definido" });
+        let geoPolygon: any;
+        try {
+          const polyData = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
+          if (Array.isArray(polyData)) {
+            const ring = polyData.map((p: any) => [p.lng || p.longitude || p[1], p.lat || p.latitude || p[0]]);
+            if (ring.length > 0 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])) ring.push([...ring[0]]);
+            geoPolygon = { type: "Polygon", coordinates: [ring] };
+          } else if (polyData.type === "Polygon") { geoPolygon = polyData; }
+          else { throw new Error("Formato no reconocido"); }
+        } catch { throw new TRPCError({ code: "BAD_REQUEST", message: "Error al parsear el polígono" }); }
+        const to = input.toDate || new Date().toISOString().split("T")[0];
+        const from = input.fromDate || new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0];
         const { getNDVIHistory } = await import("./copernicusService");
         const data = await getNDVIHistory(geoPolygon, from, to);
         return { data, fromDate: from, toDate: to };
       }),
 
+    /**
+     * Imagen True Color (RGB natural) de Sentinel-2.
+     */
     getTrueColor: protectedProcedure
       .input(z.object({
         parcelId: z.number(),
@@ -153,76 +202,77 @@ export const appRouter = router({
       .query(async ({ input }) => {
         const drizzle = await getDb();
         if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-
         const [parcel] = await drizzle.select({ polygon: parcels.polygon }).from(parcels).where(eq(parcels.id, input.parcelId));
         if (!parcel?.polygon) throw new TRPCError({ code: "BAD_REQUEST", message: "La parcela no tiene polígono definido" });
-
         let geoPolygon: any;
         try {
           const polyData = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
           if (Array.isArray(polyData)) {
             const ring = polyData.map((p: any) => [p.lng || p.longitude || p[1], p.lat || p.latitude || p[0]]);
-            if (ring.length > 0 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])) {
-              ring.push([...ring[0]]);
-            }
+            if (ring.length > 0 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])) ring.push([...ring[0]]);
             geoPolygon = { type: "Polygon", coordinates: [ring] };
-          } else if (polyData.type === "Polygon") {
-            geoPolygon = polyData;
-          } else {
-            throw new Error("Formato no reconocido");
-          }
-        } catch (e) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Error al parsear el polígono" });
-        }
-
+          } else if (polyData.type === "Polygon") { geoPolygon = polyData; }
+          else { throw new Error("Formato no reconocido"); }
+        } catch { throw new TRPCError({ code: "BAD_REQUEST", message: "Error al parsear el polígono" }); }
         const { getTrueColorImage } = await import("./copernicusService");
         const buffer = await getTrueColorImage(geoPolygon, input.date);
-        if (!buffer) return { image: null, message: "Sin imagen satelital disponible para este rango" };
-
-        return {
-          image: `data:image/png;base64,${buffer.toString("base64")}`,
-          message: null,
-        };
+        if (!buffer) return { image: null, message: "Sin imagen satelital disponible" };
+        return { image: `data:image/png;base64,${buffer.toString("base64")}`, message: null };
       }),
 
-    getNDVIMap: protectedProcedure
+    /**
+     * Mapa coloreado de un índice espectral (NDVI/NDRE/NDMI).
+     * PNG con ColorMapVisualizer, dataMask=0→transparente.
+     */
+    getIndexMap: protectedProcedure
       .input(z.object({
         parcelId: z.number(),
+        indexType: z.enum(["NDVI", "NDRE", "NDMI"]).default("NDVI"),
         date: z.string().optional(),
       }))
       .query(async ({ input }) => {
         const drizzle = await getDb();
         if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-
         const [parcel] = await drizzle.select({ polygon: parcels.polygon }).from(parcels).where(eq(parcels.id, input.parcelId));
         if (!parcel?.polygon) throw new TRPCError({ code: "BAD_REQUEST", message: "La parcela no tiene polígono definido" });
-
         let geoPolygon: any;
         try {
           const polyData = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
           if (Array.isArray(polyData)) {
             const ring = polyData.map((p: any) => [p.lng || p.longitude || p[1], p.lat || p.latitude || p[0]]);
-            if (ring.length > 0 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])) {
-              ring.push([...ring[0]]);
-            }
+            if (ring.length > 0 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])) ring.push([...ring[0]]);
             geoPolygon = { type: "Polygon", coordinates: [ring] };
-          } else if (polyData.type === "Polygon") {
-            geoPolygon = polyData;
-          } else {
-            throw new Error("Formato no reconocido");
-          }
-        } catch (e) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Error al parsear el polígono" });
-        }
+          } else if (polyData.type === "Polygon") { geoPolygon = polyData; }
+          else { throw new Error("Formato no reconocido"); }
+        } catch { throw new TRPCError({ code: "BAD_REQUEST", message: "Error al parsear el polígono" }); }
+        const { getIndexMapImage } = await import("./copernicusService");
+        const buffer = await getIndexMapImage(geoPolygon, input.indexType as any, input.date);
+        if (!buffer) return { image: null, message: `Sin mapa ${input.indexType} disponible` };
+        return { image: `data:image/png;base64,${buffer.toString("base64")}`, message: null };
+      }),
 
+    // Backward compat: getNDVIMap
+    getNDVIMap: protectedProcedure
+      .input(z.object({ parcelId: z.number(), date: z.string().optional() }))
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const [parcel] = await drizzle.select({ polygon: parcels.polygon }).from(parcels).where(eq(parcels.id, input.parcelId));
+        if (!parcel?.polygon) throw new TRPCError({ code: "BAD_REQUEST", message: "La parcela no tiene polígono" });
+        let geoPolygon: any;
+        try {
+          const polyData = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
+          if (Array.isArray(polyData)) {
+            const ring = polyData.map((p: any) => [p.lng || p.longitude || p[1], p.lat || p.latitude || p[0]]);
+            if (ring.length > 0 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])) ring.push([...ring[0]]);
+            geoPolygon = { type: "Polygon", coordinates: [ring] };
+          } else if (polyData.type === "Polygon") { geoPolygon = polyData; }
+          else { throw new Error("Formato no reconocido"); }
+        } catch { throw new TRPCError({ code: "BAD_REQUEST", message: "Error al parsear el polígono" }); }
         const { getNDVIMapImage } = await import("./copernicusService");
         const buffer = await getNDVIMapImage(geoPolygon, input.date);
-        if (!buffer) return { image: null, message: "Sin mapa NDVI disponible para este rango" };
-
-        return {
-          image: `data:image/png;base64,${buffer.toString("base64")}`,
-          message: null,
-        };
+        if (!buffer) return { image: null, message: "Sin mapa NDVI disponible" };
+        return { image: `data:image/png;base64,${buffer.toString("base64")}`, message: null };
       }),
   }),
 
