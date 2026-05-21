@@ -2183,146 +2183,256 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings, allParcels, onSelectPa
     </div>
   );
 }
-// ============ SATELLITE TAB — Agricultura de Precisión Multiespectral ============
 
-/** Configuración de UI por índice espectral */
-const INDEX_UI: Record<string, {
-  label: string; shortLabel: string; emoji: string; description: string;
-  unit: string; gradient: string; headerGradient: string;
-  colorStops: Array<{ color: string; label: string; desc: string }>;
-  getStatus: (v: number) => { label: string; color: string; bg: string; emoji: string };
-  chartColor: string; optimalLine: number; stressLine: number;
-  optimalLabel: string; stressLabel: string;
-}> = {
+// ============ SATELLITE TAB — Dashboard Comparativo Multiespectral ============
+
+/** Configuracion UI por indice */
+const INDEX_CONFIGS_UI = {
   NDVI: {
-    label: "NDVI — Vigor Vegetativo",
-    shortLabel: "Biomasa",
-    emoji: "🌿",
-    description: "(B08-B04)/(B08+B04) · Sentinel-2 Bandas NIR + Red",
-    unit: "NDVI",
+    label: "NDVI", fullLabel: "Vigor Vegetativo", emoji: "\u{1F33F}",
+    formula: "(B08-B04)/(B08+B04)", bands: "NIR + Red - 10m",
+    chartColor: "#16a34a", chartColorLight: "#86efac",
     gradient: "from-green-500 to-emerald-600",
-    headerGradient: "from-green-400 to-emerald-600",
-    chartColor: "#16a34a",
-    optimalLine: 0.6, stressLine: 0.3,
-    optimalLabel: "Óptimo", stressLabel: "Estrés",
     colorStops: [
-      { color: "#004D00", label: "0.8–1.0", desc: "Muy densa" },
-      { color: "#228B22", label: "0.6–0.8", desc: "Densa" },
-      { color: "#7CFC00", label: "0.4–0.6", desc: "Moderada" },
-      { color: "#FFD700", label: "0.2–0.4", desc: "Escasa" },
-      { color: "#8B4513", label: "0.0–0.2", desc: "Suelo" },
-      { color: "#0000FF", label: "< 0.0", desc: "Agua" },
+      { color: "#004D00", label: "0.8-1.0", desc: "Muy densa" },
+      { color: "#228B22", label: "0.6-0.8", desc: "Densa" },
+      { color: "#7CFC00", label: "0.4-0.6", desc: "Moderada" },
+      { color: "#FFD700", label: "0.2-0.4", desc: "Escasa" },
+      { color: "#8B4513", label: "0.0-0.2", desc: "Suelo" },
+      { color: "#040ED8", label: "< 0.0", desc: "Agua" },
     ],
-    getStatus: (v) => {
-      if (v >= 0.6) return { label: "Excelente", color: "text-green-600", bg: "bg-green-100", emoji: "🌿" };
-      if (v >= 0.4) return { label: "Bueno", color: "text-lime-600", bg: "bg-lime-100", emoji: "🌱" };
-      if (v >= 0.2) return { label: "Moderado", color: "text-yellow-600", bg: "bg-yellow-100", emoji: "⚠️" };
-      return { label: "Bajo", color: "text-red-600", bg: "bg-red-100", emoji: "🔴" };
+    getStatus: (v: number) => {
+      if (v >= 0.6) return { label: "Excelente", bg: "bg-green-100", color: "text-green-700", emoji: "\u{1F33F}" };
+      if (v >= 0.4) return { label: "Bueno", bg: "bg-lime-100", color: "text-lime-700", emoji: "\u{1F331}" };
+      if (v >= 0.2) return { label: "Moderado", bg: "bg-yellow-100", color: "text-yellow-700", emoji: "\u26A0\uFE0F" };
+      return { label: "Bajo", bg: "bg-red-100", color: "text-red-700", emoji: "\u{1F534}" };
     },
+    optimalLine: 0.6, stressLine: 0.3,
   },
   NDRE: {
-    label: "NDRE — Nitrógeno / Clorofila",
-    shortLabel: "Nitrógeno",
-    emoji: "🧪",
-    description: "(B08-B05)/(B08+B05) · Sentinel-2 Bandas NIR + Red Edge",
-    unit: "NDRE",
+    label: "NDRE", fullLabel: "Nitrogeno / Clorofila", emoji: "\u{1F9EA}",
+    formula: "(B08-B05)/(B08+B05)", bands: "NIR + Red Edge - 20m",
+    chartColor: "#7c3aed", chartColorLight: "#c4b5fd",
     gradient: "from-purple-500 to-violet-600",
-    headerGradient: "from-purple-400 to-violet-600",
-    chartColor: "#7c3aed",
-    optimalLine: 0.5, stressLine: 0.2,
-    optimalLabel: "Alto N", stressLabel: "Deficiencia",
     colorStops: [
-      { color: "#155724", label: "0.8–1.0", desc: "Óptimo N" },
-      { color: "#28A745", label: "0.6–0.8", desc: "Alto N" },
-      { color: "#82D656", label: "0.4–0.6", desc: "Bueno" },
-      { color: "#F7DC6F", label: "0.2–0.4", desc: "Moderado" },
-      { color: "#DB5C4C", label: "0.0–0.2", desc: "Deficiente" },
+      { color: "#155724", label: "0.8-1.0", desc: "Optimo N" },
+      { color: "#28A745", label: "0.6-0.8", desc: "Alto N" },
+      { color: "#82D656", label: "0.4-0.6", desc: "Bueno" },
+      { color: "#F7DC6F", label: "0.2-0.4", desc: "Moderado" },
+      { color: "#DB5C4C", label: "0.0-0.2", desc: "Deficiente" },
       { color: "#2C105A", label: "< 0.0", desc: "Sin clorofila" },
     ],
-    getStatus: (v) => {
-      if (v >= 0.5) return { label: "Óptimo N", color: "text-purple-600", bg: "bg-purple-100", emoji: "🧪" };
-      if (v >= 0.3) return { label: "Bueno", color: "text-violet-600", bg: "bg-violet-100", emoji: "🌱" };
-      if (v >= 0.15) return { label: "Moderado", color: "text-amber-600", bg: "bg-amber-100", emoji: "⚠️" };
-      return { label: "Deficiente", color: "text-red-600", bg: "bg-red-100", emoji: "🔴" };
+    getStatus: (v: number) => {
+      if (v >= 0.5) return { label: "Optimo", bg: "bg-purple-100", color: "text-purple-700", emoji: "\u{1F9EA}" };
+      if (v >= 0.3) return { label: "Bueno", bg: "bg-violet-100", color: "text-violet-700", emoji: "\u{1F331}" };
+      if (v >= 0.15) return { label: "Moderado", bg: "bg-amber-100", color: "text-amber-700", emoji: "\u26A0\uFE0F" };
+      return { label: "Deficiente", bg: "bg-red-100", color: "text-red-700", emoji: "\u{1F534}" };
     },
+    optimalLine: 0.5, stressLine: 0.2,
   },
   NDMI: {
-    label: "NDMI — Estrés Hídrico",
-    shortLabel: "Humedad",
-    emoji: "💧",
-    description: "(B08-B11)/(B08+B11) · Sentinel-2 Bandas NIR + SWIR",
-    unit: "NDMI",
+    label: "NDMI", fullLabel: "Estres Hidrico", emoji: "\u{1F4A7}",
+    formula: "(B08-B11)/(B08+B11)", bands: "NIR + SWIR - 20m",
+    chartColor: "#2563eb", chartColorLight: "#93c5fd",
     gradient: "from-blue-500 to-cyan-600",
-    headerGradient: "from-blue-400 to-cyan-600",
-    chartColor: "#2563eb",
-    optimalLine: 0.4, stressLine: 0.0,
-    optimalLabel: "Húmedo", stressLabel: "Seco",
     colorStops: [
-      { color: "#00008B", label: "0.7–1.0", desc: "Saturado" },
-      { color: "#4169E1", label: "0.4–0.7", desc: "Húmedo" },
-      { color: "#87CEEB", label: "0.2–0.4", desc: "Normal" },
-      { color: "#FFD700", label: "0.0–0.2", desc: "Seco" },
-      { color: "#FF6347", label: "-0.3–0.0", desc: "Estrés" },
+      { color: "#00008B", label: "0.7-1.0", desc: "Saturado" },
+      { color: "#4169E1", label: "0.4-0.7", desc: "Humedo" },
+      { color: "#87CEEB", label: "0.2-0.4", desc: "Normal" },
+      { color: "#FFD700", label: "0.0-0.2", desc: "Seco" },
+      { color: "#FF6347", label: "-0.3-0.0", desc: "Estres" },
       { color: "#8B0000", label: "< -0.3", desc: "Severo" },
     ],
-    getStatus: (v) => {
-      if (v >= 0.4) return { label: "Húmedo", color: "text-blue-600", bg: "bg-blue-100", emoji: "💧" };
-      if (v >= 0.2) return { label: "Normal", color: "text-cyan-600", bg: "bg-cyan-100", emoji: "🌱" };
-      if (v >= 0.0) return { label: "Seco", color: "text-amber-600", bg: "bg-amber-100", emoji: "⚠️" };
-      return { label: "Estrés Hídrico", color: "text-red-600", bg: "bg-red-100", emoji: "🔴" };
+    getStatus: (v: number) => {
+      if (v >= 0.4) return { label: "Humedo", bg: "bg-blue-100", color: "text-blue-700", emoji: "\u{1F4A7}" };
+      if (v >= 0.2) return { label: "Normal", bg: "bg-cyan-100", color: "text-cyan-700", emoji: "\u{1F331}" };
+      if (v >= 0.0) return { label: "Seco", bg: "bg-amber-100", color: "text-amber-700", emoji: "\u26A0\uFE0F" };
+      return { label: "Estres", bg: "bg-red-100", color: "text-red-700", emoji: "\u{1F534}" };
     },
+    optimalLine: 0.4, stressLine: 0.0,
   },
-};
+} as const;
 
+type IdxKey = "NDVI" | "NDRE" | "NDMI";
+const ALL_INDICES: IdxKey[] = ["NDVI", "NDRE", "NDMI"];
+/** Subcomponente: tarjeta de mapa individual por indice */
+function IndexMapCard({ parcelId, indexType, showLegend }: { parcelId: number; indexType: IdxKey; showLegend?: boolean }) {
+  const cfg = INDEX_CONFIGS_UI[indexType];
+  const { data, isLoading, error } = trpc.copernicus.getIndexMap.useQuery(
+    { parcelId, indexType },
+    { staleTime: 10 * 60 * 1000, retry: 1 }
+  );
+  const { data: statsData } = trpc.copernicus.getIndexStats.useQuery(
+    { parcelId, indexType },
+    { staleTime: 10 * 60 * 1000, retry: 1 }
+  );
+  const lastVal = useMemo(() => {
+    if (!statsData?.data?.length) return null;
+    return statsData.data[statsData.data.length - 1];
+  }, [statsData]);
+  const status = lastVal ? cfg.getStatus(lastVal.mean) : null;
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-2 mb-2">
+        <div className={`flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br ${cfg.gradient} shadow-sm`}>
+          <span className="text-sm">{cfg.emoji}</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <h4 className="text-xs font-bold text-gray-800">{cfg.label}</h4>
+          <p className="text-[9px] text-gray-400 truncate">{cfg.fullLabel}</p>
+        </div>
+        {status && (
+          <div className={`${status.bg} px-2 py-0.5 rounded-lg`}>
+            <p className={`text-[10px] font-bold ${status.color}`}>{lastVal!.mean.toFixed(3)}</p>
+          </div>
+        )}
+      </div>
+      {isLoading ? (
+        <div className="flex-1 flex items-center justify-center bg-gray-50 rounded-xl min-h-[140px]">
+          <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+        </div>
+      ) : error ? (
+        <div className="flex-1 flex items-center justify-center bg-red-50 rounded-xl min-h-[140px] p-2">
+          <p className="text-[10px] text-red-500 text-center">
+            {(error as any)?.message?.includes("Credenciales") ? "Sin credenciales" : "Error"}
+          </p>
+        </div>
+      ) : data?.image ? (
+        <div className="relative rounded-xl overflow-hidden border border-gray-200/50 shadow-sm">
+          <img src={data.image} alt={`Mapa ${indexType}`} className="w-full h-auto" />
+          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent p-1.5">
+            <p className="text-[9px] text-white/80">{cfg.formula}</p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex-1 flex items-center justify-center bg-gray-50 rounded-xl min-h-[140px]">
+          <CameraOff className="w-5 h-5 text-gray-300" />
+        </div>
+      )}
+      {showLegend && (
+        <div className="mt-2 space-y-0.5">
+          {cfg.colorStops.map((s) => (
+            <div key={s.label} className="flex items-center gap-1.5">
+              <div className="w-3 h-2.5 rounded-sm border border-gray-200/50" style={{ backgroundColor: s.color }} />
+              <span className="text-[9px] text-gray-500 font-medium">{s.label}</span>
+              <span className="text-[9px] text-gray-400">{s.desc}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {lastVal && (
+        <div className="grid grid-cols-3 gap-1 mt-2">
+          {[
+            { label: "Prom", value: lastVal.mean, color: cfg.chartColor },
+            { label: "Max", value: lastVal.max, color: "#059669" },
+            { label: "Min", value: lastVal.min, color: "#d97706" },
+          ].map((s) => (
+            <div key={s.label} className="bg-gray-50 rounded-md p-1 text-center">
+              <p className="text-[8px] text-gray-400 uppercase">{s.label}</p>
+              <p className="text-[11px] font-bold" style={{ color: s.color }}>{s.value.toFixed(3)}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Subcomponente: mapa historico thumbnail */
+function HistoricalMapThumb({ parcelId, indexType, date, dateLabel }: { parcelId: number; indexType: IdxKey; date: string; dateLabel: string }) {
+  const { data, isLoading } = trpc.copernicus.getIndexMap.useQuery(
+    { parcelId, indexType, date },
+    { staleTime: 30 * 60 * 1000, retry: 1 }
+  );
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <div className="relative w-full aspect-square rounded-lg overflow-hidden border border-gray-200/50 shadow-sm bg-gray-50">
+        {isLoading ? (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Loader2 className="w-4 h-4 animate-spin text-gray-300" />
+          </div>
+        ) : data?.image ? (
+          <img src={data.image} alt={`${indexType} ${dateLabel}`} className="w-full h-full object-cover" />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <CameraOff className="w-3 h-3 text-gray-300" />
+          </div>
+        )}
+      </div>
+      <p className="text-[8px] text-gray-500 font-medium text-center leading-tight">{dateLabel}</p>
+    </div>
+  );
+}
 function SatelliteTab({ parcel }: { parcel: any }) {
-  // Estado: índice activo y modo de mapa
-  const [activeIndex, setActiveIndex] = useState<"NDVI" | "NDRE" | "NDMI">("NDVI");
-  const [mapMode, setMapMode] = useState<"index" | "truecolor">("index");
-  const [hoverInfo, setHoverInfo] = useState<{ x: number; y: number; visible: boolean }>({ x: 0, y: 0, visible: false });
-  const imgRef = useRef<HTMLImageElement>(null);
-
-  const ui = INDEX_UI[activeIndex];
+  const [showLegend, setShowLegend] = useState(true);
+  const [timelineIndex, setTimelineIndex] = useState<IdxKey>("NDVI");
 
   const hasPolygon = useMemo(() => {
     if (!parcel?.polygon) return false;
     try {
       const poly = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
       if (Array.isArray(poly)) return poly.length >= 3;
-      return poly.coordinates && poly.coordinates[0] && poly.coordinates[0].length >= 3;
+      return poly.coordinates?.[0]?.length >= 3;
     } catch { return false; }
   }, [parcel]);
 
-  // ===== Queries dinámicas por índice =====
-  const { data: statsData, isLoading: statsLoading, error: statsError } = trpc.copernicus.getIndexStats.useQuery(
-    { parcelId: parcel?.id, indexType: activeIndex },
+  // Queries para los 3 indices simultaneamente
+  const { data: ndviStats, isLoading: ndviLoading } = trpc.copernicus.getIndexStats.useQuery(
+    { parcelId: parcel?.id, indexType: "NDVI" },
+    { enabled: !!parcel?.id && hasPolygon, staleTime: 10 * 60 * 1000, retry: 1 }
+  );
+  const { data: ndreStats, isLoading: ndreLoading } = trpc.copernicus.getIndexStats.useQuery(
+    { parcelId: parcel?.id, indexType: "NDRE" },
+    { enabled: !!parcel?.id && hasPolygon, staleTime: 10 * 60 * 1000, retry: 1 }
+  );
+  const { data: ndmiStats, isLoading: ndmiLoading } = trpc.copernicus.getIndexStats.useQuery(
+    { parcelId: parcel?.id, indexType: "NDMI" },
+    { enabled: !!parcel?.id && hasPolygon, staleTime: 10 * 60 * 1000, retry: 1 }
+  );
+  const { data: trueColorData } = trpc.copernicus.getTrueColor.useQuery(
+    { parcelId: parcel?.id },
     { enabled: !!parcel?.id && hasPolygon, staleTime: 10 * 60 * 1000, retry: 1 }
   );
 
-  const { data: trueColorData, isLoading: tcLoading } = trpc.copernicus.getTrueColor.useQuery(
-    { parcelId: parcel?.id },
-    { enabled: !!parcel?.id && hasPolygon && mapMode === "truecolor", staleTime: 10 * 60 * 1000, retry: 1 }
-  );
+  // Merge data para chart combinado
+  const combinedChart = useMemo(() => {
+    const dateMap = new Map<string, any>();
+    const addData = (data: any[] | undefined, prefix: string) => {
+      if (!data) return;
+      for (const d of data) {
+        const existing = dateMap.get(d.date) || {
+          date: d.date,
+          dateLabel: new Date(d.date + "T12:00:00Z").toLocaleDateString("es-MX", { day: "2-digit", month: "short" }),
+        };
+        existing[`${prefix}_mean`] = d.mean;
+        existing[`${prefix}_min`] = d.min;
+        existing[`${prefix}_max`] = d.max;
+        dateMap.set(d.date, existing);
+      }
+    };
+    addData(ndviStats?.data, "ndvi");
+    addData(ndreStats?.data, "ndre");
+    addData(ndmiStats?.data, "ndmi");
+    return Array.from(dateMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+  }, [ndviStats, ndreStats, ndmiStats]);
 
-  const { data: indexMapData, isLoading: indexMapLoading, error: indexMapError } = trpc.copernicus.getIndexMap.useQuery(
-    { parcelId: parcel?.id, indexType: activeIndex },
-    { enabled: !!parcel?.id && hasPolygon && mapMode === "index", staleTime: 10 * 60 * 1000, retry: 1 }
-  );
-
-  // Hover handlers
-  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    setHoverInfo({ x: e.clientX - rect.left, y: e.clientY - rect.top, visible: true });
+  // Fechas historicas para timeline (cada 15 dias, ultimos 3 meses)
+  const timelineDates = useMemo(() => {
+    const dates: { date: string; label: string }[] = [];
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 15 * 86400000);
+      dates.push({
+        date: d.toISOString().split("T")[0],
+        label: d.toLocaleDateString("es-MX", { day: "2-digit", month: "short" }),
+      });
+    }
+    return dates;
   }, []);
-  const handleMouseLeave = useCallback(() => setHoverInfo(p => ({ ...p, visible: false })), []);
 
-  // Clasificación por posición de hover (aproximación visual)
-  const getZoneFromPosition = useCallback((_x: number, y: number, _w: number, h: number) => {
-    const stops = ui.colorStops;
-    const idx = Math.min(Math.floor((y / h) * stops.length), stops.length - 1);
-    return stops[idx];
-  }, [ui]);
+  const chartsLoading = ndviLoading || ndreLoading || ndmiLoading;
 
-  // ===== Sin polígono =====
   if (!hasPolygon) {
     return (
       <GlassCard className="p-6 text-center">
@@ -2330,259 +2440,186 @@ function SatelliteTab({ parcel }: { parcel: any }) {
           <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center">
             <AlertTriangle className="w-8 h-8 text-amber-500" />
           </div>
-          <h3 className="text-lg font-bold text-amber-900">Polígono Requerido</h3>
+          <h3 className="text-lg font-bold text-amber-900">Poligono Requerido</h3>
           <p className="text-sm text-amber-700 max-w-md">
-            Dibuja el polígono de esta parcela en el mapa para activar la telemetría satelital multiespectral.
+            Dibuja el poligono de esta parcela en el mapa para activar la telemetria satelital multiespectral.
           </p>
         </div>
       </GlassCard>
     );
   }
 
-  // ===== Chart data =====
-  const chartData = useMemo(() => {
-    if (!statsData?.data) return [];
-    return statsData.data.map((d: any) => ({
-      date: d.date,
-      dateLabel: new Date(d.date + "T12:00:00Z").toLocaleDateString("es-MX", { day: "2-digit", month: "short" }),
-      mean: d.mean, min: d.min, max: d.max,
-    }));
-  }, [statsData]);
-
-  const lastVal = chartData.length > 0 ? chartData[chartData.length - 1] : null;
-
-  // Mapa actual
-  const currentMapImage = mapMode === "index" ? indexMapData?.image : trueColorData?.image;
-  const currentMapLoading = mapMode === "index" ? indexMapLoading : tcLoading;
-  const currentMapError = mapMode === "index" ? indexMapError : null;
-
   return (
     <div className="space-y-4">
-      {/* ===== SELECTOR MULTIESPECTRAL ===== */}
-      <div className="flex gap-1.5 bg-white/50 backdrop-blur-sm rounded-2xl p-1.5 border border-gray-200/50 shadow-sm">
-        {(["NDVI", "NDRE", "NDMI"] as const).map((idx) => {
-          const cfg = INDEX_UI[idx];
-          const isActive = activeIndex === idx;
-          return (
-            <button
-              key={idx}
-              onClick={() => { setActiveIndex(idx); setMapMode("index"); }}
-              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
-                isActive
-                  ? `bg-gradient-to-r ${cfg.gradient} text-white shadow-md scale-[1.02]`
-                  : "text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-              }`}
-            >
-              <span className="text-base">{cfg.emoji}</span>
-              <span className="hidden sm:inline">{cfg.label.split("—")[0].trim()}</span>
-              <span className="sm:hidden">{cfg.shortLabel}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* ===== HEADER con status ===== */}
+      {/* HEADER */}
       <GlassCard className="p-4" hover={false}>
         <div className="flex items-center gap-3">
-          <div className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${ui.headerGradient} shadow`}>
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow">
             <Satellite className="h-5 w-5 text-white" />
           </div>
-          <div className="flex-1 min-w-0">
-            <h2 className="text-lg font-bold text-gray-900">{ui.label}</h2>
-            <p className="text-[11px] text-gray-500 truncate">{ui.description}</p>
+          <div className="flex-1">
+            <h2 className="text-lg font-bold text-gray-900">Dashboard Multiespectral</h2>
+            <p className="text-[11px] text-gray-500">Sentinel-2 L2A · NDVI + NDRE + NDMI · Comparacion simultanea</p>
           </div>
-          {lastVal && (() => {
-            const status = ui.getStatus(lastVal.mean);
-            return (
-              <div className={`${status.bg} px-3 py-1.5 rounded-xl flex items-center gap-2 flex-shrink-0`}>
-                <span className="text-lg">{status.emoji}</span>
-                <div>
-                  <p className={`text-xs font-bold ${status.color}`}>{ui.unit}: {lastVal.mean.toFixed(3)}</p>
-                  <p className="text-[10px] text-gray-500">{status.label}</p>
-                </div>
-              </div>
-            );
-          })()}
+          <button
+            onClick={() => setShowLegend(!showLegend)}
+            className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded-lg hover:bg-gray-100 transition"
+          >
+            {showLegend ? "Ocultar" : "Mostrar"} leyendas
+          </button>
         </div>
       </GlassCard>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* ===== MAPA con toggle ===== */}
-        <GlassCard className="p-4 lg:col-span-1" hover={false}>
-          <div className="flex items-center gap-1 mb-3 bg-gray-100 rounded-lg p-0.5">
-            <button
-              onClick={() => setMapMode("index")}
-              className={`flex-1 text-xs py-1.5 px-2 rounded-md font-medium transition-all ${mapMode === "index" ? "bg-white shadow text-gray-800" : "text-gray-500"}`}
-            >
-              🗺️ {activeIndex}
-            </button>
-            <button
-              onClick={() => setMapMode("truecolor")}
-              className={`flex-1 text-xs py-1.5 px-2 rounded-md font-medium transition-all ${mapMode === "truecolor" ? "bg-white shadow text-indigo-700" : "text-gray-500"}`}
-            >
-              📷 True Color
-            </button>
+      {/* FILA 1: 4 mapas (True Color + 3 indices) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <GlassCard className="p-3" hover={false}>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-sky-400 to-blue-500 shadow-sm">
+              <Camera className="w-3.5 h-3.5 text-white" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-gray-800">True Color</h4>
+              <p className="text-[9px] text-gray-400">RGB Natural</p>
+            </div>
           </div>
-
-          {/* Imagen */}
-          {currentMapLoading ? (
-            <div className="flex items-center justify-center h-52 bg-gray-50 rounded-xl">
-              <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
-              <span className="ml-2 text-sm text-gray-500">Cargando {mapMode === "index" ? activeIndex : "RGB"}...</span>
-            </div>
-          ) : currentMapError ? (
-            <div className="flex flex-col items-center justify-center h-52 bg-red-50 rounded-xl p-4">
-              <AlertTriangle className="w-6 h-6 text-red-400 mb-2" />
-              <p className="text-xs text-red-600 text-center">
-                {(currentMapError as any)?.message?.includes("Credenciales")
-                  ? "Configura credenciales en Ajustes → Copernicus"
-                  : "Error al cargar imagen"}
-              </p>
-            </div>
-          ) : currentMapImage ? (
-            <div
-              className="relative rounded-xl overflow-hidden border border-gray-200/50 shadow-sm cursor-crosshair"
-              onMouseMove={mapMode === "index" ? handleMouseMove : undefined}
-              onMouseLeave={mapMode === "index" ? handleMouseLeave : undefined}
-            >
-              <img ref={imgRef} src={currentMapImage} alt={mapMode === "index" ? `Mapa ${activeIndex}` : "True Color"} className="w-full h-auto" />
-
-              {mapMode === "index" && hoverInfo.visible && imgRef.current && (() => {
-                const zone = getZoneFromPosition(hoverInfo.x, hoverInfo.y, imgRef.current!.clientWidth, imgRef.current!.clientHeight);
-                return (
-                  <div
-                    className="absolute pointer-events-none bg-black/85 text-white text-[10px] px-2.5 py-1.5 rounded-lg shadow-xl z-10 whitespace-nowrap backdrop-blur"
-                    style={{ left: Math.min(hoverInfo.x + 12, (imgRef.current?.clientWidth || 200) - 140), top: hoverInfo.y - 35 }}
-                  >
-                    <span style={{ color: zone.color }}>●</span> {activeIndex} {zone.label} · {zone.desc}
-                  </div>
-                );
-              })()}
-
-              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-                <p className="text-[10px] text-white/90">
-                  {mapMode === "index" ? `${activeIndex} Simbología` : "RGB Natural"} · Sentinel-2 · Últimos 15 días
-                </p>
-              </div>
+          {trueColorData?.image ? (
+            <div className="rounded-xl overflow-hidden border border-gray-200/50 shadow-sm">
+              <img src={trueColorData.image} alt="True Color" className="w-full h-auto" />
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center h-52 bg-gray-50 rounded-xl p-4">
-              <CameraOff className="w-6 h-6 text-gray-300 mb-2" />
-              <p className="text-xs text-gray-500 text-center">Sin imagen disponible</p>
-            </div>
-          )}
-
-          {/* Leyenda dinámica */}
-          {mapMode === "index" && (
-            <div className="mt-3 p-2 bg-gray-50 rounded-lg">
-              <p className="text-[10px] font-bold text-gray-600 mb-1.5 uppercase">Simbología {activeIndex}</p>
-              <div className="space-y-1">
-                {ui.colorStops.map((item) => (
-                  <div key={item.label} className="flex items-center gap-2">
-                    <div className="w-4 h-3 rounded-sm border border-gray-200" style={{ backgroundColor: item.color }} />
-                    <span className="text-[10px] text-gray-600 font-medium w-14">{item.label}</span>
-                    <span className="text-[10px] text-gray-400">{item.desc}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Stats rápidos */}
-          {lastVal && (
-            <div className="grid grid-cols-3 gap-2 mt-3">
-              <div className="bg-gray-50 rounded-lg p-2 text-center">
-                <p className="text-[10px] text-gray-500 uppercase">Prom.</p>
-                <p className="text-sm font-bold" style={{ color: ui.chartColor }}>{lastVal.mean.toFixed(3)}</p>
-              </div>
-              <div className="bg-gray-50 rounded-lg p-2 text-center">
-                <p className="text-[10px] text-gray-500 uppercase">Máx.</p>
-                <p className="text-sm font-bold text-gray-700">{lastVal.max.toFixed(3)}</p>
-              </div>
-              <div className="bg-gray-50 rounded-lg p-2 text-center">
-                <p className="text-[10px] text-gray-500 uppercase">Mín.</p>
-                <p className="text-sm font-bold text-gray-700">{lastVal.min.toFixed(3)}</p>
-              </div>
+            <div className="flex items-center justify-center bg-gray-50 rounded-xl min-h-[140px]">
+              <Loader2 className="w-5 h-5 animate-spin text-gray-300" />
             </div>
           )}
         </GlassCard>
-
-        {/* ===== GRÁFICA HISTÓRICA ===== */}
-        <GlassCard className="p-4 lg:col-span-2" hover={false}>
-          <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
-            <Activity className="w-4 h-4" style={{ color: ui.chartColor }} />
-            Histórico {ui.unit} Satelital
-            {statsData && <span className="text-[10px] text-gray-400 font-normal ml-auto">{statsData.fromDate} → {statsData.toDate}</span>}
-          </h3>
-
-          {statsLoading ? (
-            <div className="flex items-center justify-center h-64 bg-gray-50 rounded-xl">
-              <Loader2 className="w-6 h-6 animate-spin" style={{ color: ui.chartColor }} />
-              <span className="ml-2 text-sm text-gray-500">Consultando {activeIndex}...</span>
-            </div>
-          ) : statsError ? (
-            <div className="flex flex-col items-center justify-center h-64 bg-red-50 rounded-xl p-4">
-              <AlertTriangle className="w-6 h-6 text-red-400 mb-2" />
-              <p className="text-xs text-red-600 text-center">
-                {(statsError as any)?.message?.includes("Credenciales")
-                  ? "Configura credenciales en Configuración → API Copernicus (CDSE)"
-                  : (statsError as any)?.message || `Error al obtener ${activeIndex}`}
-              </p>
-            </div>
-          ) : chartData.length > 0 ? (
-            <div className="h-64">
+        {ALL_INDICES.map((idx) => (
+          <GlassCard key={idx} className="p-3" hover={false}>
+            <IndexMapCard parcelId={parcel.id} indexType={idx} showLegend={showLegend} />
+          </GlassCard>
+        ))}
+      </div>
+      {/* FILA 2: Grafica combinada — 3 indices superpuestos */}
+      <GlassCard className="p-4" hover={false}>
+        <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
+          <Activity className="w-4 h-4 text-indigo-500" />
+          Evolucion Comparativa — 3 Indices Superpuestos
+          {ndviStats && <span className="text-[10px] text-gray-400 font-normal ml-auto">{ndviStats.fromDate} → {ndviStats.toDate}</span>}
+        </h3>
+        {chartsLoading ? (
+          <div className="flex items-center justify-center h-72 bg-gray-50 rounded-xl">
+            <Loader2 className="w-6 h-6 animate-spin text-indigo-400" />
+            <span className="ml-2 text-sm text-gray-500">Consultando 3 indices...</span>
+          </div>
+        ) : combinedChart.length > 0 ? (
+          <>
+            <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
-                  <ReferenceArea y1={-0.2} y2={0.2} fill="#fecaca" fillOpacity={0.2} />
-                  <ReferenceArea y1={0.2} y2={0.4} fill="#fef08a" fillOpacity={0.2} />
-                  <ReferenceArea y1={0.4} y2={0.6} fill="#bbf7d0" fillOpacity={0.2} />
-                  <ReferenceArea y1={0.6} y2={1} fill="#86efac" fillOpacity={0.2} />
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <LineChart data={combinedChart} margin={{ top: 5, right: 15, left: -10, bottom: 5 }}>
+                  <ReferenceArea y1={-0.2} y2={0.2} fill="#fecaca" fillOpacity={0.15} />
+                  <ReferenceArea y1={0.2} y2={0.4} fill="#fef08a" fillOpacity={0.15} />
+                  <ReferenceArea y1={0.4} y2={0.6} fill="#bbf7d0" fillOpacity={0.15} />
+                  <ReferenceArea y1={0.6} y2={1.0} fill="#86efac" fillOpacity={0.15} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis dataKey="dateLabel" tick={{ fontSize: 10 }} />
                   <YAxis domain={[-0.2, 1]} tick={{ fontSize: 10 }} tickFormatter={(v: number) => v.toFixed(1)} />
                   <Tooltip
-                    contentStyle={{ borderRadius: 12, border: "1px solid #e5e7eb", fontSize: 12 }}
-                    formatter={(value: any, name: string) => [
-                      Number(value).toFixed(3),
-                      name === "mean" ? `${ui.unit} Promedio` : name === "max" ? `${ui.unit} Máximo` : `${ui.unit} Mínimo`
-                    ]}
-                    labelFormatter={(label: string) => `Fecha: ${label}`}
+                    contentStyle={{ borderRadius: 12, border: "1px solid #e5e7eb", fontSize: 11 }}
+                    formatter={(value: any, name: string) => {
+                      const val = Number(value).toFixed(3);
+                      if (name.startsWith("ndvi")) return [val, "NDVI " + (name.includes("max") ? "Max" : name.includes("min") ? "Min" : "Prom")];
+                      if (name.startsWith("ndre")) return [val, "NDRE " + (name.includes("max") ? "Max" : name.includes("min") ? "Min" : "Prom")];
+                      return [val, "NDMI " + (name.includes("max") ? "Max" : name.includes("min") ? "Min" : "Prom")];
+                    }}
                   />
-                  <Legend formatter={(value: string) => value === "mean" ? `Promedio ${ui.unit}` : value === "max" ? "Máximo" : "Mínimo"} />
-                  <Line type="monotone" dataKey="max" stroke={`${ui.chartColor}50`} strokeWidth={1} dot={false} strokeDasharray="4 2" />
-                  <Line type="monotone" dataKey="mean" stroke={ui.chartColor} strokeWidth={2.5} dot={{ r: 3, fill: ui.chartColor }} activeDot={{ r: 5 }} />
-                  <Line type="monotone" dataKey="min" stroke="#fbbf24" strokeWidth={1} dot={false} strokeDasharray="4 2" />
-                  <ReferenceLine y={ui.optimalLine} stroke={ui.chartColor} strokeDasharray="8 4" label={{ value: ui.optimalLabel, position: "right", fontSize: 9, fill: ui.chartColor }} />
-                  <ReferenceLine y={ui.stressLine} stroke="#dc2626" strokeDasharray="8 4" label={{ value: ui.stressLabel, position: "right", fontSize: 9, fill: "#dc2626" }} />
+                  <Line type="monotone" dataKey="ndvi_mean" stroke="#16a34a" strokeWidth={2.5} dot={{ r: 2, fill: "#16a34a" }} name="ndvi_mean" />
+                  <Line type="monotone" dataKey="ndvi_max" stroke="#86efac" strokeWidth={1} dot={false} strokeDasharray="3 3" name="ndvi_max" />
+                  <Line type="monotone" dataKey="ndvi_min" stroke="#86efac" strokeWidth={1} dot={false} strokeDasharray="3 3" name="ndvi_min" />
+                  <Line type="monotone" dataKey="ndre_mean" stroke="#7c3aed" strokeWidth={2.5} dot={{ r: 2, fill: "#7c3aed" }} name="ndre_mean" />
+                  <Line type="monotone" dataKey="ndre_max" stroke="#c4b5fd" strokeWidth={1} dot={false} strokeDasharray="3 3" name="ndre_max" />
+                  <Line type="monotone" dataKey="ndre_min" stroke="#c4b5fd" strokeWidth={1} dot={false} strokeDasharray="3 3" name="ndre_min" />
+                  <Line type="monotone" dataKey="ndmi_mean" stroke="#2563eb" strokeWidth={2.5} dot={{ r: 2, fill: "#2563eb" }} name="ndmi_mean" />
+                  <Line type="monotone" dataKey="ndmi_max" stroke="#93c5fd" strokeWidth={1} dot={false} strokeDasharray="3 3" name="ndmi_max" />
+                  <Line type="monotone" dataKey="ndmi_min" stroke="#93c5fd" strokeWidth={1} dot={false} strokeDasharray="3 3" name="ndmi_min" />
                 </LineChart>
               </ResponsiveContainer>
             </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-64 bg-gray-50 rounded-xl p-4">
-              <Info className="w-6 h-6 text-gray-300 mb-2" />
-              <p className="text-xs text-gray-500">Sin datos {activeIndex} para este período</p>
+            <div className="flex items-center justify-center gap-6 mt-2 flex-wrap">
+              {ALL_INDICES.map((idx) => {
+                const c = INDEX_CONFIGS_UI[idx];
+                return (
+                  <div key={idx} className="flex items-center gap-1.5">
+                    <div className="w-4 h-1 rounded-full" style={{ backgroundColor: c.chartColor }} />
+                    <span className="text-[10px] text-gray-600 font-medium">{c.emoji} {c.label} ({c.fullLabel})</span>
+                  </div>
+                );
+              })}
             </div>
-          )}
-
-          {/* Mini-leyenda inline */}
-          <div className="flex items-center gap-3 mt-3 justify-center flex-wrap">
-            {ui.colorStops.slice(0, 4).map((s) => (
-              <div key={s.label} className="flex items-center gap-1">
-                <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: s.color }} />
-                <span className="text-[10px] text-gray-500">{s.label} {s.desc}</span>
-              </div>
-            ))}
+          </>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-72 bg-gray-50 rounded-xl">
+            <Activity className="w-6 h-6 text-gray-300 mb-2" />
+            <p className="text-xs text-gray-500">Sin datos para este periodo</p>
           </div>
-        </GlassCard>
-      </div>
+        )}
+      </GlassCard>
 
-      {/* ===== INFO FOOTER ===== */}
+      {/* FILA 3: Timeline de mapas historicos */}
+      <GlassCard className="p-4" hover={false}>
+        <div className="flex items-center gap-3 mb-3">
+          <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+            <Clock className="w-4 h-4 text-indigo-500" />
+            Evolucion Temporal — Mapas Historicos
+          </h3>
+          <div className="ml-auto flex gap-1 bg-gray-100 rounded-lg p-0.5">
+            {ALL_INDICES.map((idx) => {
+              const c = INDEX_CONFIGS_UI[idx];
+              return (
+                <button
+                  key={idx}
+                  onClick={() => setTimelineIndex(idx)}
+                  className={`text-[10px] px-2.5 py-1 rounded-md font-medium transition-all ${
+                    timelineIndex === idx
+                      ? `bg-gradient-to-r ${c.gradient} text-white shadow-sm`
+                      : "text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  {c.emoji} {c.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <p className="text-[10px] text-gray-400 mb-3">
+          Cada 15 dias · {INDEX_CONFIGS_UI[timelineIndex].fullLabel} · {INDEX_CONFIGS_UI[timelineIndex].formula}
+        </p>
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+          {timelineDates.map((td) => (
+            <HistoricalMapThumb
+              key={`${timelineIndex}-${td.date}`}
+              parcelId={parcel.id}
+              indexType={timelineIndex}
+              date={td.date}
+              dateLabel={td.label}
+            />
+          ))}
+        </div>
+        <div className="flex items-center gap-3 mt-3 justify-center flex-wrap">
+          {INDEX_CONFIGS_UI[timelineIndex].colorStops.map((s) => (
+            <div key={s.label} className="flex items-center gap-1">
+              <div className="w-3 h-2.5 rounded-sm border border-gray-200/50" style={{ backgroundColor: s.color }} />
+              <span className="text-[9px] text-gray-500">{s.label} {s.desc}</span>
+            </div>
+          ))}
+        </div>
+      </GlassCard>
+
+      {/* FOOTER INFO */}
       <div className="flex items-start gap-2 p-3 bg-indigo-50/50 rounded-xl border border-indigo-100/50">
-        <Info className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" />
+        <Satellite className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" />
         <div className="text-[11px] text-indigo-700 space-y-0.5">
-          <p><strong>Fuente:</strong> Sentinel-2 L2A vía Copernicus Data Space Ecosystem</p>
-          <p><strong>Índices:</strong> NDVI (Vigor, 10m) · NDRE (Nitrógeno/Red Edge, 20m) · NDMI (Humedad/SWIR, 20m)</p>
-          <p><strong>Actualización:</strong> Cada 5 días (revisita Sentinel-2) · Filtrado &lt;30% nubes · ColorMapVisualizer</p>
+          <p><strong>Fuente:</strong> Sentinel-2 L2A via Copernicus Data Space Ecosystem</p>
+          <p><strong>Indices:</strong> NDVI (Vigor, 10m) · NDRE (Nitrogeno/Red Edge, 20m) · NDMI (Humedad/SWIR, 20m)</p>
+          <p><strong>Comparacion:</strong> Vista simultanea de los 3 indices + evolucion temporal cada 15 dias · &lt;30% nubes</p>
         </div>
       </div>
     </div>
