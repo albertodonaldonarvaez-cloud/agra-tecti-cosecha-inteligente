@@ -1212,6 +1212,51 @@ export async function notifyGroupNewNoteFromWeb(noteId: number, folio: string, d
   return true;
 }
 
+export async function notifyAssignment(noteId: number, folio: string, description: string, category: string, severity: string, assignedName: string, assignerName: string, parcelName?: string): Promise<boolean> {
+  console.log("[TG Bot] notifyAssignment: Nota", folio, "asignada a", assignedName);
+  try {
+    const { getGlobalSetting } = await import("./globalSettings");
+    const botToken = await getGlobalSetting("telegramBotToken");
+    const groupChatId = await getGlobalSetting("telegramGroupChatId");
+    if (!botToken || !groupChatId) { console.log("[TG Bot] notifyAssignment: No hay botToken o groupChatId"); return false; }
+
+    const sevEmojis: Record<string, string> = { baja: "🔵", media: "🟡", alta: "🟠", critica: "🔴" };
+    const catEmojis: Record<string, string> = { arboles_mal_plantados: "🌳", plaga_enfermedad: "🐛", riego_drenaje: "💧", dano_mecanico: "⚠️", maleza: "🌿", fertilizacion: "🧪", suelo: "🏔️", infraestructura: "🏗️", fauna: "🐾", otro: "📝" };
+
+    const msg = `👤 *NOTA ASIGNADA*\n\n📋 Folio: *${folio}*\n${catEmojis[category] || "📝"} Categoría: ${category.replace(/_/g, " ")}\n${sevEmojis[severity] || "🟡"} Prioridad: ${severity}\n\n📝 ${description.substring(0, 200)}${description.length > 200 ? "..." : ""}\n\n👤 Asignada a: *${assignedName}*\n👨‍💼 Asignó: ${assignerName}${parcelName ? `\n📍 Parcela: ${parcelName}` : ""}\n\n⏰ ${new Date().toLocaleString("es-MX", { timeZone: "America/Mexico_City" })}`;
+
+    const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: groupChatId, text: msg, parse_mode: "Markdown" }) });
+    console.log("[TG Bot] notifyAssignment: Mensaje enviado, status:", res.status);
+    return res.ok;
+  } catch (err) {
+    console.error("[TG Bot] notifyAssignment: Error:", err);
+    return false;
+  }
+}
+
+export async function notifyStatusChange(noteId: number, folio: string, newStatus: string, changerName: string, resolutionNotes?: string): Promise<boolean> {
+  console.log("[TG Bot] notifyStatusChange: Nota", folio, "-> ", newStatus);
+  try {
+    const { getGlobalSetting } = await import("./globalSettings");
+    const botToken = await getGlobalSetting("telegramBotToken");
+    const groupChatId = await getGlobalSetting("telegramGroupChatId");
+    if (!botToken || !groupChatId) return false;
+
+    const statusEmojis: Record<string, string> = { abierta: "🔴", en_revision: "👁️", en_progreso: "🔄", resuelta: "✅", descartada: "❌" };
+    const statusLabels: Record<string, string> = { abierta: "Abierta", en_revision: "En revisión", en_progreso: "En progreso", resuelta: "Resuelta", descartada: "Descartada" };
+
+    const msg = `${statusEmojis[newStatus] || "📋"} *CAMBIO DE ESTADO*\n\n📋 Folio: *${folio}*\n📊 Nuevo estado: *${statusLabels[newStatus] || newStatus}*\n👤 Cambió: ${changerName}${resolutionNotes ? `\n💬 Notas: ${resolutionNotes.substring(0, 200)}` : ""}\n\n⏰ ${new Date().toLocaleString("es-MX", { timeZone: "America/Mexico_City" })}`;
+
+    const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: groupChatId, text: msg, parse_mode: "Markdown" }) });
+    return res.ok;
+  } catch (err) {
+    console.error("[TG Bot] notifyStatusChange: Error:", err);
+    return false;
+  }
+}
+
 // ============================================================
 // Polling de actualizaciones
 // ============================================================

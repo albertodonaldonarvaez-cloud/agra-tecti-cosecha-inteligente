@@ -10,7 +10,7 @@ import {
   TreePine, Bug, Droplets, Wrench, Leaf, FlaskConical, Mountain,
   Building2, PawPrint, HelpCircle, Navigation, Trash2, MessageSquare,
   Camera, Image as ImageIcon, Hash, Send, Link2, Unlink, Copy, Check,
-  RotateCcw, SlidersHorizontal, User,
+  RotateCcw, SlidersHorizontal, User, UserPlus, Users2, ZoomIn,
 } from "lucide-react";
 
 // ===== CONSTANTES =====
@@ -93,6 +93,9 @@ function FieldNotesContent() {
   const [filterCategory, setFilterCategory] = useState("");
   const [filterPriority, setFilterPriority] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+  const [detailNote, setDetailNote] = useState<any>(null);
+  const [commentText, setCommentText] = useState("");
+  const [photoViewerSrc, setPhotoViewerSrc] = useState<string | null>(null);
 
   // Modal de cambio de estado
   const [statusModal, setStatusModal] = useState<{ noteId: number; status: string } | null>(null);
@@ -137,6 +140,16 @@ function FieldNotesContent() {
   });
   const { data: summary } = trpc.fieldNotes.summary.useQuery();
   const { data: allParcels } = trpc.parcels.listActive.useQuery();
+  const { data: collaborators } = trpc.collaborators.list.useQuery(undefined, { staleTime: 5 * 60 * 1000 });
+
+  const addCommentMut = trpc.fieldNotes.addComment.useMutation({
+    onSuccess: () => { setCommentText(""); utils.fieldNotes.list.invalidate(); toast.success("Comentario agregado"); },
+    onError: (err: any) => toast.error("Error: " + err.message),
+  });
+  const updateNoteMut = trpc.fieldNotes.update.useMutation({
+    onSuccess: () => { utils.fieldNotes.list.invalidate(); toast.success("Nota actualizada"); },
+    onError: (err: any) => toast.error("Error: " + err.message),
+  });
 
   const parcelsWithPolygon = useMemo(() => {
     if (!allParcels) return [];
@@ -569,7 +582,7 @@ function FieldNotesContent() {
                   className={`relative overflow-hidden rounded-2xl border bg-white/50 backdrop-blur-sm shadow-sm transition-all duration-200 hover:shadow-md cursor-pointer ${
                     isClosed ? "border-gray-200/40 opacity-75 hover:opacity-100" : "border-gray-200/60"
                   }`}
-                  onClick={() => setExpandedId(isExpanded ? null : note.id)}>
+                  onClick={() => setDetailNote(note)}>
 
                   {/* Indicador lateral de prioridad */}
                   {(note.severity === "critica" || note.severity === "alta") && !isClosed && (
@@ -624,143 +637,15 @@ function FieldNotesContent() {
                         </div>
                       </div>
 
-                      {/* Foto miniatura + chevron */}
+                      {/* Foto miniatura */}
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        {reportPhotos.length > 0 && !isExpanded && (
+                        {reportPhotos.length > 0 && (
                           <img src={reportPhotos[0].photoPath} alt="" className="w-10 h-10 rounded-lg object-cover border border-gray-200/80 hidden sm:block" />
                         )}
-                        <div className="text-gray-400">
-                          {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                        </div>
+                        <Eye className="w-4 h-4 text-gray-300" />
                       </div>
                     </div>
 
-                    {/* ===== DETALLE EXPANDIDO ===== */}
-                    {isExpanded && (
-                      <div className="mt-4 pt-4 border-t border-gray-100" onClick={e => e.stopPropagation()}>
-                        {/* Descripcion completa */}
-                        <p className="text-sm text-gray-600 mb-4 whitespace-pre-wrap leading-relaxed">{note.description}</p>
-
-                        {/* Fotos por etapa */}
-                        {reportPhotos.length > 0 && (
-                          <div className="mb-4">
-                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                              <Camera className="w-3.5 h-3.5" /> Fotos del reporte
-                            </p>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                              {reportPhotos.map((p: any) => (
-                                <a key={p.id} href={p.photoPath} target="_blank" rel="noopener noreferrer"
-                                  className="block rounded-xl overflow-hidden border border-gray-200 hover:border-gray-300 transition-colors">
-                                  <img src={p.photoPath} alt="Reporte" className="w-full h-28 sm:h-32 object-cover hover:scale-105 transition-transform duration-300" />
-                                </a>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        {reviewPhotos.length > 0 && (
-                          <div className="mb-4">
-                            <p className="text-xs font-semibold text-yellow-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                              <Eye className="w-3.5 h-3.5" /> Fotos de revision
-                            </p>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                              {reviewPhotos.map((p: any) => (
-                                <a key={p.id} href={p.photoPath} target="_blank" rel="noopener noreferrer"
-                                  className="block rounded-xl overflow-hidden border border-yellow-200 hover:border-yellow-300 transition-colors">
-                                  <img src={p.photoPath} alt="Revision" className="w-full h-28 sm:h-32 object-cover hover:scale-105 transition-transform duration-300" />
-                                </a>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        {resolutionPhotos.length > 0 && (
-                          <div className="mb-4">
-                            <p className="text-xs font-semibold text-green-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                              <CheckCircle2 className="w-3.5 h-3.5" /> Fotos de resolucion
-                            </p>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                              {resolutionPhotos.map((p: any) => (
-                                <a key={p.id} href={p.photoPath} target="_blank" rel="noopener noreferrer"
-                                  className="block rounded-xl overflow-hidden border border-green-200 hover:border-green-300 transition-colors">
-                                  <img src={p.photoPath} alt="Resolucion" className="w-full h-28 sm:h-32 object-cover hover:scale-105 transition-transform duration-300" />
-                                </a>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Info adicional: GPS y Parcela */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
-                          {note.latitude && note.longitude && (
-                            <a href={`https://www.google.com/maps?q=${note.latitude},${note.longitude}`} target="_blank" rel="noopener noreferrer"
-                              className="flex items-center gap-2 p-2.5 rounded-xl bg-white/70 border border-gray-200/80 hover:border-blue-300 hover:bg-blue-50/30 transition-all group">
-                              <MapPin className="w-4 h-4 text-blue-500 group-hover:text-blue-600" />
-                              <span className="text-xs text-gray-600 group-hover:text-blue-600 font-medium">GPS Reporte</span>
-                              <span className="text-[10px] text-gray-400 ml-auto">{Number(note.latitude).toFixed(4)}, {Number(note.longitude).toFixed(4)}</span>
-                            </a>
-                          )}
-                          {note.resolvedLatitude && note.resolvedLongitude && (
-                            <a href={`https://www.google.com/maps?q=${note.resolvedLatitude},${note.resolvedLongitude}`} target="_blank" rel="noopener noreferrer"
-                              className="flex items-center gap-2 p-2.5 rounded-xl bg-green-50/50 border border-green-200/80 hover:border-green-300 transition-all group">
-                              <MapPin className="w-4 h-4 text-green-500 group-hover:text-green-600" />
-                              <span className="text-xs text-gray-600 group-hover:text-green-600 font-medium">GPS Resolucion</span>
-                              <span className="text-[10px] text-gray-400 ml-auto">{Number(note.resolvedLatitude).toFixed(4)}, {Number(note.resolvedLongitude).toFixed(4)}</span>
-                            </a>
-                          )}
-                          {parcel && (
-                            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-white/70 border border-gray-200/80">
-                              <MapPin className="w-4 h-4 text-green-500" />
-                              <span className="text-xs text-gray-600 font-medium">{parcel.code} - {parcel.name}</span>
-                            </div>
-                          )}
-                          {note.createdAt && (
-                            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-white/70 border border-gray-200/80">
-                              <Clock className="w-4 h-4 text-gray-400" />
-                              <span className="text-xs text-gray-600 font-medium">Creada: {toDateStr(note.createdAt)}</span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Notas de resolucion */}
-                        {note.resolutionNotes && (
-                          <div className="mb-4 p-3 rounded-xl bg-green-50/70 border border-green-200/80">
-                            <div className="flex items-center gap-1.5 text-xs font-semibold text-green-700 mb-1.5">
-                              <MessageSquare className="w-3.5 h-3.5" /> Notas de resolucion
-                            </div>
-                            <p className="text-sm text-green-800 leading-relaxed">{note.resolutionNotes}</p>
-                            {note.resolvedAt && <p className="text-[11px] text-green-600 mt-1.5">Resuelta: {toDateStr(note.resolvedAt)}</p>}
-                          </div>
-                        )}
-
-                        {/* Acciones de estado */}
-                        {!isClosed && (
-                          <div className="mb-3">
-                            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Cambiar estado</label>
-                            <div className="flex flex-wrap gap-2">
-                              {STATUSES.filter(s => s.value !== note.status && s.value !== "abierta").map(s => {
-                                const SIcon = s.icon;
-                                return (
-                                  <button key={s.value} onClick={() => handleStatusChange(note.id, s.value)}
-                                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all border hover:shadow-md active:scale-95 ${s.color}`}>
-                                    <SIcon className="w-3.5 h-3.5" />{s.label}
-                                    {needsPhotoForStatus(s.value) && <Camera className="w-3 h-3 ml-0.5 opacity-60" />}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Eliminar */}
-                        {(user?.role === "admin" || note.reportedByUserId === user?.id) && (
-                          <div className="flex justify-end pt-2 border-t border-gray-100/50">
-                            <button onClick={() => { if (confirm("Eliminar esta nota de campo?")) deleteNote.mutate({ id: note.id }); }}
-                              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-red-500 hover:text-red-700 hover:bg-red-50 border border-transparent hover:border-red-200 transition-all">
-                              <Trash2 className="w-3.5 h-3.5" /> Eliminar
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
                 </div>
               );
@@ -953,6 +838,158 @@ function FieldNotesContent() {
           </div>
         </div>
       )}
+
+      {/* ===== VISOR DE FOTO FULLSCREEN ===== */}
+      {photoViewerSrc && (
+        <div className="fixed inset-0 z-[70] bg-black/90 flex items-center justify-center cursor-zoom-out" onClick={() => setPhotoViewerSrc(null)}>
+          <img src={photoViewerSrc} alt="" className="max-w-[95vw] max-h-[95vh] object-contain" />
+          <button onClick={() => setPhotoViewerSrc(null)} className="absolute top-4 right-4 bg-white/20 text-white rounded-full p-2 hover:bg-white/40"><X className="w-6 h-6" /></button>
+        </div>
+      )}
+
+      {/* ===== MODAL DETALLE DE NOTA ===== */}
+      {detailNote && (() => {
+        const dCat = getCategoryInfo(detailNote.category);
+        const dSev = getPriorityInfo(detailNote.severity);
+        const dStat = getStatusInfo(detailNote.status);
+        const DCatIcon = dCat.icon;
+        const DStatIcon = dStat.icon;
+        const dParcel = parcelsWithPolygon.find((p: any) => p.id === detailNote.parcelId);
+        const dPhotos = detailNote.photos || [];
+        const dReportPhotos = dPhotos.filter((p: any) => p.stage === "reporte");
+        const dReviewPhotos = dPhotos.filter((p: any) => p.stage === "revision");
+        const dResolutionPhotos = dPhotos.filter((p: any) => p.stage === "resolucion");
+        const dIsClosed = detailNote.status === "resuelta" || detailNote.status === "descartada";
+        const assignedCollab = collaborators?.find((c: any) => c.id === detailNote.assignedToCollaboratorId);
+        return (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[55] flex items-center justify-center p-2 sm:p-4" onClick={() => setDetailNote(null)}>
+            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className="sticky top-0 bg-white border-b border-gray-100 px-5 py-4 flex items-center gap-3 z-10 rounded-t-3xl">
+                <div className={`w-10 h-10 rounded-xl ${dCat.color} flex items-center justify-center`}><DCatIcon className="w-5 h-5" /></div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md flex items-center gap-1"><Hash className="w-3 h-3" />{detailNote.folio}</span>
+                    <span className={`text-xs font-medium border px-2 py-0.5 rounded-md flex items-center gap-1 ${dStat.color}`}><DStatIcon className="w-3 h-3" />{dStat.label}</span>
+                    <span className={`text-xs font-medium border px-1.5 py-0.5 rounded-md flex items-center gap-1 ${dSev.color}`}><span className={`w-1.5 h-1.5 rounded-full ${dSev.dot}`} />{dSev.label}</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">{dCat.label} · {toShortDate(detailNote.createdAt)} · {detailNote.reportedByName || "Usuario"}</p>
+                </div>
+                <button onClick={() => setDetailNote(null)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"><X className="w-5 h-5" /></button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                {/* Descripción */}
+                <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{detailNote.description}</p>
+
+                {/* Fotos por etapa */}
+                {[{ photos: dReportPhotos, label: "Fotos del reporte", color: "text-gray-500", border: "border-gray-200", icon: Camera },
+                  { photos: dReviewPhotos, label: "Fotos de revisión", color: "text-yellow-600", border: "border-yellow-200", icon: Eye },
+                  { photos: dResolutionPhotos, label: "Fotos de resolución", color: "text-green-600", border: "border-green-200", icon: CheckCircle2 },
+                ].map(({ photos: stagePhotos, label, color, border, icon: SIcon }) => stagePhotos.length > 0 && (
+                  <div key={label}>
+                    <p className={`text-xs font-semibold ${color} uppercase tracking-wider mb-2 flex items-center gap-1.5`}><SIcon className="w-3.5 h-3.5" /> {label}</p>
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {stagePhotos.map((p: any) => (
+                        <div key={p.id} className={`flex-shrink-0 w-32 h-32 rounded-xl overflow-hidden border ${border} cursor-zoom-in`} onClick={() => setPhotoViewerSrc(p.photoPath)}>
+                          <img src={p.photoPath} alt="" className="w-full h-full object-contain bg-gray-50" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {dPhotos.length === 0 && (
+                  <div className="flex items-center gap-2 text-amber-600 bg-amber-50 rounded-xl p-3 text-sm"><Camera className="w-4 h-4" /> Sin fotos adjuntas</div>
+                )}
+
+                {/* GPS + Parcela */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {detailNote.latitude && detailNote.longitude && (
+                    <a href={`https://www.google.com/maps?q=${detailNote.latitude},${detailNote.longitude}`} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-2 p-2.5 rounded-xl bg-blue-50/50 border border-blue-200/80 hover:border-blue-300 transition-all group">
+                      <MapPin className="w-4 h-4 text-blue-500" />
+                      <span className="text-xs text-gray-600 font-medium">GPS Reporte</span>
+                      <span className="text-[10px] text-gray-400 ml-auto">{Number(detailNote.latitude).toFixed(4)}, {Number(detailNote.longitude).toFixed(4)}</span>
+                    </a>
+                  )}
+                  {dParcel && (
+                    <div className="flex items-center gap-2 p-2.5 rounded-xl bg-green-50/50 border border-green-200/80">
+                      <MapPin className="w-4 h-4 text-green-500" />
+                      <span className="text-xs text-gray-600 font-medium">{dParcel.code} - {dParcel.name}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Asignar */}
+                <div className="bg-purple-50/50 rounded-xl p-3">
+                  <label className="text-[10px] font-semibold text-purple-700 flex items-center gap-1 mb-1.5 uppercase tracking-wider"><UserPlus className="w-3 h-3" /> Asignar a equipo de campo</label>
+                  <select
+                    value={detailNote.assignedToCollaboratorId || ""}
+                    onChange={(e) => {
+                      const v = e.target.value ? Number(e.target.value) : null;
+                      updateNoteMut.mutate({ id: detailNote.id, assignedToCollaboratorId: v });
+                      setDetailNote({ ...detailNote, assignedToCollaboratorId: v });
+                    }}
+                    className="w-full text-xs bg-white border border-purple-200 rounded-lg px-3 py-2 text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-400">
+                    <option value="">Sin asignar</option>
+                    {(collaborators || []).filter((c: any) => c.isActive).map((c: any) => (
+                      <option key={c.id} value={c.id}>{c.name}{c.role ? ` (${c.role})` : ""}</option>
+                    ))}
+                  </select>
+                  {assignedCollab && <p className="text-[10px] text-purple-600 mt-1 flex items-center gap-1"><Users2 className="w-3 h-3" /> Asignada a: {assignedCollab.name}</p>}
+                </div>
+
+                {/* Comentarios */}
+                {detailNote.resolutionNotes && (
+                  <div className="bg-blue-50/50 rounded-xl p-3">
+                    <h4 className="text-[10px] font-semibold text-blue-700 uppercase tracking-wider flex items-center gap-1 mb-1.5"><MessageSquare className="w-3 h-3" /> Comentarios / Notas</h4>
+                    <div className="text-xs text-blue-800 whitespace-pre-wrap max-h-32 overflow-y-auto bg-white/60 rounded-lg p-2">{detailNote.resolutionNotes}</div>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <input type="text" value={commentText} onChange={e => setCommentText(e.target.value)} placeholder="Agregar comentario..."
+                    onKeyDown={e => { if (e.key === "Enter" && commentText.trim()) addCommentMut.mutate({ id: detailNote.id, comment: commentText.trim() }); }}
+                    className="flex-1 text-xs bg-white border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                  <button onClick={() => { if (commentText.trim()) addCommentMut.mutate({ id: detailNote.id, comment: commentText.trim() }); }}
+                    disabled={!commentText.trim() || addCommentMut.isPending}
+                    className="bg-blue-600 text-white px-3 py-2 rounded-xl text-xs font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1">
+                    <Send className="w-3 h-3" /> {addCommentMut.isPending ? "..." : "Enviar"}
+                  </button>
+                </div>
+
+                {/* Acciones de estado */}
+                {!dIsClosed && (
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Cambiar estado</label>
+                    <div className="flex flex-wrap gap-2">
+                      {STATUSES.filter(s => s.value !== detailNote.status && s.value !== "abierta").map(s => {
+                        const SIcon = s.icon;
+                        return (
+                          <button key={s.value} onClick={() => { handleStatusChange(detailNote.id, s.value); setDetailNote(null); }}
+                            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all border hover:shadow-md active:scale-95 ${s.color}`}>
+                            <SIcon className="w-3.5 h-3.5" />{s.label}
+                            {needsPhotoForStatus(s.value) && <Camera className="w-3 h-3 ml-0.5 opacity-60" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Eliminar */}
+                {(user?.role === "admin" || detailNote.reportedByUserId === user?.id) && (
+                  <div className="flex justify-end pt-2 border-t border-gray-100">
+                    <button onClick={() => { if (confirm("¿Eliminar esta nota?")) { deleteNote.mutate({ id: detailNote.id }); setDetailNote(null); } }}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-red-500 hover:text-red-700 hover:bg-red-50 border border-transparent hover:border-red-200 transition-all">
+                      <Trash2 className="w-3.5 h-3.5" /> Eliminar nota
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

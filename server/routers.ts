@@ -2568,10 +2568,30 @@ export const appRouter = router({
         parcelId: z.number().nullable().optional(),
         assignedToCollaboratorId: z.number().nullable().optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const drizzle = await getDb();
         const { id, ...data } = input;
         await drizzle.update(fieldNotes).set(data as any).where(eq(fieldNotes.id, id));
+        
+        // Notificar por Telegram si se asignó a alguien
+        if (input.assignedToCollaboratorId) {
+          try {
+            const [note] = await drizzle.select().from(fieldNotes).where(eq(fieldNotes.id, id));
+            const [collab] = await drizzle.select().from(collaborators).where(eq(collaborators.id, input.assignedToCollaboratorId));
+            if (note && collab) {
+              let parcelName: string | undefined;
+              if (note.parcelId) {
+                const [parcel] = await drizzle.select({ name: parcels.name }).from(parcels).where(eq(parcels.id, note.parcelId));
+                parcelName = parcel?.name || undefined;
+              }
+              const userName = (ctx as any).user?.name || "Usuario";
+              const { notifyAssignment } = await import("./telegramFieldNotesBot");
+              await notifyAssignment(id, note.folio, note.description, note.category, note.severity, collab.name, userName, parcelName);
+            }
+          } catch (err) {
+            console.error("[FieldNotes] Error notificando asignación por Telegram:", err);
+          }
+        }
         return { success: true };
       }),
 
@@ -2598,6 +2618,16 @@ export const appRouter = router({
         }
 
         await drizzle.update(fieldNotes).set(updateData).where(eq(fieldNotes.id, input.id));
+
+        // Notificar cambio de estado por Telegram
+        try {
+          const [note] = await drizzle.select({ folio: fieldNotes.folio }).from(fieldNotes).where(eq(fieldNotes.id, input.id));
+          const userName = (ctx as any).user?.name || "Usuario";
+          const { notifyStatusChange } = await import("./telegramFieldNotesBot");
+          await notifyStatusChange(input.id, note?.folio || `N-${input.id}`, input.status, userName, input.resolutionNotes);
+        } catch (err) {
+          console.error("[FieldNotes] Error notificando cambio de estado por Telegram:", err);
+        }
 
         // Guardar foto de la etapa si se proporcionó
         if (input.photoBase64) {
