@@ -1,4 +1,4 @@
-﻿import { useAuth } from "@/_core/hooks/useAuth";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { GlassCard } from "@/components/GlassCard";
 import { ProtectedPage } from "@/components/ProtectedPage";
 import { APP_LOGO } from "@/const";
@@ -9,10 +9,11 @@ import {
   Plane, Clock, ImageIcon, BarChart3, Leaf, ArrowUpDown, ArrowLeft, Activity,
   ClipboardList, Bug, Droplets, AlertTriangle, Construction, Fence,
   FlaskConical, Mountain, PawPrint, FileText, Camera, CameraOff, Filter,
-  Maximize2, Minimize2, Send, ExternalLink, UserPlus, MessageSquare, Users2, ZoomIn
+  Maximize2, Minimize2, Send, ExternalLink, UserPlus, MessageSquare, Users2, ZoomIn,
+  Satellite, Loader2, Info
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LineChart, Line, ReferenceLine, ReferenceArea } from "recharts";
 
 // OpenLayers imports
 import Map from "ol/Map";
@@ -61,9 +62,9 @@ const LAYER_TYPES = [
 
 type LayerType = typeof LAYER_TYPES[number]["key"];
 
-// Análisis que REQUIEREN sensor multiespectral (no son fiables con RGB)
+// AnÃ¡lisis que REQUIEREN sensor multiespectral (no son fiables con RGB)
 const MULTIESPECTRAL_ONLY_LAYERS: LayerType[] = ["ndvi", "endvi"];
-// Análisis que funcionan con RGB (basados en bandas visibles)
+// AnÃ¡lisis que funcionan con RGB (basados en bandas visibles)
 const RGB_COMPATIBLE_LAYERS: LayerType[] = ["orthophoto", "vari", "exg", "gli", "dsm", "dtm"];
 
 /** Detectar si una tarea de WebODM es RGB o Multiespectral por su nombre */
@@ -76,18 +77,18 @@ function isRGBTask(task: any): boolean | null {
   return null; // No se puede determinar
 }
 
-// ============ CATEGORÍAS DE NOTAS DE CAMPO (para pines) ============
+// ============ CATEGORÃAS DE NOTAS DE CAMPO (para pines) ============
 const NOTE_CATEGORIES: Record<string, { label: string; emoji: string; color: string }> = {
-  plaga_enfermedad: { label: "Plaga", emoji: "🐛", color: "#dc2626" },
-  riego_drenaje: { label: "Riego", emoji: "💧", color: "#2563eb" },
-  arboles_mal_plantados: { label: "Árboles", emoji: "🌳", color: "#16a34a" },
-  dano_mecanico: { label: "Daño", emoji: "⚠️", color: "#ea580c" },
-  maleza: { label: "Maleza", emoji: "🌿", color: "#65a30d" },
-  fertilizacion: { label: "Fertilización", emoji: "🧪", color: "#7c3aed" },
-  suelo: { label: "Suelo", emoji: "⛰️", color: "#92400e" },
-  infraestructura: { label: "Infraestructura", emoji: "🏗️", color: "#475569" },
-  fauna: { label: "Fauna", emoji: "🐾", color: "#0d9488" },
-  otro: { label: "Otro", emoji: "📝", color: "#6b7280" },
+  plaga_enfermedad: { label: "Plaga", emoji: "ðŸ›", color: "#dc2626" },
+  riego_drenaje: { label: "Riego", emoji: "ðŸ’§", color: "#2563eb" },
+  arboles_mal_plantados: { label: "Ãrboles", emoji: "ðŸŒ³", color: "#16a34a" },
+  dano_mecanico: { label: "DaÃ±o", emoji: "âš ï¸", color: "#ea580c" },
+  maleza: { label: "Maleza", emoji: "ðŸŒ¿", color: "#65a30d" },
+  fertilizacion: { label: "FertilizaciÃ³n", emoji: "ðŸ§ª", color: "#7c3aed" },
+  suelo: { label: "Suelo", emoji: "â›°ï¸", color: "#92400e" },
+  infraestructura: { label: "Infraestructura", emoji: "ðŸ—ï¸", color: "#475569" },
+  fauna: { label: "Fauna", emoji: "ðŸ¾", color: "#0d9488" },
+  otro: { label: "Otro", emoji: "ðŸ“", color: "#6b7280" },
 };
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -124,13 +125,13 @@ function ParcelAnalysisContent() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
 
-  // Leer query params para navegación directa desde otras páginas
+  // Leer query params para navegaciÃ³n directa desde otras pÃ¡ginas
   const urlParams = new URLSearchParams(window.location.search);
   const initialParcelId = urlParams.get("parcelId") ? Number(urlParams.get("parcelId")) : null;
-  const initialTab = (urlParams.get("tab") as "map" | "details" | "harvest" | "notes") || "map";
+  const initialTab = (urlParams.get("tab") as "map" | "details" | "harvest" | "notes" | "satellite") || "map";
 
   const [selectedParcelId, setSelectedParcelId] = useState<number | null>(initialParcelId);
-  const [activeTab, setActiveTab] = useState<"map" | "details" | "harvest" | "notes">(initialTab);
+  const [activeTab, setActiveTab] = useState<"map" | "details" | "harvest" | "notes" | "satellite">(initialTab);
 
   // Cargar parcelas (solo activas)
   const { data: allParcels, isLoading: parcelsLoading } = trpc.parcels.listActive.useQuery(undefined, {
@@ -138,7 +139,7 @@ function ParcelAnalysisContent() {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Filtrar solo parcelas con polígono definido
+  // Filtrar solo parcelas con polÃ­gono definido
   const parcels = useMemo(() => {
     if (!allParcels) return [];
     return allParcels.filter((p: any) => {
@@ -194,7 +195,7 @@ function ParcelAnalysisContent() {
             <img src={APP_LOGO} alt="Agratec" className="h-12 w-12 md:h-16 md:w-16" />
             <div>
               <h1 className="text-2xl md:text-4xl font-bold bg-gradient-to-r from-green-800 to-emerald-600 bg-clip-text text-transparent">
-                Análisis de Parcela
+                AnÃ¡lisis de Parcela
               </h1>
               <p className="text-xs md:text-base text-green-600/80">
                 Vuelos, ortomosaicos, salud vegetal y rendimiento
@@ -208,7 +209,7 @@ function ParcelAnalysisContent() {
             >
               <ArrowLeft className="h-4 w-4" />
               <span className="hidden sm:inline">Vista General</span>
-              <span className="sm:hidden">Atrás</span>
+              <span className="sm:hidden">AtrÃ¡s</span>
             </button>
           )}
         </div>
@@ -246,7 +247,7 @@ function ParcelAnalysisContent() {
                     </select>
                     <ChevronDown className="absolute right-0 top-1/2 -translate-y-1/2 h-5 w-5 text-green-400 pointer-events-none" />
                   </div>
-                  <p className="text-xs text-green-500">Código: {selectedParcel.code}</p>
+                  <p className="text-xs text-green-500">CÃ³digo: {selectedParcel.code}</p>
                 </div>
                 {selectedMapping && (
                   <span className="ml-auto text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full flex items-center gap-1 flex-shrink-0">
@@ -263,7 +264,8 @@ function ParcelAnalysisContent() {
                 { key: "details" as const, icon: TreePine, label: "Detalles de Parcela", shortLabel: "Detalles" },
                 { key: "harvest" as const, icon: Package, label: "Cosecha", shortLabel: "Cosecha" },
                 { key: "notes" as const, icon: ClipboardList, label: "Notas de Campo", shortLabel: "Notas" },
-              ].map(({ key, icon: Icon, label, shortLabel }) => (
+                { key: "satellite" as const, icon: Satellite, label: "Telemetría Satelital", shortLabel: "Satélite" },
+              ].map(({ key, icon: TabIcon, label, shortLabel }) => (
                 <button
                   key={key}
                   onClick={() => setActiveTab(key)}
@@ -273,7 +275,7 @@ function ParcelAnalysisContent() {
                       : "text-green-700 hover:bg-green-100"
                   }`}
                 >
-                  <Icon className="h-4 w-4" />
+                  <TabIcon className="h-4 w-4" />
                   <span className="hidden sm:inline">{label}</span>
                   <span className="sm:hidden">{shortLabel}</span>
                 </button>
@@ -292,6 +294,9 @@ function ParcelAnalysisContent() {
             )}
             {activeTab === "notes" && (
               <FieldNotesMapTab key={`notes-${selectedParcel?.id}`} parcel={selectedParcel} mapping={selectedMapping} odmMappings={odmMappings || []} allParcels={parcels} onSelectParcel={(id: number) => setSelectedParcelId(id)} />
+            )}
+            {activeTab === "satellite" && (
+              <SatelliteTab key={`satellite-${selectedParcel?.id}`} parcel={selectedParcel} />
             )}
           </>
         )}
@@ -314,13 +319,13 @@ function OverviewView({ parcels, odmMappings, allDetails, onSelectParcel }: {
   // Cargar stats de cosecha para cada parcela
   const parcelCodes = useMemo(() => parcels.map((p: any) => p.code || p.name || ""), [parcels]);
 
-  // Inicializar mapa con polígonos de todas las parcelas
+  // Inicializar mapa con polÃ­gonos de todas las parcelas
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return;
 
     const baseLayer = new TileLayer({ source: new OSM() });
 
-    // Crear features para cada parcela con polígono
+    // Crear features para cada parcela con polÃ­gono
     const features: Feature[] = [];
     const allCoords: number[][] = [];
 
@@ -360,7 +365,7 @@ function OverviewView({ parcels, odmMappings, allDetails, onSelectParcel }: {
     const vectorSource = new VectorSource({ features });
     const vectorLayer = new VectorLayer({ source: vectorSource });
 
-    // Centro por defecto (México)
+    // Centro por defecto (MÃ©xico)
     let center = fromLonLat([-105.0, 23.0]);
     let zoom = 5;
 
@@ -370,13 +375,13 @@ function OverviewView({ parcels, odmMappings, allDetails, onSelectParcel }: {
       view: new View({ center, zoom, maxZoom: 22 }),
     });
 
-    // Ajustar vista a los polígonos
+    // Ajustar vista a los polÃ­gonos
     if (features.length > 0) {
       const extent = vectorSource.getExtent();
       map.getView().fit(extent, { padding: [50, 50, 50, 50], maxZoom: 17, duration: 500 });
     }
 
-    // Click en polígono para seleccionar parcela
+    // Click en polÃ­gono para seleccionar parcela
     map.on("click", (evt) => {
       const feature = map.forEachFeatureAtPixel(evt.pixel, (f) => f);
       if (feature) {
@@ -409,7 +414,7 @@ function OverviewView({ parcels, odmMappings, allDetails, onSelectParcel }: {
             <MapPin className="h-5 w-5" />
             Vista General de Parcelas
             <span className="text-xs font-normal text-green-500 bg-green-50 px-2 py-0.5 rounded-full">
-              {parcels.length} parcelas con polígono
+              {parcels.length} parcelas con polÃ­gono
             </span>
           </h3>
           <p className="text-xs text-green-500 mt-1">Haz clic en una parcela del mapa o de la lista para ver su detalle</p>
@@ -440,7 +445,7 @@ function OverviewView({ parcels, odmMappings, allDetails, onSelectParcel }: {
                 </div>
                 <div className="flex-1 min-w-0">
                   <h4 className="font-semibold text-green-900 truncate">{p.name || p.code}</h4>
-                  <p className="text-xs text-green-500">Código: {p.code}</p>
+                  <p className="text-xs text-green-500">CÃ³digo: {p.code}</p>
                 </div>
                 {hasOdm && (
                   <span className="flex-shrink-0 text-[10px] text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
@@ -449,11 +454,11 @@ function OverviewView({ parcels, odmMappings, allDetails, onSelectParcel }: {
                 )}
               </div>
 
-              {/* Stats rápidos */}
+              {/* Stats rÃ¡pidos */}
               <div className="mt-3 grid grid-cols-2 gap-2">
                 {detail?.totalHectares && (
                   <div className="bg-white/40 rounded-lg px-2 py-1.5">
-                    <div className="text-[10px] text-green-500">Hectáreas</div>
+                    <div className="text-[10px] text-green-500">HectÃ¡reas</div>
                     <div className="text-sm font-bold text-green-900">{detail.totalHectares} ha</div>
                   </div>
                 )}
@@ -465,7 +470,7 @@ function OverviewView({ parcels, odmMappings, allDetails, onSelectParcel }: {
                 )}
                 {detail?.totalTrees && (
                   <div className="bg-white/40 rounded-lg px-2 py-1.5">
-                    <div className="text-[10px] text-green-500">Árboles</div>
+                    <div className="text-[10px] text-green-500">Ãrboles</div>
                     <div className="text-sm font-bold text-green-900">{detail.totalTrees.toLocaleString()}</div>
                   </div>
                 )}
@@ -524,13 +529,13 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     { enabled: !!mapping?.odmProjectId, staleTime: 2 * 60 * 1000 }
   );
 
-  // Obtener el identificador único de una tarea (uuid viene normalizado del backend)
+  // Obtener el identificador Ãºnico de una tarea (uuid viene normalizado del backend)
   const getTaskId = useCallback((task: any): string => {
     return task.uuid || String(task.id) || "";
   }, []);
 
-  // Auto-seleccionar el último vuelo completado cuando llegan las tareas
-  // (al cambiar de parcela, el key={parcel.id} fuerza remount, así que selectedTaskUuid siempre empieza en null)
+  // Auto-seleccionar el Ãºltimo vuelo completado cuando llegan las tareas
+  // (al cambiar de parcela, el key={parcel.id} fuerza remount, asÃ­ que selectedTaskUuid siempre empieza en null)
   useEffect(() => {
     if (!tasks || tasks.length === 0) return;
     if (selectedTaskUuid) return;
@@ -569,7 +574,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     return tileSource;
   }, []);
 
-  // Función para cargar la ortofoto base (siempre se carga al seleccionar un vuelo)
+  // FunciÃ³n para cargar la ortofoto base (siempre se carga al seleccionar un vuelo)
   const loadOrthophoto = useCallback((taskUuid: string) => {
     if (!orthoLayerRef.current || !mapInstanceRef.current || !mapping?.odmProjectId) {
       console.warn("[ParcelAnalysis] loadOrthophoto: mapa no listo");
@@ -593,7 +598,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
           proxyUrl,
           serverMaxZoom,
           () => { setTileStatus(""); setOrthoLoaded(true); },
-          () => { setTileStatus("Error cargando ortofoto - verificar conexión con WebODM"); }
+          () => { setTileStatus("Error cargando ortofoto - verificar conexiÃ³n con WebODM"); }
         );
 
         if (orthoLayerRef.current && mapInstanceRef.current) {
@@ -629,17 +634,17 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
       });
   }, [mapping?.odmProjectId, createTileSource]);
 
-  // Función para cargar una capa de índice de vegetación (NDVI, VARI, etc.)
+  // FunciÃ³n para cargar una capa de Ã­ndice de vegetaciÃ³n (NDVI, VARI, etc.)
   const loadIndexLayer = useCallback((taskUuid: string, layerType: string) => {
     if (!indexLayerRef.current || !mapInstanceRef.current || !mapping?.odmProjectId) return;
     if (layerType === "orthophoto") {
-      // Si es ortofoto, ocultar capa de índice y mostrar ortofoto
+      // Si es ortofoto, ocultar capa de Ã­ndice y mostrar ortofoto
       indexLayerRef.current.setVisible(false);
       if (orthoLayerRef.current) orthoLayerRef.current.setVisible(true);
       return;
     }
 
-    // Ocultar ortofoto cuando se muestra un índice
+    // Ocultar ortofoto cuando se muestra un Ã­ndice
     if (orthoLayerRef.current) orthoLayerRef.current.setVisible(false);
 
     const proxyUrl = `/api/odm-tiles/${mapping.odmProjectId}/${taskUuid}/${layerType}/{z}/{x}/{y}.png`;
@@ -654,7 +659,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
           proxyUrl,
           serverMaxZoom,
           () => { setTileStatus(""); },
-          () => { setTileStatus(`Error cargando ${layerType.toUpperCase()} - verificar conexión con WebODM`); }
+          () => { setTileStatus(`Error cargando ${layerType.toUpperCase()} - verificar conexiÃ³n con WebODM`); }
         );
 
         if (indexLayerRef.current && mapInstanceRef.current) {
@@ -675,7 +680,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
       });
   }, [mapping?.odmProjectId, createTileSource]);
 
-  // Función para ocultar todas las capas de tiles
+  // FunciÃ³n para ocultar todas las capas de tiles
   const hideTiles = useCallback(() => {
     if (orthoLayerRef.current) orthoLayerRef.current.setVisible(false);
     if (indexLayerRef.current) indexLayerRef.current.setVisible(false);
@@ -762,12 +767,12 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     mapInstanceRef.current = map;
     console.log("[ParcelAnalysis] Map initialized for parcel:", parcel?.id);
 
-    // Si ya hay una tarea seleccionada, cargar ortofoto después de que el mapa esté listo
+    // Si ya hay una tarea seleccionada, cargar ortofoto despuÃ©s de que el mapa estÃ© listo
     if (selectedTaskUuid && mapping?.odmProjectId) {
       setTimeout(() => {
         console.log("[ParcelAnalysis] Map ready, loading orthophoto for pre-selected task:", selectedTaskUuid);
         loadOrthophoto(selectedTaskUuid);
-        // Si había un índice seleccionado, cargarlo también
+        // Si habÃ­a un Ã­ndice seleccionado, cargarlo tambiÃ©n
         if (selectedLayerType !== "orthophoto") {
           setTimeout(() => loadIndexLayer(selectedTaskUuid, selectedLayerType), 500);
         }
@@ -787,7 +792,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     if (!mapInstanceRef.current || !orthoLayerRef.current) return;
     if (selectedTaskUuid && mapping?.odmProjectId) {
       loadOrthophoto(selectedTaskUuid);
-      // Si hay un índice seleccionado, cargarlo después de un breve delay
+      // Si hay un Ã­ndice seleccionado, cargarlo despuÃ©s de un breve delay
       if (selectedLayerType !== "orthophoto") {
         setTimeout(() => loadIndexLayer(selectedTaskUuid, selectedLayerType), 300);
       }
@@ -796,16 +801,16 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     }
   }, [selectedTaskUuid]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Cuando cambia el tipo de capa, alternar entre ortofoto e índice
+  // Cuando cambia el tipo de capa, alternar entre ortofoto e Ã­ndice
   useEffect(() => {
     if (!mapInstanceRef.current || !selectedTaskUuid || !mapping?.odmProjectId) return;
     if (selectedLayerType === "orthophoto") {
-      // Mostrar ortofoto, ocultar índice
+      // Mostrar ortofoto, ocultar Ã­ndice
       if (orthoLayerRef.current) orthoLayerRef.current.setVisible(true);
       if (indexLayerRef.current) indexLayerRef.current.setVisible(false);
       setTileStatus("");
     } else {
-      // Ocultar ortofoto, cargar y mostrar índice
+      // Ocultar ortofoto, cargar y mostrar Ã­ndice
       loadIndexLayer(selectedTaskUuid, selectedLayerType);
     }
   }, [selectedLayerType]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -820,10 +825,10 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
     return (
       <GlassCard className="p-6 md:p-10 text-center" hover={false}>
         <Plane className="h-12 w-12 mx-auto text-green-300 mb-4" />
-        <h3 className="text-lg font-semibold text-green-800 mb-2">Sin conexión a WebODM</h3>
+        <h3 className="text-lg font-semibold text-green-800 mb-2">Sin conexiÃ³n a WebODM</h3>
         <p className="text-green-600 text-sm max-w-md mx-auto">
           Esta parcela no tiene un proyecto de WebODM vinculado.
-          {isAdmin ? " Ve a Configuración → WebODM para vincular un proyecto." : " Contacta al administrador."}
+          {isAdmin ? " Ve a ConfiguraciÃ³n â†’ WebODM para vincular un proyecto." : " Contacta al administrador."}
         </p>
       </GlassCard>
     );
@@ -859,7 +864,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
                 })()}
               </h3>
             </div>
-            {/* Selector de capas — filtrado por tipo de vuelo */}
+            {/* Selector de capas â€” filtrado por tipo de vuelo */}
             {selectedTaskUuid && (() => {
               const currentTask = sortedTasks.find((t: any) => (t.uuid || String(t.id)) === selectedTaskUuid);
               const taskType = isRGBTask(currentTask);
@@ -952,25 +957,25 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
             <div className="flex items-center gap-2 text-xs text-green-600">
               <Activity className="h-3.5 w-3.5" />
               {selectedLayerType === "ndvi" && (
-                <span><strong>NDVI</strong> — Índice de Vegetación de Diferencia Normalizada. Rojo = vegetación estresada, Verde = vegetación sana.</span>
+                <span><strong>NDVI</strong> â€” Ãndice de VegetaciÃ³n de Diferencia Normalizada. Rojo = vegetaciÃ³n estresada, Verde = vegetaciÃ³n sana.</span>
               )}
               {selectedLayerType === "vari" && (
-                <span><strong>VARI</strong> — Índice de Vegetación Visible (solo RGB). Útil para cámaras sin banda infrarroja.</span>
+                <span><strong>VARI</strong> â€” Ãndice de VegetaciÃ³n Visible (solo RGB). Ãštil para cÃ¡maras sin banda infrarroja.</span>
               )}
               {selectedLayerType === "exg" && (
-                <span><strong>EXG</strong> — Exceso de Verde. Resalta áreas con vegetación verde prominente.</span>
+                <span><strong>EXG</strong> â€” Exceso de Verde. Resalta Ã¡reas con vegetaciÃ³n verde prominente.</span>
               )}
               {selectedLayerType === "gli" && (
-                <span><strong>GLI</strong> — Índice de Hoja Verde. Detecta cobertura de hojas verdes en el cultivo.</span>
+                <span><strong>GLI</strong> â€” Ãndice de Hoja Verde. Detecta cobertura de hojas verdes en el cultivo.</span>
               )}
               {selectedLayerType === "endvi" && (
-                <span><strong>ENDVI</strong> — NDVI Mejorado. Versión optimizada del NDVI para imágenes RGB.</span>
+                <span><strong>ENDVI</strong> â€” NDVI Mejorado. VersiÃ³n optimizada del NDVI para imÃ¡genes RGB.</span>
               )}
               {selectedLayerType === "dsm" && (
-                <span><strong>DSM</strong> — Modelo Digital de Superficie. Incluye árboles, edificios y terreno.</span>
+                <span><strong>DSM</strong> â€” Modelo Digital de Superficie. Incluye Ã¡rboles, edificios y terreno.</span>
               )}
               {selectedLayerType === "dtm" && (
-                <span><strong>DTM</strong> — Modelo Digital de Terreno. Solo la superficie del suelo.</span>
+                <span><strong>DTM</strong> â€” Modelo Digital de Terreno. Solo la superficie del suelo.</span>
               )}
             </div>
           </div>
@@ -1051,7 +1056,7 @@ function MapAndFlightsTab({ parcel, mapping, isAdmin }: { parcel: any; mapping: 
                         </span>
                         <span className="flex items-center gap-1">
                           <ImageIcon className="h-3 w-3" />
-                          {task.images_count} imágenes
+                          {task.images_count} imÃ¡genes
                         </span>
                         {task.processing_time > 0 && (
                           <span className="flex items-center gap-1">
@@ -1184,7 +1189,7 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
     });
   };
 
-  // Calcular árboles faltantes
+  // Calcular Ã¡rboles faltantes
   const totalTrees = form.totalTrees ? parseInt(form.totalTrees) : 0;
   const productiveTrees = form.productiveTrees ? parseInt(form.productiveTrees) : 0;
   const newTrees = form.newTrees ? parseInt(form.newTrees) : 0;
@@ -1194,16 +1199,16 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
   const cropName = crops?.find((c: any) => c.id === parseInt(form.cropId))?.name || "";
   const varietyName = varieties?.find((v: any) => v.id === parseInt(form.varietyId))?.name || "";
 
-  // Calcular densidad por hectárea automáticamente
+  // Calcular densidad por hectÃ¡rea automÃ¡ticamente
   const hectares = form.totalHectares ? parseFloat(form.totalHectares) : 0;
   const autoDensity = hectares > 0 && totalTrees > 0 ? Math.round(totalTrees / hectares) : 0;
 
   const fields = [
-    { key: "totalHectares", label: "Hectáreas Totales", icon: Ruler, suffix: "ha", type: "text" },
-    { key: "productiveHectares", label: "Hectáreas Productivas", icon: Ruler, suffix: "ha", type: "text" },
-    { key: "totalTrees", label: "Total de Árboles", icon: TreePine, suffix: "", type: "number" },
-    { key: "productiveTrees", label: "Árboles Productivos", icon: Sprout, suffix: "", type: "number" },
-    { key: "newTrees", label: "Árboles Nuevos", icon: Sprout, suffix: "", type: "number" },
+    { key: "totalHectares", label: "HectÃ¡reas Totales", icon: Ruler, suffix: "ha", type: "text" },
+    { key: "productiveHectares", label: "HectÃ¡reas Productivas", icon: Ruler, suffix: "ha", type: "text" },
+    { key: "totalTrees", label: "Total de Ãrboles", icon: TreePine, suffix: "", type: "number" },
+    { key: "productiveTrees", label: "Ãrboles Productivos", icon: Sprout, suffix: "", type: "number" },
+    { key: "newTrees", label: "Ãrboles Nuevos", icon: Sprout, suffix: "", type: "number" },
   ];
 
   return (
@@ -1211,7 +1216,7 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
       <div className="flex items-center justify-between">
         <h3 className="text-base md:text-lg font-semibold text-green-800 flex items-center gap-2">
           <TreePine className="h-5 w-5" />
-          Información de {parcel.name || parcel.code}
+          InformaciÃ³n de {parcel.name || parcel.code}
         </h3>
         {isAdmin && (
           <div className="flex gap-2">
@@ -1321,7 +1326,7 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
         )}
       </GlassCard>
 
-      {/* Campos numéricos */}
+      {/* Campos numÃ©ricos */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
         {fields.map(({ key, label, icon: Icon, suffix, type }) => (
           <GlassCard key={key} className="p-3 md:p-4" hover={true}>
@@ -1351,31 +1356,31 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
           </GlassCard>
         ))}
 
-        {/* Tarjeta de Densidad por Hectárea (calculada automáticamente) */}
+        {/* Tarjeta de Densidad por HectÃ¡rea (calculada automÃ¡ticamente) */}
         {autoDensity > 0 && (
           <GlassCard className="p-3 md:p-4" hover={true}>
             <div className="flex items-center gap-2 mb-2">
               <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-100">
                 <TreePine className="h-4 w-4 text-blue-600" />
               </div>
-              <span className="text-xs text-blue-600 font-medium">Densidad por Hectárea</span>
+              <span className="text-xs text-blue-600 font-medium">Densidad por HectÃ¡rea</span>
             </div>
             <div className="text-xl md:text-2xl font-bold text-blue-700">
               {autoDensity.toLocaleString()}
-              <span className="text-sm font-normal text-blue-400 ml-1">árboles/ha</span>
+              <span className="text-sm font-normal text-blue-400 ml-1">Ã¡rboles/ha</span>
             </div>
-            <p className="text-[10px] text-blue-400 mt-1">Total árboles ÷ Hectáreas totales</p>
+            <p className="text-[10px] text-blue-400 mt-1">Total Ã¡rboles Ã· HectÃ¡reas totales</p>
           </GlassCard>
         )}
 
-        {/* Tarjeta de Árboles Faltantes (calculada) */}
+        {/* Tarjeta de Ãrboles Faltantes (calculada) */}
         {totalTrees > 0 && (
           <GlassCard className="p-3 md:p-4" hover={true}>
             <div className="flex items-center gap-2 mb-2">
               <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-red-100">
                 <TreePine className="h-4 w-4 text-red-600" />
               </div>
-              <span className="text-xs text-red-600 font-medium">Árboles Faltantes</span>
+              <span className="text-xs text-red-600 font-medium">Ãrboles Faltantes</span>
             </div>
             <div className="text-xl md:text-2xl font-bold text-red-600">
               {missingTrees >= 0 ? missingTrees.toLocaleString() : 0}
@@ -1420,7 +1425,7 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
         {/* Lista de notas */}
         <div className="space-y-2">
           {(!notes || notes.length === 0) && (
-            <p className="text-xs text-green-400 italic">Sin notas aún</p>
+            <p className="text-xs text-green-400 italic">Sin notas aÃºn</p>
           )}
           {notes?.map((note: any) => (
             <div key={note.id} className="bg-white/40 rounded-xl p-3 border border-green-100/30">
@@ -1436,7 +1441,7 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
                 {(isAdmin || note.userId === user?.id) && (
                   <button
                     onClick={() => {
-                      if (confirm("¿Eliminar esta nota?")) {
+                      if (confirm("Â¿Eliminar esta nota?")) {
                         deleteNoteMutation.mutate({ noteId: note.id });
                       }
                     }}
@@ -1451,10 +1456,10 @@ function ParcelDetailsTab({ parcel, details, isAdmin }: { parcel: any; details: 
         </div>
       </GlassCard>
 
-      {/* Composición del Arbolado */}
+      {/* ComposiciÃ³n del Arbolado */}
       {(form.totalTrees || form.productiveTrees || form.newTrees) && (
         <GlassCard className="p-3 md:p-5" hover={true}>
-          <h4 className="text-sm font-semibold text-green-800 mb-3">Composición del Arbolado</h4>
+          <h4 className="text-sm font-semibold text-green-800 mb-3">ComposiciÃ³n del Arbolado</h4>
           <div className="space-y-2">
             {form.productiveTrees && form.totalTrees && (
               <div>
@@ -1584,7 +1589,7 @@ function HarvestTab({ parcel }: { parcel: any }) {
 
   return (
     <div className="space-y-4">
-      {/* Números totales */}
+      {/* NÃºmeros totales */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: "Total Cosechado", value: `${harvestStats.totalWeight} kg`, icon: Package, color: "from-green-400 to-emerald-500" },
@@ -1604,7 +1609,7 @@ function HarvestTab({ parcel }: { parcel: any }) {
         ))}
       </div>
 
-      {/* Datos de parcela: Árboles productivos y Hectáreas productivas */}
+      {/* Datos de parcela: Ãrboles productivos y HectÃ¡reas productivas */}
       {(productiveTreesCount || productiveHa) && (
         <div className="grid grid-cols-2 gap-3">
           {productiveTreesCount && (
@@ -1613,7 +1618,7 @@ function HarvestTab({ parcel }: { parcel: any }) {
                 <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-green-400 to-emerald-600 shadow-sm">
                   <TreePine className="h-3.5 w-3.5 text-white" />
                 </div>
-                <span className="text-[10px] md:text-xs text-green-600">Árboles Productivos</span>
+                <span className="text-[10px] md:text-xs text-green-600">Ãrboles Productivos</span>
               </div>
               <div className="text-lg md:text-xl font-bold text-green-900">{productiveTreesCount.toLocaleString()}</div>
             </GlassCard>
@@ -1624,7 +1629,7 @@ function HarvestTab({ parcel }: { parcel: any }) {
                 <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-lime-400 to-green-500 shadow-sm">
                   <Ruler className="h-3.5 w-3.5 text-white" />
                 </div>
-                <span className="text-[10px] md:text-xs text-green-600">Hectáreas Productivas</span>
+                <span className="text-[10px] md:text-xs text-green-600">HectÃ¡reas Productivas</span>
               </div>
               <div className="text-lg md:text-xl font-bold text-green-900">{productiveHa} ha</div>
             </GlassCard>
@@ -1632,28 +1637,28 @@ function HarvestTab({ parcel }: { parcel: any }) {
         </div>
       )}
 
-      {/* Rendimiento por Árbol */}
+      {/* Rendimiento por Ãrbol */}
       {productiveTreesCount && productiveTreesCount > 0 && totalWeight > 0 && (
         <GlassCard className="p-3 md:p-4" hover={true}>
           <h4 className="text-sm font-semibold text-green-800 mb-2 flex items-center gap-2">
             <TreePine className="h-4 w-4" />
-            Rendimiento por Árbol
+            Rendimiento por Ãrbol
           </h4>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div>
-              <div className="text-xs text-green-600">Total / árbol</div>
+              <div className="text-xs text-green-600">Total / Ã¡rbol</div>
               <div className="text-lg font-bold text-green-900">{(totalWeight / productiveTreesCount).toFixed(2)} kg</div>
             </div>
             <div>
-              <div className="text-xs text-emerald-600">1ra Calidad / árbol</div>
+              <div className="text-xs text-emerald-600">1ra Calidad / Ã¡rbol</div>
               <div className="text-lg font-bold text-emerald-700">{((harvestStats?.firstQualityWeight || 0) / productiveTreesCount).toFixed(2)} kg</div>
             </div>
             <div>
-              <div className="text-xs text-yellow-600">2da Calidad / árbol</div>
+              <div className="text-xs text-yellow-600">2da Calidad / Ã¡rbol</div>
               <div className="text-lg font-bold text-yellow-700">{((harvestStats?.secondQualityWeight || 0) / productiveTreesCount).toFixed(2)} kg</div>
             </div>
             <div>
-              <div className="text-xs text-red-600">Desperdicio / árbol</div>
+              <div className="text-xs text-red-600">Desperdicio / Ã¡rbol</div>
               <div className="text-lg font-bold text-red-600">{((harvestStats?.wasteWeight || 0) / productiveTreesCount).toFixed(2)} kg</div>
             </div>
           </div>
@@ -1691,12 +1696,12 @@ function HarvestTab({ parcel }: { parcel: any }) {
         </div>
       </GlassCard>
 
-      {/* Rendimiento por Hectárea + Fecha inicio ciclo */}
+      {/* Rendimiento por HectÃ¡rea + Fecha inicio ciclo */}
       {productiveHa && productiveHa > 0 && (
         <GlassCard className="p-3 md:p-4" hover={true}>
           <h4 className="text-sm font-semibold text-green-800 mb-2 flex items-center gap-2">
             <Ruler className="h-4 w-4" />
-            Rendimiento por Hectárea
+            Rendimiento por HectÃ¡rea
           </h4>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div>
@@ -1708,7 +1713,7 @@ function HarvestTab({ parcel }: { parcel: any }) {
               <div className="text-lg font-bold text-emerald-700">{(harvestStats.firstQualityWeight / productiveHa).toFixed(1)} kg</div>
             </div>
             <div>
-              <div className="text-xs text-green-600">Días de cosecha</div>
+              <div className="text-xs text-green-600">DÃ­as de cosecha</div>
               <div className="text-lg font-bold text-green-900">{harvestStats.harvestDays}</div>
             </div>
             <div>
@@ -1749,7 +1754,7 @@ function HarvestTab({ parcel }: { parcel: any }) {
         <GlassCard className="p-3 md:p-5" hover={true}>
           <h4 className="text-sm font-semibold text-green-800 mb-3 flex items-center gap-2">
             <Calendar className="h-4 w-4" />
-            Detalle por Día
+            Detalle por DÃ­a
           </h4>
 
           <div className="hidden md:block overflow-x-auto">
@@ -1997,7 +2002,7 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings, allParcels, onSelectPa
             )}
             <div className="p-5 space-y-4">
               <div className="flex items-start gap-3">
-                <div className="w-11 h-11 rounded-full flex items-center justify-center text-xl shadow" style={{ backgroundColor: SEVERITY_COLORS[detailNote.severity] || "#6b7280" }}>{NOTE_CATEGORIES[detailNote.category]?.emoji || "📝"}</div>
+                <div className="w-11 h-11 rounded-full flex items-center justify-center text-xl shadow" style={{ backgroundColor: SEVERITY_COLORS[detailNote.severity] || "#6b7280" }}>{NOTE_CATEGORIES[detailNote.category]?.emoji || "ðŸ“"}</div>
                 <div className="flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="text-base font-bold text-green-900">{NOTE_CATEGORIES[detailNote.category]?.label || detailNote.category}</h3>
@@ -2071,10 +2076,10 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings, allParcels, onSelectPa
       {/* Filters */}
       <div className="flex flex-wrap gap-2 mt-4">
         <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} className="text-xs bg-white/60 border border-green-200/50 rounded-xl px-3 py-1.5 text-green-700 focus:outline-none focus:ring-1 focus:ring-green-400">
-          <option value="all">Todas categorías</option>{Object.entries(NOTE_CATEGORIES).map(([k, { label, emoji }]) => <option key={k} value={k}>{emoji} {label}</option>)}
+          <option value="all">Todas categorÃ­as</option>{Object.entries(NOTE_CATEGORIES).map(([k, { label, emoji }]) => <option key={k} value={k}>{emoji} {label}</option>)}
         </select>
         <select value={filterSeverity} onChange={e => setFilterSeverity(e.target.value)} className="text-xs bg-white/60 border border-green-200/50 rounded-xl px-3 py-1.5 text-green-700 focus:outline-none focus:ring-1 focus:ring-green-400">
-          <option value="all">Todas prioridades</option><option value="baja">🔵 Baja</option><option value="media">🟡 Media</option><option value="alta">🟠 Alta</option><option value="critica">🔴 Crítica</option>
+          <option value="all">Todas prioridades</option><option value="baja">ðŸ”µ Baja</option><option value="media">ðŸŸ¡ Media</option><option value="alta">ðŸŸ  Alta</option><option value="critica">ðŸ”´ CrÃ­tica</option>
         </select>
         <button onClick={() => setFilterNoPhoto(!filterNoPhoto)} className={`text-xs px-3 py-1.5 rounded-xl font-medium transition-all flex items-center gap-1 ${filterNoPhoto ? "bg-amber-500 text-white shadow-sm" : "bg-white/60 text-green-700 border border-green-200/50 hover:bg-amber-50"}`}><CameraOff className="h-3 w-3" /> Solo sin foto</button>
       </div>
@@ -2087,7 +2092,7 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings, allParcels, onSelectPa
             <div className="absolute bottom-3 right-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-lg border border-green-200/50 p-2.5 z-20 text-[10px] space-y-1 max-w-[150px]">
               <div className="font-semibold text-green-800 text-xs mb-1">Prioridad</div>
               <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-blue-500 border-2 border-white shadow-sm" /> Baja <span className="w-3 h-3 rounded-full bg-amber-500 border-2 border-white shadow-sm ml-1" /> Media</div>
-              <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-orange-500 border-2 border-white shadow-sm" /> Alta <span className="w-3 h-3 rounded-full bg-red-500 border-2 border-white shadow-sm ml-1" /> Crítica</div>
+              <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-orange-500 border-2 border-white shadow-sm" /> Alta <span className="w-3 h-3 rounded-full bg-red-500 border-2 border-white shadow-sm ml-1" /> CrÃ­tica</div>
               <div className="border-t border-green-200/30 pt-1 mt-1"><div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full border-2 border-black" style={{ borderStyle: "dashed" }} /> Sin foto</div></div>
             </div>
             {filteredNotes.length === 0 && !notesLoading && (
@@ -2102,7 +2107,7 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings, allParcels, onSelectPa
           <GlassCard className="p-0 overflow-hidden" hover={false}>
             <div className="p-3 border-b border-green-200/30 bg-white/30">
               <h4 className="text-sm font-semibold text-green-800 flex items-center gap-2"><ClipboardList className="h-4 w-4" /> Notas ({filteredNotes.length})</h4>
-              <p className="text-[10px] text-green-500 mt-0.5">Click = mapa · Doble click = detalle</p>
+              <p className="text-[10px] text-green-500 mt-0.5">Click = mapa Â· Doble click = detalle</p>
             </div>
             <div className={`${isFullscreen ? "max-h-[calc(100vh-300px)]" : "max-h-[350px] sm:max-h-[400px] lg:max-h-[540px]"} overflow-y-auto divide-y divide-green-100/50`}>
               {filteredNotes.length === 0 && <div className="p-6 text-center text-green-400 text-xs">Sin notas</div>}
@@ -2126,9 +2131,9 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings, allParcels, onSelectPa
                       </div>
                       <p className="text-[10px] text-green-600 mt-0.5 line-clamp-2">{note.description}</p>
                       <div className="flex items-center gap-2 mt-1 text-[9px] text-green-400 flex-wrap">
-                        <span>{note.reportedByName || "Usuario"}</span><span>·</span><span>{formatDate(note.createdAt)}</span>
-                        {hasPhoto && <><span>·</span><span className="flex items-center gap-0.5 text-green-500"><Camera className="h-2.5 w-2.5" /> {note.photos.length}</span></>}
-                        {assignedCollab && <><span>·</span><span className="flex items-center gap-0.5 text-purple-500"><Users2 className="h-2.5 w-2.5" /> {assignedCollab.name}</span></>}
+                        <span>{note.reportedByName || "Usuario"}</span><span>Â·</span><span>{formatDate(note.createdAt)}</span>
+                        {hasPhoto && <><span>Â·</span><span className="flex items-center gap-0.5 text-green-500"><Camera className="h-2.5 w-2.5" /> {note.photos.length}</span></>}
+                        {assignedCollab && <><span>Â·</span><span className="flex items-center gap-0.5 text-purple-500"><Users2 className="h-2.5 w-2.5" /> {assignedCollab.name}</span></>}
                       </div>
                       <div className="flex gap-1 mt-1.5">
                         <button onClick={e => { e.stopPropagation(); setDetailNote(note); }} className="text-[9px] bg-green-50 text-green-600 px-2 py-0.5 rounded-lg hover:bg-green-100 flex items-center gap-0.5"><Eye className="h-2.5 w-2.5" /> Detalle</button>
@@ -2157,7 +2162,7 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings, allParcels, onSelectPa
             )}
             <div className="p-3">
               <div className="flex items-start gap-2 mb-2">
-                <span className="text-lg">{NOTE_CATEGORIES[selectedNote.category]?.emoji || "📝"}</span>
+                <span className="text-lg">{NOTE_CATEGORIES[selectedNote.category]?.emoji || "ðŸ“"}</span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-semibold text-green-900">{NOTE_CATEGORIES[selectedNote.category]?.label || selectedNote.category}</span>
@@ -2174,6 +2179,221 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings, allParcels, onSelectPa
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ============ SATELLITE TAB ============
+function SatelliteTab({ parcel }: { parcel: any }) {
+  const hasPolygon = useMemo(() => {
+    if (!parcel?.polygon) return false;
+    try {
+      const poly = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
+      if (Array.isArray(poly)) return poly.length >= 3;
+      return poly.coordinates && poly.coordinates[0] && poly.coordinates[0].length >= 3;
+    } catch { return false; }
+  }, [parcel]);
+
+  const { data: ndviData, isLoading: ndviLoading, error: ndviError } = trpc.copernicus.getNDVI.useQuery(
+    { parcelId: parcel?.id },
+    { enabled: !!parcel?.id && hasPolygon, staleTime: 10 * 60 * 1000, retry: 1 }
+  );
+
+  const { data: trueColorData, isLoading: tcLoading, error: tcError } = trpc.copernicus.getTrueColor.useQuery(
+    { parcelId: parcel?.id },
+    { enabled: !!parcel?.id && hasPolygon, staleTime: 10 * 60 * 1000, retry: 1 }
+  );
+
+  if (!hasPolygon) {
+    return (
+      <GlassCard className="p-6 text-center">
+        <div className="flex flex-col items-center gap-3 py-8">
+          <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center">
+            <AlertTriangle className="w-8 h-8 text-amber-500" />
+          </div>
+          <h3 className="text-lg font-bold text-amber-900">Polígono Requerido</h3>
+          <p className="text-sm text-amber-700 max-w-md">
+            Dibuja el polígono de esta parcela en el mapa para activar la telemetría satelital de Copernicus.
+          </p>
+        </div>
+      </GlassCard>
+    );
+  }
+
+  const chartData = useMemo(() => {
+    if (!ndviData?.data) return [];
+    return ndviData.data.map((d: any) => ({
+      date: d.date,
+      dateLabel: new Date(d.date + "T12:00:00Z").toLocaleDateString("es-MX", { day: "2-digit", month: "short" }),
+      mean: d.mean,
+      min: d.min,
+      max: d.max,
+    }));
+  }, [ndviData]);
+
+  const lastNDVI = chartData.length > 0 ? chartData[chartData.length - 1] : null;
+
+  const getNDVIStatus = (val: number) => {
+    if (val >= 0.6) return { label: "Excelente", color: "text-green-600", bg: "bg-green-100", emoji: "🌿" };
+    if (val >= 0.4) return { label: "Bueno", color: "text-lime-600", bg: "bg-lime-100", emoji: "🌱" };
+    if (val >= 0.2) return { label: "Moderado", color: "text-yellow-600", bg: "bg-yellow-100", emoji: "⚠️" };
+    return { label: "Bajo / Estrés", color: "text-red-600", bg: "bg-red-100", emoji: "🔴" };
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <GlassCard className="p-4" hover={false}>
+        <div className="flex items-center gap-3 mb-1">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-400 to-purple-600 shadow">
+            <Satellite className="h-5 w-5 text-white" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-indigo-900">Telemetría Satelital</h2>
+            <p className="text-xs text-indigo-600">Sentinel-2 · Copernicus CDSE · Datos cada 5 días</p>
+          </div>
+          {lastNDVI && (() => {
+            const status = getNDVIStatus(lastNDVI.mean);
+            return (
+              <div className={`ml-auto ${status.bg} px-3 py-1.5 rounded-xl flex items-center gap-2`}>
+                <span className="text-lg">{status.emoji}</span>
+                <div>
+                  <p className={`text-xs font-bold ${status.color}`}>NDVI: {lastNDVI.mean.toFixed(3)}</p>
+                  <p className="text-[10px] text-gray-500">{status.label}</p>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      </GlassCard>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* True Color Image */}
+        <GlassCard className="p-4 lg:col-span-1" hover={false}>
+          <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
+            <ImageIcon className="w-4 h-4 text-indigo-500" />
+            Imagen True Color (RGB)
+          </h3>
+          {tcLoading ? (
+            <div className="flex items-center justify-center h-48 bg-gray-50 rounded-xl">
+              <Loader2 className="w-6 h-6 animate-spin text-indigo-400" />
+              <span className="ml-2 text-sm text-gray-500">Descargando imagen...</span>
+            </div>
+          ) : tcError ? (
+            <div className="flex flex-col items-center justify-center h-48 bg-red-50 rounded-xl p-4">
+              <AlertTriangle className="w-6 h-6 text-red-400 mb-2" />
+              <p className="text-xs text-red-600 text-center">
+                {(tcError as any)?.message?.includes("Credenciales") 
+                  ? "Configura las credenciales de Copernicus en Ajustes" 
+                  : "Error al cargar imagen satelital"}
+              </p>
+            </div>
+          ) : trueColorData?.image ? (
+            <div className="relative rounded-xl overflow-hidden border border-indigo-200/50 shadow-sm">
+              <img src={trueColorData.image} alt="True Color Sentinel-2" className="w-full h-auto" />
+              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                <p className="text-[10px] text-white/90">Sentinel-2 · Últimos 15 días · &lt;30% nubes</p>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-48 bg-gray-50 rounded-xl p-4">
+              <CameraOff className="w-6 h-6 text-gray-300 mb-2" />
+              <p className="text-xs text-gray-500 text-center">{trueColorData?.message || "Sin imagen disponible"}</p>
+            </div>
+          )}
+
+          {/* NDVI Snapshot Cards */}
+          {lastNDVI && (
+            <div className="grid grid-cols-3 gap-2 mt-3">
+              <div className="bg-green-50 rounded-lg p-2 text-center">
+                <p className="text-[10px] text-gray-500 uppercase">Promedio</p>
+                <p className="text-sm font-bold text-green-700">{lastNDVI.mean.toFixed(3)}</p>
+              </div>
+              <div className="bg-lime-50 rounded-lg p-2 text-center">
+                <p className="text-[10px] text-gray-500 uppercase">Máximo</p>
+                <p className="text-sm font-bold text-lime-700">{lastNDVI.max.toFixed(3)}</p>
+              </div>
+              <div className="bg-amber-50 rounded-lg p-2 text-center">
+                <p className="text-[10px] text-gray-500 uppercase">Mínimo</p>
+                <p className="text-sm font-bold text-amber-700">{lastNDVI.min.toFixed(3)}</p>
+              </div>
+            </div>
+          )}
+        </GlassCard>
+
+        {/* NDVI Chart */}
+        <GlassCard className="p-4 lg:col-span-2" hover={false}>
+          <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
+            <Activity className="w-4 h-4 text-green-500" />
+            Histórico NDVI Satelital
+            {ndviData && <span className="text-[10px] text-gray-400 font-normal ml-auto">{ndviData.fromDate} → {ndviData.toDate}</span>}
+          </h3>
+          {ndviLoading ? (
+            <div className="flex items-center justify-center h-64 bg-gray-50 rounded-xl">
+              <Loader2 className="w-6 h-6 animate-spin text-green-400" />
+              <span className="ml-2 text-sm text-gray-500">Consultando Copernicus...</span>
+            </div>
+          ) : ndviError ? (
+            <div className="flex flex-col items-center justify-center h-64 bg-red-50 rounded-xl p-4">
+              <AlertTriangle className="w-6 h-6 text-red-400 mb-2" />
+              <p className="text-xs text-red-600 text-center">
+                {(ndviError as any)?.message?.includes("Credenciales")
+                  ? "Configura las credenciales de Copernicus en Configuración → API Copernicus (CDSE)"
+                  : (ndviError as any)?.message || "Error al obtener datos NDVI"}
+              </p>
+            </div>
+          ) : chartData.length > 0 ? (
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+                  {/* Zonas de color de fondo */}
+                  <ReferenceArea y1={0} y2={0.2} fill="#fecaca" fillOpacity={0.3} />
+                  <ReferenceArea y1={0.2} y2={0.4} fill="#fef08a" fillOpacity={0.3} />
+                  <ReferenceArea y1={0.4} y2={0.6} fill="#bbf7d0" fillOpacity={0.3} />
+                  <ReferenceArea y1={0.6} y2={1} fill="#86efac" fillOpacity={0.3} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="dateLabel" tick={{ fontSize: 10 }} />
+                  <YAxis domain={[0, 1]} tick={{ fontSize: 10 }} tickFormatter={(v: number) => v.toFixed(1)} />
+                  <Tooltip
+                    contentStyle={{ borderRadius: 12, border: "1px solid #e5e7eb", fontSize: 12 }}
+                    formatter={(value: any, name: string) => [Number(value).toFixed(3), name === "mean" ? "NDVI Promedio" : name === "max" ? "NDVI Máximo" : "NDVI Mínimo"]}
+                    labelFormatter={(label: string) => `Fecha: ${label}`}
+                  />
+                  <Legend formatter={(value: string) => value === "mean" ? "Promedio NDVI Satelital" : value === "max" ? "Máximo" : "Mínimo"} />
+                  <Line type="monotone" dataKey="max" stroke="#86efac" strokeWidth={1} dot={false} strokeDasharray="4 2" />
+                  <Line type="monotone" dataKey="mean" stroke="#16a34a" strokeWidth={2.5} dot={{ r: 3, fill: "#16a34a" }} activeDot={{ r: 5 }} />
+                  <Line type="monotone" dataKey="min" stroke="#fbbf24" strokeWidth={1} dot={false} strokeDasharray="4 2" />
+                  <ReferenceLine y={0.6} stroke="#16a34a" strokeDasharray="8 4" label={{ value: "Óptimo", position: "right", fontSize: 9, fill: "#16a34a" }} />
+                  <ReferenceLine y={0.3} stroke="#dc2626" strokeDasharray="8 4" label={{ value: "Estrés", position: "right", fontSize: 9, fill: "#dc2626" }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-64 bg-gray-50 rounded-xl p-4">
+              <Info className="w-6 h-6 text-gray-300 mb-2" />
+              <p className="text-xs text-gray-500">Sin datos NDVI para este período</p>
+            </div>
+          )}
+
+          {/* Leyenda de zonas */}
+          <div className="flex items-center gap-4 mt-3 justify-center flex-wrap">
+            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-red-200" /><span className="text-[10px] text-gray-500">&lt;0.2 Suelo/Estrés</span></div>
+            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-yellow-200" /><span className="text-[10px] text-gray-500">0.2-0.4 Moderado</span></div>
+            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-green-200" /><span className="text-[10px] text-gray-500">0.4-0.6 Bueno</span></div>
+            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-green-300" /><span className="text-[10px] text-gray-500">&gt;0.6 Excelente</span></div>
+          </div>
+        </GlassCard>
+      </div>
+
+      {/* Info footer */}
+      <div className="flex items-start gap-2 p-3 bg-indigo-50/50 rounded-xl border border-indigo-100/50">
+        <Info className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" />
+        <div className="text-[11px] text-indigo-700 space-y-0.5">
+          <p><strong>Fuente:</strong> Sentinel-2 L2A (Resolución 10m) vía Copernicus Data Space Ecosystem</p>
+          <p><strong>NDVI:</strong> Índice de Vegetación de Diferencia Normalizada — mide la salud y densidad de la vegetación (0 = suelo, 1 = vegetación densa)</p>
+          <p><strong>Actualización:</strong> Cada 5 días (revisita de Sentinel-2) · Datos filtrados por &lt;30% cobertura de nubes</p>
+        </div>
       </div>
     </div>
   );

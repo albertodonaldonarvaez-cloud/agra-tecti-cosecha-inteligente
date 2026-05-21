@@ -501,6 +501,9 @@ export default function Settings() {
           {/* WebODM */}
           <WebODMSection />
 
+          {/* Copernicus CDSE - Telemetría Satelital */}
+          <CopernicusSection />
+
           {/* Carga Manual */}
           <GlassCard className="p-4 md:p-6">
             <div className="mb-4 flex items-center gap-2">
@@ -1647,6 +1650,136 @@ function WebODMSection() {
           )}
         </div>
       )}
+    </GlassCard>
+  );
+}
+
+// Componente de Copernicus CDSE - Telemetría Satelital
+function CopernicusSection() {
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const [showSecret, setShowSecret] = useState(false);
+
+  const { data: config, refetch } = trpc.copernicus.getConfig.useQuery(undefined, {
+    retry: false,
+    onError: () => {}, // Silenciar si no es admin
+  });
+
+  const saveConfig = trpc.copernicus.saveConfig.useMutation({
+    onSuccess: () => {
+      toast.success("Credenciales de Copernicus guardadas (secreto encriptado)");
+      setClientSecret("");
+      refetch();
+    },
+    onError: (error: any) => toast.error(error.message),
+  });
+
+  const testConnection = trpc.copernicus.testConnection.useMutation({
+    onSuccess: (data: any) => toast.success(data.message),
+    onError: (error: any) => toast.error("Error de conexión: " + error.message),
+  });
+
+  useEffect(() => {
+    if (config) {
+      setClientId(config.clientId || "");
+    }
+  }, [config]);
+
+  return (
+    <GlassCard className="p-4 md:p-6 border-2 border-indigo-200 bg-indigo-50/20">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-100">
+            <span className="text-lg">🛰️</span>
+          </div>
+          <h2 className="text-lg md:text-2xl font-semibold text-indigo-900">API Copernicus (CDSE)</h2>
+        </div>
+        {config?.hasSecret && (
+          <span className="flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
+            <CheckCircle className="h-3 w-3" />
+            Configurado
+          </span>
+        )}
+      </div>
+
+      <p className="mb-4 text-sm text-indigo-700">
+        Conecta con el ecosistema satelital de Copernicus para obtener datos NDVI e imágenes True Color de Sentinel-2 directamente en cada parcela.
+      </p>
+
+      <div className="rounded-lg bg-indigo-50 p-3 mb-4 text-sm text-indigo-800">
+        <strong>📋 Cómo obtener credenciales:</strong>
+        <ol className="list-decimal list-inside mt-1 space-y-0.5 text-xs text-indigo-700">
+          <li>Regístrate en <a href="https://dataspace.copernicus.eu" target="_blank" rel="noopener noreferrer" className="underline font-medium hover:text-indigo-900">dataspace.copernicus.eu</a></li>
+          <li>Ve a Dashboard → "Sentinel Hub" → "OAuth clients"</li>
+          <li>Crea un nuevo OAuth client</li>
+          <li>Copia el Client ID y Client Secret aquí</li>
+        </ol>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <Label htmlFor="copernicusClientId">Client ID</Label>
+          <Input
+            id="copernicusClientId"
+            value={clientId}
+            onChange={(e) => setClientId(e.target.value)}
+            placeholder="sh-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+          />
+        </div>
+
+        <div>
+          <Label htmlFor="copernicusClientSecret">Client Secret</Label>
+          <div className="relative">
+            <Input
+              id="copernicusClientSecret"
+              type={showSecret ? "text" : "password"}
+              value={clientSecret}
+              onChange={(e) => setClientSecret(e.target.value)}
+              placeholder={config?.hasSecret ? "••••••••••• (ya configurado, ingresa nuevo para cambiar)" : "Tu client secret"}
+              className="pr-10"
+            />
+            <button
+              type="button"
+              onClick={() => setShowSecret(!showSecret)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+          <p className="text-[10px] text-indigo-500 mt-1 flex items-center gap-1">
+            🔒 El secreto se encripta con AES-256-GCM antes de almacenarse
+          </p>
+        </div>
+
+        <div className="flex gap-2">
+          <Button
+            onClick={() => {
+              if (!clientId || !clientSecret) {
+                toast.error("Ingresa ambos campos");
+                return;
+              }
+              saveConfig.mutate({ clientId, clientSecret });
+            }}
+            disabled={saveConfig.isPending || !clientId}
+            className="flex-1 bg-indigo-600 hover:bg-indigo-700"
+          >
+            <Save className="mr-2 h-4 w-4" />
+            {saveConfig.isPending ? "Encriptando y guardando..." : "Guardar Credenciales"}
+          </Button>
+
+          {config?.hasSecret && (
+            <Button
+              onClick={() => testConnection.mutate()}
+              disabled={testConnection.isPending}
+              variant="outline"
+              className="border-indigo-300 text-indigo-700 hover:bg-indigo-100"
+            >
+              <Zap className="mr-1 h-4 w-4" />
+              {testConnection.isPending ? "..." : "Probar"}
+            </Button>
+          )}
+        </div>
+      </div>
     </GlassCard>
   );
 }

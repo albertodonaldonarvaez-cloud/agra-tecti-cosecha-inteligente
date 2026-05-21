@@ -141,6 +141,8 @@ export const apiConfig = mysqlTable("apiConfig", {
   telegramHarvestEnabled: boolean("telegramHarvestEnabled").default(false),
   telegramFieldNotesChatId: varchar("telegramFieldNotesChatId", { length: 128 }),
   telegramFieldNotesEnabled: boolean("telegramFieldNotesEnabled").default(false),
+  copernicusClientId: varchar("copernicusClientId", { length: 256 }),
+  copernicusClientSecret: varchar("copernicusClientSecret", { length: 1024 }),
   lastSync: timestamp("lastSync"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

@@ -68,6 +68,124 @@ export const appRouter = router({
       }),
   }),
 
+  // ===== Copernicus CDSE (Telemetría Satelital) =====
+  copernicus: router({
+    getConfig: adminProcedure.query(async () => {
+      const config = await db.getApiConfig();
+      if (!config) return { clientId: "", hasSecret: false };
+      return {
+        clientId: (config as any).copernicusClientId || "",
+        hasSecret: !!(config as any).copernicusClientSecret,
+      };
+    }),
+
+    saveConfig: adminProcedure
+      .input(z.object({
+        clientId: z.string().min(1),
+        clientSecret: z.string().min(1),
+      }))
+      .mutation(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB no disponible" });
+        const { encryptSecret } = await import("./encryption");
+        const encryptedSecret = encryptSecret(input.clientSecret);
+        await drizzle.execute(
+          sql`UPDATE apiConfig SET copernicusClientId = ${input.clientId}, copernicusClientSecret = ${encryptedSecret}`
+        );
+        return { success: true };
+      }),
+
+    testConnection: protectedProcedure.mutation(async () => {
+      const { getAccessToken } = await import("./copernicusService");
+      await getAccessToken();
+      return { success: true, message: "Conexión exitosa con Copernicus CDSE" };
+    }),
+
+    getNDVI: protectedProcedure
+      .input(z.object({
+        parcelId: z.number(),
+        fromDate: z.string().optional(),
+        toDate: z.string().optional(),
+      }))
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const [parcel] = await drizzle.select({ polygon: parcels.polygon }).from(parcels).where(eq(parcels.id, input.parcelId));
+        if (!parcel?.polygon) throw new TRPCError({ code: "BAD_REQUEST", message: "La parcela no tiene polígono definido" });
+
+        // Parsear polígono almacenado a GeoJSON
+        let geoPolygon: any;
+        try {
+          const polyData = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
+          // El polígono en BD es un array de {lat, lng} — convertir a GeoJSON [lng, lat]
+          if (Array.isArray(polyData)) {
+            const ring = polyData.map((p: any) => [p.lng || p.longitude || p[1], p.lat || p.latitude || p[0]]);
+            // Cerrar el anillo si no está cerrado
+            if (ring.length > 0 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])) {
+              ring.push([...ring[0]]);
+            }
+            geoPolygon = { type: "Polygon", coordinates: [ring] };
+          } else if (polyData.type === "Polygon") {
+            geoPolygon = polyData;
+          } else {
+            throw new Error("Formato de polígono no reconocido");
+          }
+        } catch (e) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Error al parsear el polígono de la parcela" });
+        }
+
+        // Rango de fechas: por defecto últimos 6 meses
+        const to = input.toDate || new Date().toISOString().split("T")[0];
+        const defaultFrom = new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0];
+        const from = input.fromDate || defaultFrom;
+
+        const { getNDVIHistory } = await import("./copernicusService");
+        const data = await getNDVIHistory(geoPolygon, from, to);
+        return { data, fromDate: from, toDate: to };
+      }),
+
+    getTrueColor: protectedProcedure
+      .input(z.object({
+        parcelId: z.number(),
+        date: z.string().optional(),
+      }))
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const [parcel] = await drizzle.select({ polygon: parcels.polygon }).from(parcels).where(eq(parcels.id, input.parcelId));
+        if (!parcel?.polygon) throw new TRPCError({ code: "BAD_REQUEST", message: "La parcela no tiene polígono definido" });
+
+        let geoPolygon: any;
+        try {
+          const polyData = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
+          if (Array.isArray(polyData)) {
+            const ring = polyData.map((p: any) => [p.lng || p.longitude || p[1], p.lat || p.latitude || p[0]]);
+            if (ring.length > 0 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])) {
+              ring.push([...ring[0]]);
+            }
+            geoPolygon = { type: "Polygon", coordinates: [ring] };
+          } else if (polyData.type === "Polygon") {
+            geoPolygon = polyData;
+          } else {
+            throw new Error("Formato no reconocido");
+          }
+        } catch (e) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Error al parsear el polígono" });
+        }
+
+        const { getTrueColorImage } = await import("./copernicusService");
+        const buffer = await getTrueColorImage(geoPolygon, input.date);
+        if (!buffer) return { image: null, message: "Sin imagen satelital disponible para este rango" };
+
+        return {
+          image: `data:image/png;base64,${buffer.toString("base64")}`,
+          message: null,
+        };
+      }),
+  }),
+
   // Sincronización automática
   autoSync: router({
     status: adminProcedure.query(async () => {
