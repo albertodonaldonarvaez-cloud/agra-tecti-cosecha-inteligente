@@ -184,6 +184,46 @@ export const appRouter = router({
           message: null,
         };
       }),
+
+    getNDVIMap: protectedProcedure
+      .input(z.object({
+        parcelId: z.number(),
+        date: z.string().optional(),
+      }))
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const [parcel] = await drizzle.select({ polygon: parcels.polygon }).from(parcels).where(eq(parcels.id, input.parcelId));
+        if (!parcel?.polygon) throw new TRPCError({ code: "BAD_REQUEST", message: "La parcela no tiene polígono definido" });
+
+        let geoPolygon: any;
+        try {
+          const polyData = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
+          if (Array.isArray(polyData)) {
+            const ring = polyData.map((p: any) => [p.lng || p.longitude || p[1], p.lat || p.latitude || p[0]]);
+            if (ring.length > 0 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])) {
+              ring.push([...ring[0]]);
+            }
+            geoPolygon = { type: "Polygon", coordinates: [ring] };
+          } else if (polyData.type === "Polygon") {
+            geoPolygon = polyData;
+          } else {
+            throw new Error("Formato no reconocido");
+          }
+        } catch (e) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Error al parsear el polígono" });
+        }
+
+        const { getNDVIMapImage } = await import("./copernicusService");
+        const buffer = await getNDVIMapImage(geoPolygon, input.date);
+        if (!buffer) return { image: null, message: "Sin mapa NDVI disponible para este rango" };
+
+        return {
+          image: `data:image/png;base64,${buffer.toString("base64")}`,
+          message: null,
+        };
+      }),
   }),
 
   // Sincronización automática
