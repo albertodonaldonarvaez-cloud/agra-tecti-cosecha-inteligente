@@ -2436,6 +2436,7 @@ export const appRouter = router({
             resolvedAt: fieldNotes.resolvedAt,
             createdAt: fieldNotes.createdAt,
             updatedAt: fieldNotes.updatedAt,
+            assignedToCollaboratorId: fieldNotes.assignedToCollaboratorId,
           })
           .from(fieldNotes)
           .leftJoin(users, eq(fieldNotes.reportedByUserId, users.id))
@@ -2565,6 +2566,7 @@ export const appRouter = router({
         category: z.string().optional(),
         severity: z.string().optional(),
         parcelId: z.number().nullable().optional(),
+        assignedToCollaboratorId: z.number().nullable().optional(),
       }))
       .mutation(async ({ input }) => {
         const drizzle = await getDb();
@@ -2630,6 +2632,24 @@ export const appRouter = router({
         }
 
         return { success: true };
+      }),
+
+    addComment: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        comment: z.string().min(1),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const drizzle = await getDb();
+        // Append comment to existing resolutionNotes with timestamp
+        const [note] = await drizzle.select({ resolutionNotes: fieldNotes.resolutionNotes }).from(fieldNotes).where(eq(fieldNotes.id, input.id));
+        const userName = (ctx as any).user?.name || "Usuario";
+        const timestamp = new Date().toLocaleString("es-MX", { timeZone: "America/Mexico_City" });
+        const newComment = `[${timestamp}] ${userName}: ${input.comment}`;
+        const existingNotes = note?.resolutionNotes || "";
+        const updatedNotes = existingNotes ? `${existingNotes}\n${newComment}` : newComment;
+        await drizzle.update(fieldNotes).set({ resolutionNotes: updatedNotes }).where(eq(fieldNotes.id, input.id));
+        return { success: true, comment: newComment };
       }),
 
     delete: protectedProcedure

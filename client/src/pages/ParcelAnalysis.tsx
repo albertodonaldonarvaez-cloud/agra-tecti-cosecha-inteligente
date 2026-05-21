@@ -8,7 +8,8 @@ import {
   ChevronDown, ChevronUp, Edit3, Save, X, Layers, Eye,
   Plane, Clock, ImageIcon, BarChart3, Leaf, ArrowUpDown, ArrowLeft, Activity,
   ClipboardList, Bug, Droplets, AlertTriangle, Construction, Fence,
-  FlaskConical, Mountain, PawPrint, FileText, Camera, CameraOff, Filter
+  FlaskConical, Mountain, PawPrint, FileText, Camera, CameraOff, Filter,
+  Maximize2, Minimize2, Send, ExternalLink, UserPlus, MessageSquare, Users2, ZoomIn
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
@@ -290,7 +291,7 @@ function ParcelAnalysisContent() {
               <HarvestTab key={`harvest-${selectedParcel?.id}`} parcel={selectedParcel} />
             )}
             {activeTab === "notes" && (
-              <FieldNotesMapTab key={`notes-${selectedParcel?.id}`} parcel={selectedParcel} mapping={selectedMapping} odmMappings={odmMappings || []} />
+              <FieldNotesMapTab key={`notes-${selectedParcel?.id}`} parcel={selectedParcel} mapping={selectedMapping} odmMappings={odmMappings || []} allParcels={parcels} onSelectParcel={(id: number) => setSelectedParcelId(id)} />
             )}
           </>
         )}
@@ -1826,8 +1827,11 @@ function HarvestTab({ parcel }: { parcel: any }) {
 }
 
 // ============ TAB 4: NOTAS DE CAMPO EN MAPA ============
-function FieldNotesMapTab({ parcel, mapping, odmMappings }: { parcel: any; mapping: any; odmMappings: any[] }) {
+function FieldNotesMapTab({ parcel, mapping, odmMappings, allParcels, onSelectParcel }: {
+  parcel: any; mapping: any; odmMappings: any[]; allParcels: any[]; onSelectParcel: (id: number) => void;
+}) {
   const { user } = useAuth();
+  const utils = trpc.useUtils();
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<Map | null>(null);
   const popupRef = useRef<HTMLDivElement>(null);
@@ -1840,20 +1844,22 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings }: { parcel: any; mappi
   const [filterSeverity, setFilterSeverity] = useState<string>("all");
   const [filterNoPhoto, setFilterNoPhoto] = useState(false);
   const [hoveredNoteId, setHoveredNoteId] = useState<number | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [commentText, setCommentText] = useState("");
+  const [detailNote, setDetailNote] = useState<any>(null);
+  const [photoViewerSrc, setPhotoViewerSrc] = useState<string | null>(null);
 
-  // Cargar TODAS las notas de campo (no filtrar por parcelId para que funcione en todas las parcelas)
-  const { data: allNotes, isLoading: notesLoading } = trpc.fieldNotes.list.useQuery(
-    {},
-    { enabled: !!user, staleTime: 30 * 1000 }
-  );
+  const addCommentMut = trpc.fieldNotes.addComment.useMutation({
+    onSuccess: () => { setCommentText(""); utils.fieldNotes.list.invalidate(); },
+  });
+  const updateMut = trpc.fieldNotes.update.useMutation({
+    onSuccess: () => { utils.fieldNotes.list.invalidate(); },
+  });
+  const { data: collaborators } = trpc.collaborators.list.useQuery(undefined, { staleTime: 5 * 60 * 1000 });
 
-  // Cargar tareas ODM para la ortofoto de fondo
-  const { data: tasks } = trpc.webodm.getProjectTasks.useQuery(
-    { projectId: mapping?.odmProjectId || 0 },
-    { enabled: !!mapping?.odmProjectId, staleTime: 2 * 60 * 1000 }
-  );
+  const { data: allNotes, isLoading: notesLoading } = trpc.fieldNotes.list.useQuery({}, { enabled: !!user, staleTime: 30 * 1000 });
+  const { data: tasks } = trpc.webodm.getProjectTasks.useQuery({ projectId: mapping?.odmProjectId || 0 }, { enabled: !!mapping?.odmProjectId, staleTime: 2 * 60 * 1000 });
 
-  // Calcular el bounding box de la parcela para filtrar notas geográficamente
   const parcelBounds = useMemo(() => {
     if (!parcel?.polygon) return null;
     try {
@@ -1861,448 +1867,275 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings }: { parcel: any; mappi
       if (!poly.coordinates?.[0]?.length) return null;
       const coords = poly.coordinates[0];
       let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
-      for (const [lng, lat] of coords) {
-        if (lat < minLat) minLat = lat;
-        if (lat > maxLat) maxLat = lat;
-        if (lng < minLng) minLng = lng;
-        if (lng > maxLng) maxLng = lng;
-      }
-      // Expandir 20% para captar notas cercanas al borde
-      const latPad = (maxLat - minLat) * 0.2 || 0.002;
-      const lngPad = (maxLng - minLng) * 0.2 || 0.002;
+      for (const [lng, lat] of coords) { if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat; if (lng < minLng) minLng = lng; if (lng > maxLng) maxLng = lng; }
+      const latPad = (maxLat - minLat) * 0.2 || 0.002, lngPad = (maxLng - minLng) * 0.2 || 0.002;
       return { minLat: minLat - latPad, maxLat: maxLat + latPad, minLng: minLng - lngPad, maxLng: maxLng + lngPad };
     } catch { return null; }
   }, [parcel?.polygon]);
 
-  // Filtrar notas: primero por parcelId, luego por ubicación geográfica, y luego los filtros del UI
   const notes = useMemo(() => {
     if (!allNotes) return [];
     return allNotes.filter((n: any) => {
-      // Si tiene parcelId y coincide → incluir
       if (n.parcelId === parcel?.id) return true;
-      // Si no tiene parcelId pero tiene GPS y cae dentro del bounding box → incluir
       if (!n.parcelId && n.latitude && n.longitude && parcelBounds) {
-        const lat = parseFloat(n.latitude);
-        const lng = parseFloat(n.longitude);
-        return lat >= parcelBounds.minLat && lat <= parcelBounds.maxLat &&
-               lng >= parcelBounds.minLng && lng <= parcelBounds.maxLng;
+        const lat = parseFloat(n.latitude), lng = parseFloat(n.longitude);
+        return lat >= parcelBounds.minLat && lat <= parcelBounds.maxLat && lng >= parcelBounds.minLng && lng <= parcelBounds.maxLng;
       }
       return false;
     });
   }, [allNotes, parcel?.id, parcelBounds]);
 
-  const filteredNotes = useMemo(() => {
-    return notes.filter((n: any) => {
-      if (!n.latitude || !n.longitude) return false;
-      if (filterCategory !== "all" && n.category !== filterCategory) return false;
-      if (filterSeverity !== "all" && n.severity !== filterSeverity) return false;
-      if (filterNoPhoto && n.photos && n.photos.length > 0) return false;
-      return true;
-    });
-  }, [notes, filterCategory, filterSeverity, filterNoPhoto]);
+  const filteredNotes = useMemo(() => notes.filter((n: any) => {
+    if (!n.latitude || !n.longitude) return false;
+    if (filterCategory !== "all" && n.category !== filterCategory) return false;
+    if (filterSeverity !== "all" && n.severity !== filterSeverity) return false;
+    if (filterNoPhoto && n.photos && n.photos.length > 0) return false;
+    return true;
+  }), [notes, filterCategory, filterSeverity, filterNoPhoto]);
 
-  // Stats
   const stats = useMemo(() => {
     if (!notes) return { total: 0, withGps: 0, withPhoto: 0, withoutPhoto: 0, critical: 0 };
-    return {
-      total: notes.length,
-      withGps: notes.filter((n: any) => n.latitude && n.longitude).length,
-      withPhoto: notes.filter((n: any) => n.photos?.length > 0).length,
-      withoutPhoto: notes.filter((n: any) => !n.photos || n.photos.length === 0).length,
-      critical: notes.filter((n: any) => n.severity === "critica" || n.severity === "alta").length,
-    };
+    return { total: notes.length, withGps: notes.filter((n: any) => n.latitude && n.longitude).length,
+      withPhoto: notes.filter((n: any) => n.photos?.length > 0).length, withoutPhoto: notes.filter((n: any) => !n.photos || n.photos.length === 0).length,
+      critical: notes.filter((n: any) => n.severity === "critica" || n.severity === "alta").length };
   }, [notes]);
 
-  // Encontrar el último vuelo completado para ortofoto de fondo
   const bestTaskUuid = useMemo(() => {
     if (!tasks) return null;
     const completed = tasks.filter((t: any) => t.status === 40);
-    if (completed.length === 0) return null;
-    const sorted = [...completed].sort((a: any, b: any) =>
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
-    // Preferir vuelos marcados como RGB manualmente
+    if (!completed.length) return null;
+    const sorted = [...completed].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     const rgbFlight = sorted.find((t: any) => isRGBTask(t) === true);
     if (rgbFlight) return rgbFlight.uuid || String(rgbFlight.id);
-    // Usar el más reciente que no sea explícitamente multiespectral
     const nonMulti = sorted.find((t: any) => isRGBTask(t) !== false);
     return nonMulti ? (nonMulti.uuid || String(nonMulti.id)) : (sorted[0].uuid || String(sorted[0].id));
   }, [tasks]);
 
-  // Crear estilo de pin
   const createNoteStyle = useCallback((note: any, isHighlighted = false) => {
-    const severityColor = SEVERITY_COLORS[note.severity] || "#6b7280";
+    const sevColor = SEVERITY_COLORS[note.severity] || "#6b7280";
     const cat = NOTE_CATEGORIES[note.category] || NOTE_CATEGORIES.otro;
     const hasPhoto = note.photos?.length > 0;
-    const radius = isHighlighted ? 18 : 14;
-
+    const r = isHighlighted ? 18 : 14;
     return new Style({
-      image: new CircleStyle({
-        radius,
-        fill: new Fill({ color: severityColor }),
-        stroke: new Stroke({
-          color: hasPhoto ? "#ffffff" : "#000000",
-          width: isHighlighted ? 3.5 : 2.5,
-          lineDash: hasPhoto ? undefined : [4, 4],
-        }),
-      }),
-      text: new OlText({
-        text: cat.emoji,
-        font: `${isHighlighted ? 18 : 14}px sans-serif`,
-        fill: new Fill({ color: "#ffffff" }),
-        stroke: new Stroke({ color: "rgba(0,0,0,0.5)", width: 1 }),
-      }),
+      image: new CircleStyle({ radius: r, fill: new Fill({ color: sevColor }), stroke: new Stroke({ color: hasPhoto ? "#fff" : "#000", width: isHighlighted ? 3.5 : 2.5, lineDash: hasPhoto ? undefined : [4, 4] }) }),
+      text: new OlText({ text: cat.emoji, font: `${r}px sans-serif`, fill: new Fill({ color: "#fff" }), stroke: new Stroke({ color: "rgba(0,0,0,0.5)", width: 1 }) }),
       zIndex: isHighlighted ? 100 : 1,
     });
   }, []);
 
-  // Función para ir a una nota en el mapa
   const flyToNote = useCallback((note: any) => {
     if (!mapInstanceRef.current) return;
-    const lat = parseFloat(note.latitude);
-    const lng = parseFloat(note.longitude);
+    const lat = parseFloat(note.latitude), lng = parseFloat(note.longitude);
     if (isNaN(lat) || isNaN(lng)) return;
-
     const coords = fromLonLat([lng, lat]);
     mapInstanceRef.current.getView().animate({ center: coords, zoom: 20, duration: 600 });
-
-    // Mostrar popup
-    setSelectedNote(note);
-    overlayRef.current?.setPosition(coords);
-
-    // Resaltar el pin
-    if (notesLayerRef.current) {
-      const source = notesLayerRef.current.getSource();
-      source?.getFeatures().forEach(f => {
-        const nd = f.get("noteData");
-        f.setStyle(createNoteStyle(nd, nd?.id === note.id));
-      });
-    }
+    setSelectedNote(note); overlayRef.current?.setPosition(coords);
+    notesLayerRef.current?.getSource()?.getFeatures().forEach(f => { const nd = f.get("noteData"); f.setStyle(createNoteStyle(nd, nd?.id === note.id)); });
   }, [createNoteStyle]);
 
-  // Inicializar mapa
+  const goToFieldNotes = useCallback((note: any) => { window.location.href = `/field-notes?noteId=${note.id}`; }, []);
+
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return;
-
-    const overlay = new Overlay({
-      element: popupRef.current || undefined,
-      autoPan: { animation: { duration: 250 } } as any,
-      positioning: "bottom-center" as any,
-      offset: [0, -20],
-    });
+    const overlay = new Overlay({ element: popupRef.current || undefined, autoPan: { animation: { duration: 250 } } as any, positioning: "bottom-center" as any, offset: [0, -20] });
     overlayRef.current = overlay;
-
-    let center = fromLonLat([-105.0, 23.0]);
-    let zoom = 5;
-
-    if (parcel?.polygon) {
-      try {
-        const poly = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
-        if (poly.coordinates?.[0]?.length > 0) {
-          const coords = poly.coordinates[0];
-          const avgLon = coords.reduce((s: number, c: number[]) => s + c[0], 0) / coords.length;
-          const avgLat = coords.reduce((s: number, c: number[]) => s + c[1], 0) / coords.length;
-          center = fromLonLat([avgLon, avgLat]);
-          zoom = 16;
-        }
-      } catch { /* ignore */ }
-    }
-
+    let center = fromLonLat([-105.0, 23.0]), zoom = 5;
+    if (parcel?.polygon) { try { const poly = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon; if (poly.coordinates?.[0]?.length > 0) { const c = poly.coordinates[0]; center = fromLonLat([c.reduce((s: number, p: number[]) => s + p[0], 0) / c.length, c.reduce((s: number, p: number[]) => s + p[1], 0) / c.length]); zoom = 16; } } catch {} }
     const baseLayer = new TileLayer({ source: new OSM() });
-    const orthoTileLayer = new TileLayer({ visible: false, opacity: 0.9, zIndex: 10 });
-    orthoLayerRef.current = orthoTileLayer;
-
+    const orthoTileLayer = new TileLayer({ visible: false, opacity: 0.9, zIndex: 10 }); orthoLayerRef.current = orthoTileLayer;
     const polyFeatures: Feature[] = [];
-    if (parcel?.polygon) {
-      try {
-        const poly = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
-        if (poly.coordinates?.[0]) {
-          const coords = poly.coordinates[0].map((c: number[]) => fromLonLat([c[0], c[1]]));
-          const feature = new Feature({ geometry: new Polygon([coords]) });
-          feature.setStyle(new Style({
-            fill: new Fill({ color: "rgba(16, 185, 129, 0.06)" }),
-            stroke: new Stroke({ color: "#10b981", width: 2, lineDash: [8, 4] }),
-          }));
-          polyFeatures.push(feature);
-        }
-      } catch { /* ignore */ }
-    }
-
+    if (parcel?.polygon) { try { const poly = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon; if (poly.coordinates?.[0]) { const f = new Feature({ geometry: new Polygon([poly.coordinates[0].map((c: number[]) => fromLonLat([c[0], c[1]]))]) }); f.setStyle(new Style({ fill: new Fill({ color: "rgba(16,185,129,0.06)" }), stroke: new Stroke({ color: "#10b981", width: 2, lineDash: [8, 4] }) })); polyFeatures.push(f); } } catch {} }
     const polygonLayer = new VectorLayer({ source: new VectorSource({ features: polyFeatures }), zIndex: 5 });
-    const notesVectorLayer = new VectorLayer({ source: new VectorSource(), zIndex: 25 });
-    notesLayerRef.current = notesVectorLayer;
-
-    const map = new Map({
-      target: mapRef.current,
-      layers: [baseLayer, orthoTileLayer, polygonLayer, notesVectorLayer],
-      overlays: [overlay],
-      view: new View({ center, zoom, maxZoom: 24 }),
-    });
-
-    map.on("click", (evt) => {
-      const feature = map.forEachFeatureAtPixel(evt.pixel, (f) => f);
-      if (feature?.get("noteData")) {
-        const nd = feature.get("noteData");
-        setSelectedNote(nd);
-        const geom = feature.getGeometry();
-        if (geom) overlay.setPosition((geom as Point).getCoordinates());
-        // Resaltar
-        notesVectorLayer.getSource()?.getFeatures().forEach(f => {
-          const d = f.get("noteData");
-          f.setStyle(createNoteStyle(d, d?.id === nd?.id));
-        });
-      } else {
-        setSelectedNote(null);
-        overlay.setPosition(undefined);
-        // Quitar resaltado
-        notesVectorLayer.getSource()?.getFeatures().forEach(f => {
-          f.setStyle(createNoteStyle(f.get("noteData"), false));
-        });
-      }
-    });
-
-    map.on("pointermove", (evt) => {
-      const hit = map.forEachFeatureAtPixel(evt.pixel, (f) => !!f.get("noteData"));
-      const el = map.getTargetElement();
-      if (el) (el as HTMLElement).style.cursor = hit ? "pointer" : "";
-    });
-
+    const nvl = new VectorLayer({ source: new VectorSource(), zIndex: 25 }); notesLayerRef.current = nvl;
+    const map = new Map({ target: mapRef.current, layers: [baseLayer, orthoTileLayer, polygonLayer, nvl], overlays: [overlay], view: new View({ center, zoom, maxZoom: 24 }) });
+    map.on("click", (evt) => { const feature = map.forEachFeatureAtPixel(evt.pixel, (f) => f); if (feature?.get("noteData")) { const nd = feature.get("noteData"); setSelectedNote(nd); const g = feature.getGeometry(); if (g) overlay.setPosition((g as Point).getCoordinates()); nvl.getSource()?.getFeatures().forEach(f => { const d = f.get("noteData"); f.setStyle(createNoteStyle(d, d?.id === nd?.id)); }); } else { setSelectedNote(null); overlay.setPosition(undefined); nvl.getSource()?.getFeatures().forEach(f => f.setStyle(createNoteStyle(f.get("noteData"), false))); } });
+    map.on("pointermove", (evt) => { const hit = map.forEachFeatureAtPixel(evt.pixel, (f) => !!f.get("noteData")); const el = map.getTargetElement(); if (el) (el as HTMLElement).style.cursor = hit ? "pointer" : ""; });
     mapInstanceRef.current = map;
     return () => { map.setTarget(undefined); mapInstanceRef.current = null; };
   }, [parcel?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Cargar ortofoto de fondo
   useEffect(() => {
     if (!mapInstanceRef.current || !orthoLayerRef.current || !bestTaskUuid || !mapping?.odmProjectId) return;
-
-    const proxyUrl = `/api/odm-tiles/${mapping.odmProjectId}/${bestTaskUuid}/orthophoto/{z}/{x}/{y}.png`;
-    fetch(`/api/odm-bounds/${mapping.odmProjectId}/${bestTaskUuid}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        const tileSource = new XYZ({ url: proxyUrl, minZoom: 0, maxZoom: data?.maxzoom || 24, tileSize: 256, crossOrigin: "anonymous" });
-        if (orthoLayerRef.current && mapInstanceRef.current) {
-          orthoLayerRef.current.setSource(tileSource);
-          orthoLayerRef.current.setVisible(true);
-          if (data?.bounds) {
-            const [minLon, minLat, maxLon, maxLat] = data.bounds;
-            const extent = transformExtent([minLon, minLat, maxLon, maxLat], "EPSG:4326", "EPSG:3857");
-            mapInstanceRef.current.getView().fit(extent, { padding: [50, 50, 50, 50], maxZoom: 19, duration: 800 });
-          }
-        }
-      })
-      .catch(() => {});
+    fetch(`/api/odm-bounds/${mapping.odmProjectId}/${bestTaskUuid}`).then(r => r.ok ? r.json() : null).then(data => {
+      const ts = new XYZ({ url: `/api/odm-tiles/${mapping.odmProjectId}/${bestTaskUuid}/orthophoto/{z}/{x}/{y}.png`, minZoom: 0, maxZoom: data?.maxzoom || 24, tileSize: 256, crossOrigin: "anonymous" });
+      if (orthoLayerRef.current && mapInstanceRef.current) { orthoLayerRef.current.setSource(ts); orthoLayerRef.current.setVisible(true); if (data?.bounds) { mapInstanceRef.current.getView().fit(transformExtent(data.bounds, "EPSG:4326", "EPSG:3857"), { padding: [50, 50, 50, 50], maxZoom: 19, duration: 800 }); } }
+    }).catch(() => {});
   }, [bestTaskUuid, mapping?.odmProjectId]);
 
-  // Actualizar pines
   useEffect(() => {
-    if (!notesLayerRef.current) return;
-    const source = notesLayerRef.current.getSource();
-    if (!source) return;
-    source.clear();
-
-    for (const note of filteredNotes) {
-      const lat = parseFloat(note.latitude);
-      const lng = parseFloat(note.longitude);
-      if (isNaN(lat) || isNaN(lng)) continue;
-      const feature = new Feature({ geometry: new Point(fromLonLat([lng, lat])), noteData: note });
-      feature.setStyle(createNoteStyle(note, false));
-      source.addFeature(feature);
-    }
-
-    if (filteredNotes.length > 0 && !bestTaskUuid && mapInstanceRef.current) {
-      const extent = source.getExtent();
-      mapInstanceRef.current.getView().fit(extent, { padding: [60, 60, 60, 60], maxZoom: 18, duration: 500 });
-    }
+    if (!notesLayerRef.current) return; const source = notesLayerRef.current.getSource(); if (!source) return; source.clear();
+    for (const note of filteredNotes) { const lat = parseFloat(note.latitude), lng = parseFloat(note.longitude); if (isNaN(lat) || isNaN(lng)) continue; const f = new Feature({ geometry: new Point(fromLonLat([lng, lat])), noteData: note }); f.setStyle(createNoteStyle(note, false)); source.addFeature(f); }
+    if (filteredNotes.length > 0 && !bestTaskUuid && mapInstanceRef.current) mapInstanceRef.current.getView().fit(source.getExtent(), { padding: [60, 60, 60, 60], maxZoom: 18, duration: 500 });
   }, [filteredNotes, createNoteStyle, bestTaskUuid]);
 
-  if (notesLoading) {
-    return (
-      <GlassCard className="p-8 text-center" hover={false}>
-        <div className="animate-pulse text-green-600">Cargando notas de campo...</div>
-      </GlassCard>
-    );
-  }
+  useEffect(() => { setTimeout(() => mapInstanceRef.current?.updateSize(), 300); }, [isFullscreen]);
+
+  if (notesLoading) return <GlassCard className="p-8 text-center" hover={false}><div className="animate-pulse text-green-600">Cargando notas...</div></GlassCard>;
+
+  const containerCls = isFullscreen ? "fixed inset-0 z-50 bg-gradient-to-br from-green-50 via-white to-emerald-50/30 overflow-y-auto p-4" : "space-y-4";
 
   return (
-    <div className="space-y-4">
-      {/* Header con stats */}
+    <div className={containerCls}>
+      {/* Photo Viewer */}
+      {photoViewerSrc && (
+        <div className="fixed inset-0 z-[70] bg-black/90 flex items-center justify-center cursor-zoom-out" onClick={() => setPhotoViewerSrc(null)}>
+          <img src={photoViewerSrc} alt="" className="max-w-[95vw] max-h-[95vh] object-contain" />
+          <button onClick={() => setPhotoViewerSrc(null)} className="absolute top-4 right-4 bg-white/20 text-white rounded-full p-2 hover:bg-white/40"><X className="h-6 w-6" /></button>
+        </div>
+      )}
+
+      {/* Detail Modal */}
+      {detailNote && (
+        <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setDetailNote(null)}>
+          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            {detailNote.photos?.length > 0 ? (
+              <div className="relative"><div className="flex overflow-x-auto snap-x gap-1 bg-gray-900 rounded-t-3xl">
+                {detailNote.photos.map((p: any, i: number) => <img key={p.id || i} src={p.photoPath} alt="" className="h-64 w-auto object-contain snap-center cursor-zoom-in flex-shrink-0" onClick={() => setPhotoViewerSrc(p.photoPath)} />)}
+              </div><span className="absolute top-2 right-2 bg-black/50 text-white text-[10px] px-2 py-0.5 rounded-full">{detailNote.photos.length} fotos</span></div>
+            ) : (
+              <div className="h-16 bg-amber-50 rounded-t-3xl flex items-center justify-center gap-2 text-amber-600"><CameraOff className="h-5 w-5" /><span className="font-medium">Sin fotos</span></div>
+            )}
+            <div className="p-5 space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="w-11 h-11 rounded-full flex items-center justify-center text-xl shadow" style={{ backgroundColor: SEVERITY_COLORS[detailNote.severity] || "#6b7280" }}>{NOTE_CATEGORIES[detailNote.category]?.emoji || "📝"}</div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base font-bold text-green-900">{NOTE_CATEGORIES[detailNote.category]?.label || detailNote.category}</h3>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-bold text-white" style={{ backgroundColor: SEVERITY_COLORS[detailNote.severity] || "#6b7280" }}>{detailNote.severity}</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${detailNote.status === "resuelta" ? "bg-green-100 text-green-700" : detailNote.status === "abierta" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"}`}>{detailNote.status}</span>
+                  </div>
+                  <p className="text-sm text-green-700 mt-1">{detailNote.description}</p>
+                  <div className="flex gap-3 mt-2 text-xs text-green-500"><span>{detailNote.reportedByName || "Usuario"}</span><span>{formatDate(detailNote.createdAt)}</span></div>
+                </div>
+              </div>
+              {/* Assign */}
+              <div className="bg-green-50/50 rounded-xl p-3">
+                <label className="text-[10px] font-semibold text-green-700 flex items-center gap-1 mb-1.5"><UserPlus className="h-3 w-3" /> Asignar a equipo</label>
+                <select value={detailNote.assignedToCollaboratorId || ""} onChange={(e) => { const v = e.target.value ? Number(e.target.value) : null; updateMut.mutate({ id: detailNote.id, assignedToCollaboratorId: v }); setDetailNote({ ...detailNote, assignedToCollaboratorId: v }); }}
+                  className="w-full text-xs bg-white border border-green-200 rounded-lg px-3 py-2 text-green-800 focus:outline-none focus:ring-2 focus:ring-green-400">
+                  <option value="">Sin asignar</option>
+                  {(collaborators || []).filter((c: any) => c.isActive).map((c: any) => <option key={c.id} value={c.id}>{c.name}{c.role ? ` (${c.role})` : ""}</option>)}
+                </select>
+              </div>
+              {/* Comments */}
+              {detailNote.resolutionNotes && (
+                <div className="bg-blue-50/50 rounded-xl p-3">
+                  <h4 className="text-[10px] font-semibold text-blue-700 flex items-center gap-1 mb-1.5"><MessageSquare className="h-3 w-3" /> Comentarios</h4>
+                  <div className="text-xs text-blue-800 whitespace-pre-wrap max-h-32 overflow-y-auto bg-white/60 rounded-lg p-2">{detailNote.resolutionNotes}</div>
+                </div>
+              )}
+              <div className="flex gap-2">
+                <input type="text" value={commentText} onChange={e => setCommentText(e.target.value)} placeholder="Agregar comentario..."
+                  onKeyDown={e => { if (e.key === "Enter" && commentText.trim()) addCommentMut.mutate({ id: detailNote.id, comment: commentText.trim() }); }}
+                  className="flex-1 text-xs bg-white border border-green-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400" />
+                <button onClick={() => { if (commentText.trim()) addCommentMut.mutate({ id: detailNote.id, comment: commentText.trim() }); }}
+                  disabled={!commentText.trim() || addCommentMut.isPending}
+                  className="bg-green-600 text-white px-3 py-2 rounded-xl text-xs font-medium hover:bg-green-700 disabled:opacity-50 flex items-center gap-1">
+                  <Send className="h-3 w-3" /> {addCommentMut.isPending ? "..." : "Enviar"}
+                </button>
+              </div>
+              <div className="flex gap-2 pt-2 border-t border-green-100">
+                <button onClick={() => goToFieldNotes(detailNote)} className="flex-1 bg-blue-50 text-blue-700 px-3 py-2 rounded-xl text-xs font-medium hover:bg-blue-100 flex items-center justify-center gap-1.5"><ExternalLink className="h-3.5 w-3.5" /> Abrir nota completa</button>
+                <button onClick={() => { flyToNote(detailNote); setDetailNote(null); }} className="flex-1 bg-green-50 text-green-700 px-3 py-2 rounded-xl text-xs font-medium hover:bg-green-100 flex items-center justify-center gap-1.5"><ZoomIn className="h-3.5 w-3.5" /> Ver en mapa</button>
+                <button onClick={() => setDetailNote(null)} className="px-3 py-2 rounded-xl text-xs text-green-500 hover:bg-green-50"><X className="h-4 w-4" /></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
       <GlassCard className="p-3 md:p-4" hover={false}>
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-green-400 to-emerald-600 shadow">
-              <ClipboardList className="h-4 w-4 text-white" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-green-900">Notas en Mapa</h3>
-              <p className="text-[10px] text-green-500">{stats.withGps} de {stats.total} con GPS · {parcel?.name || parcel?.code}</p>
-            </div>
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-green-400 to-emerald-600 shadow"><ClipboardList className="h-4 w-4 text-white" /></div>
+            <div><h3 className="text-sm font-semibold text-green-900">Notas en Mapa</h3><p className="text-[10px] text-green-500">{stats.withGps} de {stats.total} con GPS</p></div>
           </div>
-          <div className="flex flex-wrap gap-2 ml-auto">
-            <span className="text-[10px] bg-green-50 text-green-700 px-2 py-1 rounded-full flex items-center gap-1">
-              <Camera className="h-3 w-3" /> {stats.withPhoto} con foto
-            </span>
-            <span className="text-[10px] bg-amber-50 text-amber-700 px-2 py-1 rounded-full flex items-center gap-1">
-              <CameraOff className="h-3 w-3" /> {stats.withoutPhoto} sin foto
-            </span>
-            {stats.critical > 0 && (
-              <span className="text-[10px] bg-red-50 text-red-700 px-2 py-1 rounded-full flex items-center gap-1">
-                <AlertTriangle className="h-3 w-3" /> {stats.critical} urgentes
-              </span>
-            )}
+          {isFullscreen && (
+            <select value={parcel?.id || ""} onChange={e => onSelectParcel(Number(e.target.value))}
+              className="text-xs bg-white/60 border border-green-200/50 rounded-xl px-3 py-1.5 text-green-700 focus:outline-none focus:ring-1 focus:ring-green-400 max-w-[200px]">
+              {allParcels.map((p: any) => <option key={p.id} value={p.id}>{p.name || p.code}</option>)}
+            </select>
+          )}
+          <div className="flex flex-wrap gap-2 ml-auto items-center">
+            <span className="text-[10px] bg-green-50 text-green-700 px-2 py-1 rounded-full flex items-center gap-1"><Camera className="h-3 w-3" /> {stats.withPhoto}</span>
+            <span className="text-[10px] bg-amber-50 text-amber-700 px-2 py-1 rounded-full flex items-center gap-1"><CameraOff className="h-3 w-3" /> {stats.withoutPhoto}</span>
+            {stats.critical > 0 && <span className="text-[10px] bg-red-50 text-red-700 px-2 py-1 rounded-full flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> {stats.critical}</span>}
+            <button onClick={() => setIsFullscreen(!isFullscreen)} className="bg-green-600 text-white p-2 rounded-xl hover:bg-green-700 transition-all shadow-sm" title={isFullscreen ? "Salir" : "Pantalla completa"}>
+              {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </button>
           </div>
         </div>
       </GlassCard>
 
-      {/* Filtros */}
-      <div className="flex flex-wrap gap-2">
-        <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}
-          className="text-xs bg-white/60 border border-green-200/50 rounded-xl px-3 py-1.5 text-green-700 focus:outline-none focus:ring-1 focus:ring-green-400">
-          <option value="all">Todas las categorías</option>
-          {Object.entries(NOTE_CATEGORIES).map(([key, { label, emoji }]) => (
-            <option key={key} value={key}>{emoji} {label}</option>
-          ))}
+      {/* Filters */}
+      <div className="flex flex-wrap gap-2 mt-4">
+        <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} className="text-xs bg-white/60 border border-green-200/50 rounded-xl px-3 py-1.5 text-green-700 focus:outline-none focus:ring-1 focus:ring-green-400">
+          <option value="all">Todas categorías</option>{Object.entries(NOTE_CATEGORIES).map(([k, { label, emoji }]) => <option key={k} value={k}>{emoji} {label}</option>)}
         </select>
-        <select value={filterSeverity} onChange={(e) => setFilterSeverity(e.target.value)}
-          className="text-xs bg-white/60 border border-green-200/50 rounded-xl px-3 py-1.5 text-green-700 focus:outline-none focus:ring-1 focus:ring-green-400">
-          <option value="all">Todas las prioridades</option>
-          <option value="baja">🔵 Baja</option>
-          <option value="media">🟡 Media</option>
-          <option value="alta">🟠 Alta</option>
-          <option value="critica">🔴 Crítica</option>
+        <select value={filterSeverity} onChange={e => setFilterSeverity(e.target.value)} className="text-xs bg-white/60 border border-green-200/50 rounded-xl px-3 py-1.5 text-green-700 focus:outline-none focus:ring-1 focus:ring-green-400">
+          <option value="all">Todas prioridades</option><option value="baja">🔵 Baja</option><option value="media">🟡 Media</option><option value="alta">🟠 Alta</option><option value="critica">🔴 Crítica</option>
         </select>
-        <button onClick={() => setFilterNoPhoto(!filterNoPhoto)}
-          className={`text-xs px-3 py-1.5 rounded-xl font-medium transition-all flex items-center gap-1 ${
-            filterNoPhoto ? "bg-amber-500 text-white shadow-sm" : "bg-white/60 text-green-700 border border-green-200/50 hover:bg-amber-50"
-          }`}>
-          <CameraOff className="h-3 w-3" /> Solo sin foto
-        </button>
+        <button onClick={() => setFilterNoPhoto(!filterNoPhoto)} className={`text-xs px-3 py-1.5 rounded-xl font-medium transition-all flex items-center gap-1 ${filterNoPhoto ? "bg-amber-500 text-white shadow-sm" : "bg-white/60 text-green-700 border border-green-200/50 hover:bg-amber-50"}`}><CameraOff className="h-3 w-3" /> Solo sin foto</button>
       </div>
 
-      {/* Mapa + Lista */}
-      <div className="flex flex-col lg:flex-row gap-4">
-        {/* Mapa */}
+      {/* Map + List */}
+      <div className={`flex flex-col lg:flex-row gap-4 mt-4 ${isFullscreen ? "flex-1 min-h-0" : ""}`}>
         <GlassCard className="overflow-hidden flex-1 lg:min-w-0" hover={false}>
           <div className="relative">
-            <div ref={mapRef} className="w-full h-[350px] sm:h-[450px] md:h-[500px] lg:h-[600px]" style={{ background: "#f0f9f0" }} />
-            {/* Leyenda */}
-            <div className="absolute bottom-3 right-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-lg border border-green-200/50 p-2.5 z-20 text-[10px] space-y-1.5 max-w-[160px]">
+            <div ref={mapRef} className={`w-full ${isFullscreen ? "h-[calc(100vh-220px)]" : "h-[350px] sm:h-[450px] md:h-[500px] lg:h-[600px]"}`} style={{ background: "#f0f9f0" }} />
+            <div className="absolute bottom-3 right-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-lg border border-green-200/50 p-2.5 z-20 text-[10px] space-y-1 max-w-[150px]">
               <div className="font-semibold text-green-800 text-xs mb-1">Prioridad</div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-full bg-blue-500 border-2 border-white shadow-sm" /> Baja
-                <span className="w-3 h-3 rounded-full bg-amber-500 border-2 border-white shadow-sm ml-2" /> Media
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-full bg-orange-500 border-2 border-white shadow-sm" /> Alta
-                <span className="w-3 h-3 rounded-full bg-red-500 border-2 border-white shadow-sm ml-2" /> Crítica
-              </div>
-              <div className="border-t border-green-200/30 pt-1 mt-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-full border-2 border-black" style={{ borderStyle: "dashed" }} /> Sin foto
-                </div>
-              </div>
+              <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-blue-500 border-2 border-white shadow-sm" /> Baja <span className="w-3 h-3 rounded-full bg-amber-500 border-2 border-white shadow-sm ml-1" /> Media</div>
+              <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-orange-500 border-2 border-white shadow-sm" /> Alta <span className="w-3 h-3 rounded-full bg-red-500 border-2 border-white shadow-sm ml-1" /> Crítica</div>
+              <div className="border-t border-green-200/30 pt-1 mt-1"><div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full border-2 border-black" style={{ borderStyle: "dashed" }} /> Sin foto</div></div>
             </div>
             {filteredNotes.length === 0 && !notesLoading && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/5 z-10">
-                <div className="bg-white/90 backdrop-blur-sm px-6 py-4 rounded-2xl shadow-lg text-center">
-                  <ClipboardList className="h-8 w-8 mx-auto text-green-300 mb-2" />
-                  <p className="text-sm text-green-700 font-medium">
-                    {notes.length === 0 ? "Sin notas en esta parcela" : "Sin notas que coincidan con los filtros"}
-                  </p>
-                  <p className="text-xs text-green-500 mt-1">
-                    {notes.length === 0 ? "Crea notas desde la app móvil con GPS activo" : "Ajusta los filtros"}
-                  </p>
-                </div>
-              </div>
+              <div className="absolute inset-0 flex items-center justify-center bg-black/5 z-10"><div className="bg-white/90 backdrop-blur-sm px-6 py-4 rounded-2xl shadow-lg text-center">
+                <ClipboardList className="h-8 w-8 mx-auto text-green-300 mb-2" /><p className="text-sm text-green-700 font-medium">{notes.length === 0 ? "Sin notas en esta parcela" : "Sin notas que coincidan"}</p>
+              </div></div>
             )}
           </div>
         </GlassCard>
 
-        {/* Lista de notas (lado derecho) */}
-        <div className="lg:w-[320px] xl:w-[360px] flex-shrink-0">
+        <div className={`${isFullscreen ? "lg:w-[380px] xl:w-[420px]" : "lg:w-[320px] xl:w-[360px]"} flex-shrink-0`}>
           <GlassCard className="p-0 overflow-hidden" hover={false}>
             <div className="p-3 border-b border-green-200/30 bg-white/30">
-              <h4 className="text-sm font-semibold text-green-800 flex items-center gap-2">
-                <ClipboardList className="h-4 w-4" />
-                Notas ({filteredNotes.length})
-              </h4>
-              <p className="text-[10px] text-green-500 mt-0.5">Toca una nota para ir a su ubicación</p>
+              <h4 className="text-sm font-semibold text-green-800 flex items-center gap-2"><ClipboardList className="h-4 w-4" /> Notas ({filteredNotes.length})</h4>
+              <p className="text-[10px] text-green-500 mt-0.5">Click = mapa · Doble click = detalle</p>
             </div>
-            <div className="max-h-[350px] sm:max-h-[400px] lg:max-h-[540px] overflow-y-auto divide-y divide-green-100/50">
-              {filteredNotes.length === 0 && (
-                <div className="p-6 text-center text-green-400 text-xs">Sin notas</div>
-              )}
+            <div className={`${isFullscreen ? "max-h-[calc(100vh-300px)]" : "max-h-[350px] sm:max-h-[400px] lg:max-h-[540px]"} overflow-y-auto divide-y divide-green-100/50`}>
+              {filteredNotes.length === 0 && <div className="p-6 text-center text-green-400 text-xs">Sin notas</div>}
               {filteredNotes.map((note: any) => {
                 const cat = NOTE_CATEGORIES[note.category] || NOTE_CATEGORIES.otro;
                 const hasPhoto = note.photos?.length > 0;
                 const isActive = selectedNote?.id === note.id;
+                const assignedCollab = collaborators?.find((c: any) => c.id === note.assignedToCollaboratorId);
                 return (
-                  <div
-                    key={note.id}
-                    onClick={() => flyToNote(note)}
-                    onMouseEnter={() => setHoveredNoteId(note.id)}
-                    onMouseLeave={() => setHoveredNoteId(null)}
-                    className={`flex items-start gap-2.5 p-3 cursor-pointer transition-all ${
-                      isActive ? "bg-green-50 border-l-4 border-l-green-500" :
-                      hoveredNoteId === note.id ? "bg-green-25 bg-green-50/50" : "hover:bg-white/40"
-                    }`}
-                  >
-                    {/* Icono categoría + severidad */}
+                  <div key={note.id} onClick={() => flyToNote(note)} onDoubleClick={() => setDetailNote(note)} onMouseEnter={() => setHoveredNoteId(note.id)} onMouseLeave={() => setHoveredNoteId(null)}
+                    className={`flex items-start gap-2.5 p-3 cursor-pointer transition-all ${isActive ? "bg-green-50 border-l-4 border-l-green-500" : hoveredNoteId === note.id ? "bg-green-50/50" : "hover:bg-white/40"}`}>
                     <div className="flex-shrink-0 relative">
-                      <div
-                        className="w-9 h-9 rounded-full flex items-center justify-center text-sm shadow-sm"
-                        style={{ backgroundColor: SEVERITY_COLORS[note.severity] || "#6b7280" }}
-                      >
-                        {cat.emoji}
-                      </div>
-                      {!hasPhoto && (
-                        <div className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-amber-500 rounded-full flex items-center justify-center">
-                          <CameraOff className="h-2.5 w-2.5 text-white" />
-                        </div>
-                      )}
+                      <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm shadow-sm" style={{ backgroundColor: SEVERITY_COLORS[note.severity] || "#6b7280" }}>{cat.emoji}</div>
+                      {!hasPhoto && <div className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-amber-500 rounded-full flex items-center justify-center"><CameraOff className="h-2.5 w-2.5 text-white" /></div>}
                     </div>
-                    {/* Info */}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-xs font-semibold text-green-900 truncate">{cat.label}</span>
-                        <span
-                          className="text-[9px] px-1 py-0.5 rounded-full font-bold text-white flex-shrink-0"
-                          style={{ backgroundColor: SEVERITY_COLORS[note.severity] || "#6b7280" }}
-                        >
-                          {note.severity}
-                        </span>
-                        <span className={`text-[9px] px-1 py-0.5 rounded-full flex-shrink-0 ${
-                          note.status === "resuelta" ? "bg-green-100 text-green-700" :
-                          note.status === "abierta" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"
-                        }`}>
-                          {note.status}
-                        </span>
+                        <span className="text-[9px] px-1 py-0.5 rounded-full font-bold text-white flex-shrink-0" style={{ backgroundColor: SEVERITY_COLORS[note.severity] || "#6b7280" }}>{note.severity}</span>
+                        <span className={`text-[9px] px-1 py-0.5 rounded-full flex-shrink-0 ${note.status === "resuelta" ? "bg-green-100 text-green-700" : note.status === "abierta" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"}`}>{note.status}</span>
                       </div>
                       <p className="text-[10px] text-green-600 mt-0.5 line-clamp-2">{note.description}</p>
-                      <div className="flex items-center gap-2 mt-1 text-[9px] text-green-400">
-                        <span>{note.reportedByName || "Usuario"}</span>
-                        <span>·</span>
-                        <span>{formatDate(note.createdAt)}</span>
-                        {hasPhoto && (
-                          <>
-                            <span>·</span>
-                            <span className="flex items-center gap-0.5 text-green-500">
-                              <Camera className="h-2.5 w-2.5" /> {note.photos.length}
-                            </span>
-                          </>
-                        )}
+                      <div className="flex items-center gap-2 mt-1 text-[9px] text-green-400 flex-wrap">
+                        <span>{note.reportedByName || "Usuario"}</span><span>·</span><span>{formatDate(note.createdAt)}</span>
+                        {hasPhoto && <><span>·</span><span className="flex items-center gap-0.5 text-green-500"><Camera className="h-2.5 w-2.5" /> {note.photos.length}</span></>}
+                        {assignedCollab && <><span>·</span><span className="flex items-center gap-0.5 text-purple-500"><Users2 className="h-2.5 w-2.5" /> {assignedCollab.name}</span></>}
+                      </div>
+                      <div className="flex gap-1 mt-1.5">
+                        <button onClick={e => { e.stopPropagation(); setDetailNote(note); }} className="text-[9px] bg-green-50 text-green-600 px-2 py-0.5 rounded-lg hover:bg-green-100 flex items-center gap-0.5"><Eye className="h-2.5 w-2.5" /> Detalle</button>
+                        <button onClick={e => { e.stopPropagation(); goToFieldNotes(note); }} className="text-[9px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg hover:bg-blue-100 flex items-center gap-0.5"><ExternalLink className="h-2.5 w-2.5" /> Abrir</button>
                       </div>
                     </div>
-                    {/* Thumbnail */}
-                    {hasPhoto && (
-                      <div className="flex-shrink-0 w-12 h-12 rounded-lg overflow-hidden border border-green-200/50">
-                        <img
-                          src={note.photos[0].photoPath}
-                          alt=""
-                          className="w-full h-full object-cover"
-                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                        />
-                      </div>
-                    )}
+                    {hasPhoto && <div className="flex-shrink-0 w-12 h-12 rounded-lg overflow-hidden border border-green-200/50"><img src={note.photos[0].photoPath} alt="" className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} /></div>}
                   </div>
                 );
               })}
@@ -2311,58 +2144,32 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings }: { parcel: any; mappi
         </div>
       </div>
 
-      {/* Popup overlay */}
-      <div ref={popupRef} className="absolute z-50" style={{ display: selectedNote ? undefined : "none" }}>
+      {/* Popup */}
+      <div ref={popupRef} className="absolute z-[40]" style={{ display: selectedNote ? undefined : "none" }}>
         {selectedNote && (
-          <div className="bg-white rounded-2xl shadow-2xl border border-green-200/60 w-[280px] sm:w-[320px] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            {selectedNote.photos?.length > 0 && (
-              <div className="h-36 overflow-hidden">
-                <img
-                  src={selectedNote.photos[0].photoPath}
-                  alt="Foto"
-                  className="w-full h-full object-cover"
-                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                />
+          <div className="bg-white rounded-2xl shadow-2xl border border-green-200/60 w-[280px] sm:w-[320px] overflow-hidden">
+            {selectedNote.photos?.length > 0 ? (
+              <div className="h-40 overflow-hidden bg-gray-900 flex items-center justify-center cursor-zoom-in" onClick={() => setPhotoViewerSrc(selectedNote.photos[0].photoPath)}>
+                <img src={selectedNote.photos[0].photoPath} alt="" className="max-w-full max-h-full object-contain" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
               </div>
-            )}
-            {(!selectedNote.photos || selectedNote.photos.length === 0) && (
-              <div className="h-14 bg-amber-50 flex items-center justify-center gap-2 text-amber-600">
-                <CameraOff className="h-5 w-5" />
-                <span className="text-sm font-medium">Sin foto</span>
-              </div>
+            ) : (
+              <div className="h-12 bg-amber-50 flex items-center justify-center gap-2 text-amber-600"><CameraOff className="h-4 w-4" /><span className="text-xs font-medium">Sin foto</span></div>
             )}
             <div className="p-3">
               <div className="flex items-start gap-2 mb-2">
                 <span className="text-lg">{NOTE_CATEGORIES[selectedNote.category]?.emoji || "📝"}</span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-semibold text-green-900">
-                      {NOTE_CATEGORIES[selectedNote.category]?.label || selectedNote.category}
-                    </span>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold text-white"
-                      style={{ backgroundColor: SEVERITY_COLORS[selectedNote.severity] || "#6b7280" }}>
-                      {selectedNote.severity}
-                    </span>
+                    <span className="text-xs font-semibold text-green-900">{NOTE_CATEGORIES[selectedNote.category]?.label || selectedNote.category}</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold text-white" style={{ backgroundColor: SEVERITY_COLORS[selectedNote.severity] || "#6b7280" }}>{selectedNote.severity}</span>
                   </div>
-                  <p className="text-[11px] text-green-700 mt-0.5 line-clamp-3">{selectedNote.description}</p>
+                  <p className="text-[11px] text-green-700 mt-0.5 line-clamp-2">{selectedNote.description}</p>
                 </div>
               </div>
-              <div className="flex items-center justify-between text-[10px] text-green-500 border-t border-green-100 pt-1.5">
-                <span>{selectedNote.reportedByName || "Usuario"}</span>
-                <span>{formatDate(selectedNote.createdAt)}</span>
-              </div>
-              <div className="flex items-center justify-between text-[10px] mt-1">
-                <span className={`px-1.5 py-0.5 rounded-full ${
-                  selectedNote.status === "resuelta" ? "bg-green-100 text-green-700" :
-                  selectedNote.status === "abierta" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"
-                }`}>
-                  {selectedNote.status}
-                </span>
-                <button onClick={() => { setSelectedNote(null); overlayRef.current?.setPosition(undefined);
-                  notesLayerRef.current?.getSource()?.getFeatures().forEach(f => f.setStyle(createNoteStyle(f.get("noteData"), false)));
-                }} className="text-green-400 hover:text-green-600 p-0.5">
-                  <X className="h-3.5 w-3.5" />
-                </button>
+              <div className="flex gap-1.5 mt-2">
+                <button onClick={() => setDetailNote(selectedNote)} className="flex-1 text-[10px] bg-green-50 text-green-700 px-2 py-1.5 rounded-lg hover:bg-green-100 flex items-center justify-center gap-1 font-medium"><Eye className="h-3 w-3" /> Detalle</button>
+                <button onClick={() => goToFieldNotes(selectedNote)} className="flex-1 text-[10px] bg-blue-50 text-blue-700 px-2 py-1.5 rounded-lg hover:bg-blue-100 flex items-center justify-center gap-1 font-medium"><ExternalLink className="h-3 w-3" /> Abrir nota</button>
+                <button onClick={() => { setSelectedNote(null); overlayRef.current?.setPosition(undefined); notesLayerRef.current?.getSource()?.getFeatures().forEach(f => f.setStyle(createNoteStyle(f.get("noteData"), false))); }} className="text-green-400 hover:text-green-600 p-1"><X className="h-3.5 w-3.5" /></button>
               </div>
             </div>
           </div>
@@ -2371,3 +2178,4 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings }: { parcel: any; mappi
     </div>
   );
 }
+

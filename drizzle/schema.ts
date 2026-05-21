@@ -552,6 +552,7 @@ export const fieldNotes = mysqlTable("fieldNotes", {
   // GPS de resolucion
   resolvedLatitude: decimal("resolvedLatitude", { precision: 10, scale: 7 }),
   resolvedLongitude: decimal("resolvedLongitude", { precision: 10, scale: 7 }),
+  assignedToCollaboratorId: int("assignedToCollaboratorId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
