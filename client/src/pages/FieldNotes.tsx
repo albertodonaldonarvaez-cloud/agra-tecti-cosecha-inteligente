@@ -156,6 +156,21 @@ function FieldNotesContent() {
     return (allParcels as any[]).filter((p: any) => p.polygon && p.polygon.length > 0);
   }, [allParcels]);
 
+  // Auto-abrir nota desde URL (?noteId=123)
+  useEffect(() => {
+    if (!notes || notes.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const noteIdParam = params.get("noteId");
+    if (noteIdParam) {
+      const found = notes.find((n: any) => n.id === Number(noteIdParam));
+      if (found) {
+        setDetailNote(found);
+        // Limpiar URL para no re-abrir al navegar
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    }
+  }, [notes]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Mutations
   const createNote = trpc.fieldNotes.create.useMutation({
     onSuccess: (data) => {
