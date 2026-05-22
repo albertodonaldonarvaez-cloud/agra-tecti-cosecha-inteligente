@@ -296,7 +296,7 @@ function ParcelAnalysisContent() {
               <FieldNotesMapTab key={`notes-${selectedParcel?.id}`} parcel={selectedParcel} mapping={selectedMapping} odmMappings={odmMappings || []} allParcels={parcels} onSelectParcel={(id: number) => setSelectedParcelId(id)} />
             )}
             {activeTab === "satellite" && (
-              <SatelliteTab key={`satellite-${selectedParcel?.id}`} parcel={selectedParcel} />
+              <SatelliteTab key={`satellite-${selectedParcel?.id}`} parcel={selectedParcel} mapping={selectedMapping} />
             )}
           </>
         )}
@@ -2476,7 +2476,7 @@ function HistoricalMapThumb({ parcelId, indexType, date, dateLabel }: { parcelId
     </div>
   );
 }
-function SatelliteTab({ parcel }: { parcel: any }) {
+function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
   const [showLegend, setShowLegend] = useState(true);
   const [timelineIndex, setTimelineIndex] = useState<IdxKey>("NDVI");
 
@@ -2502,10 +2502,49 @@ function SatelliteTab({ parcel }: { parcel: any }) {
     { parcelId: parcel?.id, indexType: "NDMI" },
     { enabled: !!parcel?.id && hasPolygon, staleTime: 10 * 60 * 1000, retry: 1 }
   );
-  const { data: trueColorData } = trpc.copernicus.getTrueColor.useQuery(
-    { parcelId: parcel?.id },
-    { enabled: !!parcel?.id && hasPolygon, staleTime: 10 * 60 * 1000, retry: 1 }
+
+  // Obtener tareas del drone (WebODM) para la ortofoto
+  const { data: odmTasks } = trpc.webodm.getProjectTasks.useQuery(
+    { projectId: mapping?.odmProjectId || 0 },
+    { enabled: !!mapping?.odmProjectId, staleTime: 5 * 60 * 1000 }
   );
+
+  // Ultimo vuelo completado y su ortofoto
+  const droneInfo = useMemo(() => {
+    if (!odmTasks || !mapping?.odmProjectId) return null;
+    const completed = odmTasks.filter((t: any) => t.status === 40);
+    if (completed.length === 0) return null;
+    const sorted = [...completed].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const task = sorted[0];
+    const taskUuid = task.uuid || String(task.id);
+    // Calcular tile central del poligono a zoom 17 para thumbnail
+    let centerLat = 0, centerLng = 0;
+    try {
+      const poly = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
+      const coords = Array.isArray(poly) ? poly : poly.coordinates?.[0];
+      if (coords?.length) {
+        for (const c of coords) {
+          const lat = c.lat || c.latitude || c[1] || 0;
+          const lng = c.lng || c.longitude || c[0] || 0;
+          centerLat += lat; centerLng += lng;
+        }
+        centerLat /= coords.length; centerLng /= coords.length;
+      }
+    } catch {}
+    const zoom = 17;
+    const n = Math.pow(2, zoom);
+    const tileX = Math.floor(((centerLng + 180) / 360) * n);
+    const tileY = Math.floor((1 - Math.log(Math.tan(centerLat * Math.PI / 180) + 1 / Math.cos(centerLat * Math.PI / 180)) / Math.PI) / 2 * n);
+    // Generar grid de 3x3 tiles alrededor del centro para un thumbnail mas amplio
+    const tiles: string[] = [];
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        tiles.push(`/api/odm-tiles/${mapping.odmProjectId}/${taskUuid}/orthophoto/${zoom}/${tileX + dx}/${tileY + dy}.png`);
+      }
+    }
+    const flightDate = task.created_at ? new Date(task.created_at).toLocaleDateString("es-MX", { day: "2-digit", month: "short", year: "numeric" }) : "";
+    return { taskUuid, tiles, tileX, tileY, zoom, flightDate, taskName: task.name || "Vuelo drone" };
+  }, [odmTasks, mapping, parcel]);
 
   // Merge data para chart combinado
   const combinedChart = useMemo(() => {
@@ -2591,25 +2630,33 @@ function SatelliteTab({ parcel }: { parcel: any }) {
         </div>
       </GlassCard>
 
-      {/* FILA 1: 4 mapas (True Color + 3 indices) */}
+      {/* FILA 1: 4 mapas (Ortofoto Drone + 3 indices) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <GlassCard className="p-3" hover={false}>
           <div className="flex items-center gap-2 mb-2">
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-sky-400 to-blue-500 shadow-sm">
               <Camera className="w-3.5 h-3.5 text-white" />
             </div>
-            <div>
-              <h4 className="text-xs font-bold text-gray-800">True Color</h4>
-              <p className="text-[9px] text-gray-400">RGB Natural</p>
+            <div className="flex-1 min-w-0">
+              <h4 className="text-xs font-bold text-gray-800">Ortofoto Drone</h4>
+              <p className="text-[9px] text-gray-400 truncate">RGB · {droneInfo?.flightDate || "Sin vuelo"}</p>
             </div>
           </div>
-          {trueColorData?.image ? (
-            <div className="rounded-xl overflow-hidden border border-gray-200/50 shadow-sm">
-              <img src={trueColorData.image} alt="True Color" className="w-full h-auto" />
+          {droneInfo ? (
+            <div className="relative rounded-xl overflow-hidden border border-gray-200/50 shadow-sm">
+              <div className="grid grid-cols-3 w-full" style={{ aspectRatio: "1" }}>
+                {droneInfo.tiles.map((url: string, i: number) => (
+                  <img key={i} src={url} alt="" className="w-full h-full object-cover" crossOrigin="anonymous" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                ))}
+              </div>
+              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-1.5">
+                <p className="text-[9px] text-white/90">Ortofoto de Drone · {droneInfo.flightDate}</p>
+              </div>
             </div>
           ) : (
-            <div className="flex items-center justify-center bg-gray-50 rounded-xl min-h-[140px]">
-              <Loader2 className="w-5 h-5 animate-spin text-gray-300" />
+            <div className="flex flex-col items-center justify-center bg-gray-50 rounded-xl min-h-[140px] p-3">
+              <CameraOff className="w-5 h-5 text-gray-300 mb-1" />
+              <p className="text-[9px] text-gray-400 text-center">Sin vuelo de drone disponible para esta parcela</p>
             </div>
           )}
         </GlassCard>
@@ -2738,9 +2785,9 @@ function SatelliteTab({ parcel }: { parcel: any }) {
       <div className="flex items-start gap-2 p-3 bg-indigo-50/50 rounded-xl border border-indigo-100/50">
         <Satellite className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" />
         <div className="text-[11px] text-indigo-700 space-y-0.5">
-          <p><strong>Fuente:</strong> Sentinel-2 L2A via Copernicus Data Space Ecosystem</p>
+          <p><strong>Fuente:</strong> Sentinel-2 L2A via Copernicus CDSE + Ortofoto de Drone (WebODM)</p>
           <p><strong>Indices:</strong> NDVI (Vigor, 10m) · NDRE (Nitrogeno/Red Edge, 20m) · NDMI (Humedad/SWIR, 20m)</p>
-          <p><strong>Comparacion:</strong> Vista simultanea de los 3 indices + evolucion temporal cada 15 dias · &lt;30% nubes</p>
+          <p><strong>Ortofoto:</strong> Imagen RGB del drone para visualizacion de referencia · Datos desde primera cosecha</p>
         </div>
       </div>
     </div>
