@@ -2509,16 +2509,18 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
     { enabled: !!mapping?.odmProjectId, staleTime: 5 * 60 * 1000 }
   );
 
-  // Ultimo vuelo completado y su ortofoto
+  // Primera ortofoto completada y calculo de tiles que cubran toda la parcela
   const droneInfo = useMemo(() => {
     if (!odmTasks || !mapping?.odmProjectId) return null;
     const completed = odmTasks.filter((t: any) => t.status === 40);
     if (completed.length === 0) return null;
-    const sorted = [...completed].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    // Usar la PRIMERA ortofoto (mas antigua, mejor calidad visual inicial)
+    const sorted = [...completed].sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     const task = sorted[0];
     const taskUuid = task.uuid || String(task.id);
-    // Calcular tile central del poligono a zoom 17 para thumbnail
-    let centerLat = 0, centerLng = 0;
+
+    // Calcular bounding box del poligono
+    let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
     try {
       const poly = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
       const coords = Array.isArray(poly) ? poly : poly.coordinates?.[0];
@@ -2526,24 +2528,58 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
         for (const c of coords) {
           const lat = c.lat || c.latitude || c[1] || 0;
           const lng = c.lng || c.longitude || c[0] || 0;
-          centerLat += lat; centerLng += lng;
+          if (lat < minLat) minLat = lat;
+          if (lat > maxLat) maxLat = lat;
+          if (lng < minLng) minLng = lng;
+          if (lng > maxLng) maxLng = lng;
         }
-        centerLat /= coords.length; centerLng /= coords.length;
       }
     } catch {}
-    const zoom = 17;
+
+    if (!isFinite(minLat)) return null;
+
+    const centerLat = (minLat + maxLat) / 2;
+    const centerLng = (minLng + maxLng) / 2;
+    const dLat = maxLat - minLat;
+    const dLng = maxLng - minLng;
+
+    // Calcular zoom optimo: que la parcela quepa en ~4 tiles de ancho
+    // Un tile a zoom z cubre 360/2^z grados de longitud
+    const targetTilesAcross = 4;
+    const maxSpan = Math.max(dLng, dLat * Math.cos(centerLat * Math.PI / 180));
+    let zoom = 18;
+    for (let z = 20; z >= 10; z--) {
+      const tileDeg = 360 / Math.pow(2, z);
+      if (maxSpan / tileDeg <= targetTilesAcross) { zoom = z; break; }
+    }
+
     const n = Math.pow(2, zoom);
-    const tileX = Math.floor(((centerLng + 180) / 360) * n);
-    const tileY = Math.floor((1 - Math.log(Math.tan(centerLat * Math.PI / 180) + 1 / Math.cos(centerLat * Math.PI / 180)) / Math.PI) / 2 * n);
-    // Generar grid de 3x3 tiles alrededor del centro para un thumbnail mas amplio
+    const centerTileX = Math.floor(((centerLng + 180) / 360) * n);
+    const centerTileY = Math.floor((1 - Math.log(Math.tan(centerLat * Math.PI / 180) + 1 / Math.cos(centerLat * Math.PI / 180)) / Math.PI) / 2 * n);
+
+    // Calcular cuantos tiles necesitamos para cubrir el bbox
+    const minTileX = Math.floor(((minLng + 180) / 360) * n);
+    const maxTileX = Math.floor(((maxLng + 180) / 360) * n);
+    const minTileY = Math.floor((1 - Math.log(Math.tan(maxLat * Math.PI / 180) + 1 / Math.cos(maxLat * Math.PI / 180)) / Math.PI) / 2 * n);
+    const maxTileY = Math.floor((1 - Math.log(Math.tan(minLat * Math.PI / 180) + 1 / Math.cos(minLat * Math.PI / 180)) / Math.PI) / 2 * n);
+
+    // Expandir 1 tile en cada direccion para margen
+    const startX = minTileX - 1;
+    const endX = maxTileX + 1;
+    const startY = minTileY - 1;
+    const endY = maxTileY + 1;
+    const cols = endX - startX + 1;
+    const rows = endY - startY + 1;
+
     const tiles: string[] = [];
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        tiles.push(`/api/odm-tiles/${mapping.odmProjectId}/${taskUuid}/orthophoto/${zoom}/${tileX + dx}/${tileY + dy}.png`);
+    for (let ty = startY; ty <= endY; ty++) {
+      for (let tx = startX; tx <= endX; tx++) {
+        tiles.push(`/api/odm-tiles/${mapping.odmProjectId}/${taskUuid}/orthophoto/${zoom}/${tx}/${ty}.png`);
       }
     }
+
     const flightDate = task.created_at ? new Date(task.created_at).toLocaleDateString("es-MX", { day: "2-digit", month: "short", year: "numeric" }) : "";
-    return { taskUuid, tiles, tileX, tileY, zoom, flightDate, taskName: task.name || "Vuelo drone" };
+    return { taskUuid, tiles, cols, rows, zoom, flightDate, taskName: task.name || "Vuelo drone" };
   }, [odmTasks, mapping, parcel]);
 
   // Merge data para chart combinado
@@ -2644,9 +2680,9 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
           </div>
           {droneInfo ? (
             <div className="relative rounded-xl overflow-hidden border border-gray-200/50 shadow-sm">
-              <div className="grid grid-cols-3 w-full" style={{ aspectRatio: "1" }}>
+              <div className="w-full" style={{ display: "grid", gridTemplateColumns: `repeat(${droneInfo.cols}, 1fr)`, aspectRatio: `${droneInfo.cols}/${droneInfo.rows}` }}>
                 {droneInfo.tiles.map((url: string, i: number) => (
-                  <img key={i} src={url} alt="" className="w-full h-full object-cover" crossOrigin="anonymous" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                  <img key={i} src={url} alt="" className="w-full h-full object-cover block" crossOrigin="anonymous" onError={(e) => { (e.target as HTMLImageElement).style.opacity = "0"; }} />
                 ))}
               </div>
               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-1.5">
