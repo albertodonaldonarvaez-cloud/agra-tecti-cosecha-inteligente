@@ -2557,9 +2557,12 @@ function AIAnalysisCard({ parcelId, parcelName, ndviStats, ndreStats, ndmiStats 
 
       {error && !analysis && (
         <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-700">
-          {(error as any)?.message?.includes("API Key") || (error as any)?.message?.includes("configurado")
-            ? "Configura la API Key de IA en Ajustes para activar el análisis inteligente"
-            : "No se pudo generar el análisis. Intenta más tarde."}
+          {(() => {
+            const msg = (error as any)?.message || (error as any)?.data?.message || String(error) || "";
+            if (msg.includes("API Key") || msg.includes("configurado") || msg.includes("BAD_REQUEST"))
+              return "⚙️ Configura la API Key de IA en la sección de Ajustes para activar el análisis inteligente.";
+            return `⚠️ ${msg || "No se pudo generar el análisis. Intenta más tarde."}`;
+          })()}
         </div>
       )}
 

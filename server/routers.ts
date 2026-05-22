@@ -7,7 +7,7 @@ import * as db from "./db";
 import * as dbExt from "./db_extended";
 import * as webodm from "./webodmService";
 import { getDb } from "./db";
-import { users, boxes, harvesters, parcels, parcelDetails, parcelAiAnalysis, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos, telegramLinkCodes, collaborators, collaboratorLinkCodes, fieldActivityAssignments } from "../drizzle/schema";
+import { users, boxes, harvesters, parcels, parcelDetails, parcelAiAnalysis, crops, cropVarieties, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos, telegramLinkCodes, collaborators, collaboratorLinkCodes, fieldActivityAssignments } from "../drizzle/schema";
 import { eq, desc, and, gte, lte, inArray, sql } from "drizzle-orm";
 
 export const appRouter = router({
@@ -368,7 +368,34 @@ export const appRouter = router({
             data.map((d: any) => `  ${d.date}: media=${d.mean?.toFixed(3)}, min=${d.min?.toFixed(3)}, max=${d.max?.toFixed(3)}`).join("\n");
         };
 
-        const prompt = `Eres un ingeniero agronomo experto en agricultura de precision y teledeteccion. Analiza los siguientes indices espectrales de la parcela "${input.parcelName}" y genera un resumen ejecutivo de 6-7 lineas maximo.
+        // Buscar info del cultivo y variedad de la parcela
+        let cropInfo = "";
+        try {
+          const [details] = await drizzle.select().from(parcelDetails).where(eq(parcelDetails.parcelId, input.parcelId));
+          if (details) {
+            let cropName = "", varietyName = "";
+            if (details.cropId) {
+              const [crop] = await drizzle.select({ name: crops.name }).from(crops).where(eq(crops.id, details.cropId));
+              cropName = crop?.name || "";
+            }
+            if (details.varietyId) {
+              const [variety] = await drizzle.select({ name: cropVarieties.name }).from(cropVarieties).where(eq(cropVarieties.id, details.varietyId));
+              varietyName = variety?.name || "";
+            }
+            const parts = [];
+            if (cropName) parts.push(`Cultivo: ${cropName}`);
+            if (varietyName) parts.push(`Variedad: ${varietyName}`);
+            if (details.totalHectares) parts.push(`Superficie: ${details.totalHectares} ha`);
+            if (details.totalTrees) parts.push(`Arboles: ${details.totalTrees}`);
+            if (details.productiveTrees) parts.push(`Productivos: ${details.productiveTrees}`);
+            if (details.establishedAt) parts.push(`Establecida: ${details.establishedAt}`);
+            if (parts.length) cropInfo = `\nInformacion de la parcela: ${parts.join(" | ")}`;
+          }
+        } catch (e) {
+          console.log("[IA] No se pudo obtener info del cultivo:", e);
+        }
+
+        const prompt = `Eres un ingeniero agronomo experto en agricultura de precision y teledeteccion. Analiza los siguientes indices espectrales de la parcela "${input.parcelName}" y genera un resumen ejecutivo de 6-7 lineas maximo.${cropInfo}
 
 Datos del analisis (periodo: ${from || "N/A"} a ${to || "N/A"}):
 
@@ -379,6 +406,7 @@ ${formatData(input.ndreData, "NDRE (Nitrogeno/Clorofila)")}
 ${formatData(input.ndmiData, "NDMI (Estres Hidrico)")}
 
 IMPORTANTE: 
+- Considera el tipo de cultivo y variedad para contextualizar los valores
 - Resume las tendencias principales (mejora, deterioro, estabilidad)
 - Identifica alertas si hay caidas bruscas o valores criticos
 - Da recomendaciones practicas y accionables
