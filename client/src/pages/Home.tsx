@@ -6,9 +6,11 @@ import { getProxiedImageUrl } from "@/lib/imageProxy";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Package, TrendingUp, CheckCircle, Cloud, Calendar as CalendarIcon, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
+import { Package, TrendingUp, CheckCircle, Cloud, Calendar as CalendarIcon, RefreshCw, ChevronDown, ChevronUp, Sparkles, X, Satellite, MapPin, Wifi, WifiOff, ClipboardList, BookOpen, Users, Brain, Leaf, ArrowRight } from "lucide-react";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+
+const UPDATE_VERSION = "2.5.0";
 
 export default function Home() {
   return (
@@ -25,6 +27,21 @@ function HomeContent() {
   const [selectedMonth, setSelectedMonth] = useState('all');
   const [tableSortField, setTableSortField] = useState<string>("dateKey");
   const [tableSortOrder, setTableSortOrder] = useState<"asc" | "desc">("desc");
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+
+  // Mostrar modal de novedades una vez por version
+  useEffect(() => {
+    if (!user) return;
+    const key = `agra_update_seen_${UPDATE_VERSION}`;
+    if (!localStorage.getItem(key)) {
+      setTimeout(() => setShowUpdateModal(true), 800);
+    }
+  }, [user]);
+
+  const dismissUpdateModal = useCallback(() => {
+    localStorage.setItem(`agra_update_seen_${UPDATE_VERSION}`, "true");
+    setShowUpdateModal(false);
+  }, []);
   
   // ====== OPTIMIZACIÓN: Usar endpoints agregados en lugar de descargar todas las cajas ======
   
@@ -635,6 +652,109 @@ function HomeContent() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ===== MODAL DE NOVEDADES ===== */}
+      {showUpdateModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-3 sm:p-4" onClick={dismissUpdateModal}>
+          <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-300" onClick={e => e.stopPropagation()}>
+            {/* Header gradient */}
+            <div className="relative bg-gradient-to-br from-green-500 via-emerald-500 to-teal-600 px-6 py-7 text-white overflow-hidden">
+              <div className="absolute inset-0 opacity-10">
+                <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full bg-white/20" />
+                <div className="absolute -bottom-8 -left-8 w-32 h-32 rounded-full bg-white/15" />
+              </div>
+              <div className="relative">
+                <div className="flex items-center gap-2 mb-1">
+                  <Sparkles className="w-5 h-5 text-yellow-300" />
+                  <span className="text-xs font-bold bg-white/20 px-2.5 py-0.5 rounded-full tracking-wider uppercase">Actualización v{UPDATE_VERSION}</span>
+                </div>
+                <h2 className="text-2xl font-bold mt-2">¡Nuevas herramientas!</h2>
+                <p className="text-sm text-white/80 mt-1">Tu sistema de gestión agrícola ahora es más poderoso</p>
+              </div>
+              <button onClick={dismissUpdateModal} className="absolute top-4 right-4 p-1.5 rounded-full bg-white/20 hover:bg-white/30 transition">
+                <X className="w-4 h-4 text-white" />
+              </button>
+            </div>
+
+            {/* Features */}
+            <div className="px-5 py-4 space-y-3 max-h-[55vh] overflow-y-auto">
+              {/* Feature 1: Libreta de campo */}
+              <div className="flex items-start gap-3 p-3 rounded-2xl bg-green-50/70 border border-green-100/80">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center flex-shrink-0 shadow-sm">
+                  <BookOpen className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-gray-900">Libreta de Campo Digital</h4>
+                  <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">Registra actividades de campo, aplicaciones de productos, uso de herramientas y asigna personal directamente desde la app.</p>
+                </div>
+              </div>
+
+              {/* Feature 2: Notas de campo */}
+              <div className="flex items-start gap-3 p-3 rounded-2xl bg-amber-50/70 border border-amber-100/80">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center flex-shrink-0 shadow-sm">
+                  <ClipboardList className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-gray-900">Notas de Campo Georreferenciadas</h4>
+                  <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">Reporta plagas, daños o problemas con foto y GPS. Asigna notas al personal de campo para su seguimiento y resolución en tiempo real.</p>
+                </div>
+              </div>
+
+              {/* Feature 3: App Offline */}
+              <div className="flex items-start gap-3 p-3 rounded-2xl bg-blue-50/70 border border-blue-100/80">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center flex-shrink-0 shadow-sm">
+                  <WifiOff className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-gray-900">App Offline – Sin Internet</h4>
+                  <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">Trabaja sin conexión en campo. La app se instala en tu teléfono y sincroniza automáticamente cuando recuperas señal. ¡Sin interrupciones!</p>
+                </div>
+              </div>
+
+              {/* Feature 4: Telemetría satelital */}
+              <div className="flex items-start gap-3 p-3 rounded-2xl bg-purple-50/70 border border-purple-100/80">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-400 to-violet-500 flex items-center justify-center flex-shrink-0 shadow-sm">
+                  <Satellite className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-gray-900">Telemetría Satelital</h4>
+                  <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">Monitorea tus parcelas con imágenes Sentinel-2 del programa Copernicus. Índices NDVI, NDRE y NDMI para vigor, nitrógeno y estrés hídrico.</p>
+                </div>
+              </div>
+
+              {/* Feature 5: Análisis IA */}
+              <div className="flex items-start gap-3 p-3 rounded-2xl bg-indigo-50/70 border border-indigo-100/80">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-400 to-purple-600 flex items-center justify-center flex-shrink-0 shadow-sm">
+                  <Brain className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-gray-900">Análisis Inteligente con IA</h4>
+                  <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">Resumen agronómico automático que correlaciona datos satelitales con producción real para recomendaciones accionables.</p>
+                </div>
+              </div>
+
+              {/* Feature 6: Telegram */}
+              <div className="flex items-start gap-3 p-3 rounded-2xl bg-cyan-50/70 border border-cyan-100/80">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center flex-shrink-0 shadow-sm">
+                  <Users className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-gray-900">Colaboradores y Telegram</h4>
+                  <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">Gestiona tu equipo de campo. Notificaciones automáticas por Telegram cuando se asignan notas o cambian de estado.</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 py-4 bg-gray-50/80 border-t border-gray-100">
+              <button onClick={dismissUpdateModal}
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold text-sm shadow-lg hover:shadow-xl transition-all active:scale-[0.98]">
+                <Leaf className="w-4 h-4" /> ¡Explorar ahora! <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
