@@ -1994,9 +1994,16 @@ function FieldNotesMapTab({ parcel, mapping, odmMappings, allParcels, onSelectPa
         <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setDetailNote(null)}>
           <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             {detailNote.photos?.length > 0 ? (
-              <div className="relative"><div className="flex overflow-x-auto snap-x gap-1 bg-gray-900 rounded-t-3xl">
-                {detailNote.photos.map((p: any, i: number) => <img key={p.id || i} src={p.photoPath} alt="" className="h-64 w-auto object-contain snap-center cursor-zoom-in flex-shrink-0" onClick={() => setPhotoViewerSrc(p.photoPath)} />)}
-              </div><span className="absolute top-2 right-2 bg-black/50 text-white text-[10px] px-2 py-0.5 rounded-full">{detailNote.photos.length} fotos</span></div>
+              <div className="relative bg-gray-900 rounded-t-3xl">
+                <div className={`flex ${detailNote.photos.length === 1 ? "justify-center" : "overflow-x-auto snap-x gap-1"} p-2`}>
+                  {detailNote.photos.map((p: any, i: number) => (
+                    <img key={p.id || i} src={p.photoPath} alt=""
+                      className="max-h-72 min-h-[180px] w-auto object-contain snap-center cursor-zoom-in flex-shrink-0 rounded-xl"
+                      onClick={() => setPhotoViewerSrc(p.photoPath)} />
+                  ))}
+                </div>
+                <span className="absolute top-3 right-3 bg-black/50 text-white text-[10px] px-2 py-0.5 rounded-full">{detailNote.photos.length} {detailNote.photos.length === 1 ? "foto" : "fotos"}</span>
+              </div>
             ) : (
               <div className="h-16 bg-amber-50 rounded-t-3xl flex items-center justify-center gap-2 text-amber-600"><CameraOff className="h-5 w-5" /><span className="font-medium">Sin fotos</span></div>
             )}
@@ -2756,24 +2763,24 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <GlassCard className="p-0 overflow-hidden" hover={false}>
           {droneInfo ? (
-            <div className="relative">
-              <div className="w-full" style={{ display: "grid", gridTemplateColumns: `repeat(${droneInfo.cols}, 1fr)` }}>
+            <div className="relative aspect-square">
+              <div className="absolute inset-0" style={{ display: "grid", gridTemplateColumns: `repeat(${droneInfo.cols}, 1fr)`, gridTemplateRows: `repeat(${droneInfo.rows}, 1fr)` }}>
                 {droneInfo.tiles.map((url: string, i: number) => (
                   <img key={i} src={url} alt="" className="w-full h-full object-cover block" crossOrigin="anonymous" onError={(e) => { (e.target as HTMLImageElement).style.opacity = "0"; }} />
                 ))}
               </div>
-              <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/60 to-transparent p-2">
+              <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/60 to-transparent p-2 z-10">
                 <div className="flex items-center gap-1.5">
                   <Camera className="w-3 h-3 text-white/90" />
                   <span className="text-[10px] font-bold text-white/95">Ortofoto Drone</span>
                 </div>
               </div>
-              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2 z-10">
                 <p className="text-[9px] text-white/90">RGB · {droneInfo.flightDate}</p>
               </div>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center bg-gray-50 min-h-[140px] p-3">
+            <div className="flex flex-col items-center justify-center bg-gray-50 aspect-square p-3">
               <CameraOff className="w-5 h-5 text-gray-300 mb-1" />
               <p className="text-[9px] text-gray-400 text-center">Sin vuelo de drone</p>
             </div>
