@@ -2477,99 +2477,104 @@ function HistoricalMapThumb({ parcelId, indexType, date, dateLabel }: { parcelId
   );
 }
 
-/** Subcomponente: Analisis IA con DeepSeek */
+/** Subcomponente: Analisis IA automatico con cache */
 function AIAnalysisCard({ parcelId, parcelName, ndviStats, ndreStats, ndmiStats }: {
   parcelId: number; parcelName: string;
   ndviStats?: any; ndreStats?: any; ndmiStats?: any;
 }) {
-  const [analysis, setAnalysis] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const hasData = ndviStats?.data?.length || ndreStats?.data?.length || ndmiStats?.data?.length;
+  const fromDate = ndviStats?.fromDate || "";
+  const toDate = ndviStats?.toDate || "";
 
-  const analyzeMut = trpc.copernicus.analyzeWithAI.useMutation({
-    onSuccess: (data: any) => {
-      setAnalysis(data.analysis);
-      setLoading(false);
-      setError(null);
-    },
-    onError: (err: any) => {
-      setError(err.message || "Error al analizar");
-      setLoading(false);
-    },
-  });
-
-  const handleAnalyze = useCallback(() => {
-    if (loading) return;
-    setLoading(true);
-    setError(null);
-    setAnalysis(null);
-    analyzeMut.mutate({
+  // Auto-cargar analisis cacheado o generar uno nuevo
+  const { data: aiData, isLoading, error, refetch } = trpc.copernicus.getAIAnalysis.useQuery(
+    {
       parcelId,
       parcelName,
       ndviData: ndviStats?.data,
       ndreData: ndreStats?.data,
       ndmiData: ndmiStats?.data,
-      fromDate: ndviStats?.fromDate,
-      toDate: ndviStats?.toDate,
-    });
-  }, [parcelId, parcelName, ndviStats, ndreStats, ndmiStats, loading, analyzeMut]);
+      fromDate,
+      toDate,
+    },
+    {
+      enabled: !!parcelId && !!hasData,
+      staleTime: 30 * 60 * 1000, // 30 min antes de re-fetch
+      retry: false,
+    }
+  );
 
-  const hasData = ndviStats?.data?.length || ndreStats?.data?.length || ndmiStats?.data?.length;
+  // Refrescar forzando nueva generacion
+  const { data: refreshData, isLoading: refreshing, refetch: doRefresh } = trpc.copernicus.getAIAnalysis.useQuery(
+    {
+      parcelId,
+      parcelName,
+      ndviData: ndviStats?.data,
+      ndreData: ndreStats?.data,
+      ndmiData: ndmiStats?.data,
+      fromDate,
+      toDate,
+      forceRefresh: true,
+    },
+    { enabled: false, retry: false }
+  );
+
+  const analysis = refreshData?.analysis || aiData?.analysis;
+  const isCached = refreshData ? refreshData.cached : aiData?.cached;
+  const loading = isLoading || refreshing;
 
   return (
-    <GlassCard className="p-4 border-2 border-purple-100/50 bg-gradient-to-br from-purple-50/30 to-indigo-50/20" hover={false}>
+    <GlassCard className="p-4 border border-purple-100/50 bg-gradient-to-br from-purple-50/20 to-indigo-50/10" hover={false}>
       <div className="flex items-center gap-3 mb-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-purple-500 to-indigo-600 shadow-md">
-          <Sparkles className="h-4.5 w-4.5 text-white" />
+          <Sparkles className="h-4 w-4 text-white" />
         </div>
         <div className="flex-1">
           <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-            Analisis IA — DeepSeek
-            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-600 font-medium">Beta</span>
+            Análisis Inteligente
+            {isCached && <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-green-100 text-green-600 font-medium">Cacheado</span>}
           </h3>
-          <p className="text-[10px] text-gray-500">Resumen agronómico automatizado basado en los indices espectrales</p>
+          <p className="text-[10px] text-gray-500">Resumen agronómico basado en datos espectrales · {fromDate} → {toDate}</p>
         </div>
-        <button
-          onClick={handleAnalyze}
-          disabled={loading || !hasData}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-sm ${
-            loading
-              ? "bg-purple-100 text-purple-400 cursor-wait"
-              : !hasData
-              ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-              : "bg-gradient-to-r from-purple-500 to-indigo-600 text-white hover:from-purple-600 hover:to-indigo-700 hover:shadow-md"
-          }`}
-        >
-          {loading ? (
-            <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Analizando...</>
-          ) : (
-            <><Sparkles className="w-3.5 h-3.5" /> {analysis ? "Re-analizar" : "Analizar"}</>
-          )}
-        </button>
+        {analysis && (
+          <button
+            onClick={() => doRefresh()}
+            disabled={refreshing}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium text-purple-600 hover:bg-purple-50 transition"
+          >
+            {refreshing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+            Regenerar
+          </button>
+        )}
       </div>
 
-      {error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-xs text-red-700">
-          <strong>Error:</strong> {error}
+      {loading && !analysis && (
+        <div className="flex items-center gap-2 p-3 bg-purple-50/50 rounded-lg">
+          <Loader2 className="w-4 h-4 animate-spin text-purple-400" />
+          <p className="text-xs text-purple-600">Generando análisis inteligente...</p>
+        </div>
+      )}
+
+      {error && !analysis && (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-700">
+          {(error as any)?.message?.includes("API Key") || (error as any)?.message?.includes("configurado")
+            ? "Configura la API Key de IA en Ajustes para activar el análisis inteligente"
+            : "No se pudo generar el análisis. Intenta más tarde."}
         </div>
       )}
 
       {analysis && (
-        <div className="rounded-xl bg-white/80 border border-purple-100 p-4 shadow-inner">
+        <div className="rounded-xl bg-white/80 border border-purple-100/50 p-4">
           <div className="flex items-start gap-2">
-            <Sparkles className="w-4 h-4 text-purple-500 mt-0.5 flex-shrink-0" />
-            <div className="text-sm text-gray-800 leading-relaxed whitespace-pre-line">{analysis}</div>
+            <Sparkles className="w-4 h-4 text-purple-400 mt-0.5 flex-shrink-0" />
+            <div className="text-[13px] text-gray-800 leading-relaxed whitespace-pre-line">{analysis}</div>
           </div>
         </div>
       )}
 
       {!analysis && !error && !loading && (
         <div className="rounded-lg bg-gray-50/50 p-3 text-center">
-          <p className="text-[11px] text-gray-400">
-            {hasData
-              ? "Presiona \"Analizar\" para obtener un resumen agronómico basado en los datos espectrales de esta parcela"
-              : "Esperando datos espectrales..."}
-          </p>
+          <p className="text-[11px] text-gray-400">Esperando datos espectrales para generar análisis...</p>
         </div>
       )}
     </GlassCard>

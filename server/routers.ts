@@ -7,7 +7,7 @@ import * as db from "./db";
 import * as dbExt from "./db_extended";
 import * as webodm from "./webodmService";
 import { getDb } from "./db";
-import { users, boxes, harvesters, parcels, parcelDetails, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos, telegramLinkCodes, collaborators, collaboratorLinkCodes, fieldActivityAssignments } from "../drizzle/schema";
+import { users, boxes, harvesters, parcels, parcelDetails, parcelAiAnalysis, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos, telegramLinkCodes, collaborators, collaboratorLinkCodes, fieldActivityAssignments } from "../drizzle/schema";
 import { eq, desc, and, gte, lte, inArray, sql } from "drizzle-orm";
 
 export const appRouter = router({
@@ -314,7 +314,8 @@ export const appRouter = router({
         return { image: `data:image/png;base64,${buffer.toString("base64")}`, message: null };
       }),
 
-    analyzeWithAI: protectedProcedure
+    // Analisis IA con cache en BD
+    getAIAnalysis: protectedProcedure
       .input(z.object({
         parcelId: z.number(),
         parcelName: z.string(),
@@ -323,30 +324,53 @@ export const appRouter = router({
         ndmiData: z.array(z.any()).optional(),
         fromDate: z.string().optional(),
         toDate: z.string().optional(),
+        forceRefresh: z.boolean().optional(),
       }))
-      .mutation(async ({ input }) => {
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const from = input.fromDate || "";
+        const to = input.toDate || new Date().toISOString().split("T")[0];
+
+        // Buscar analisis cacheado (menos de 7 dias de antiguedad)
+        if (!input.forceRefresh) {
+          const [cached] = await drizzle
+            .select()
+            .from(parcelAiAnalysis)
+            .where(eq(parcelAiAnalysis.parcelId, input.parcelId))
+            .orderBy(sql`createdAt DESC`)
+            .limit(1);
+          if (cached) {
+            const ageMs = Date.now() - new Date(cached.createdAt).getTime();
+            const sevenDays = 7 * 24 * 60 * 60 * 1000;
+            if (ageMs < sevenDays && cached.fromDate === from && cached.toDate === to) {
+              return { analysis: cached.analysis, model: cached.model, cached: true, cachedAt: cached.createdAt };
+            }
+          }
+        }
+
+        // Generar nuevo analisis
         const { getGlobalSetting } = await import("./globalSettings");
         let apiKey = await getGlobalSetting("deepseekApiKey");
-        if (!apiKey) throw new TRPCError({ code: "BAD_REQUEST", message: "No se ha configurado la API Key de DeepSeek en Configuraciones" });
+        if (!apiKey) throw new TRPCError({ code: "BAD_REQUEST", message: "No se ha configurado la API Key de IA en Configuraciones" });
 
-        // Desencriptar si está encriptado
         try {
           const { decryptSecret, isEncrypted } = await import("./encryption");
           if (isEncrypted(apiKey)) apiKey = decryptSecret(apiKey);
         } catch (e) {
-          console.error("[DeepSeek] Error desencriptando API key:", e);
+          console.error("[IA] Error desencriptando API key:", e);
         }
 
-        // Formatear datos para el prompt
         const formatData = (data: any[] | undefined, label: string) => {
           if (!data?.length) return `${label}: Sin datos`;
           return `${label} (${data.length} muestras, ${data[0].date} a ${data[data.length-1].date}):\n` +
-            data.map(d => `  ${d.date}: media=${d.mean?.toFixed(3)}, min=${d.min?.toFixed(3)}, max=${d.max?.toFixed(3)}`).join("\n");
+            data.map((d: any) => `  ${d.date}: media=${d.mean?.toFixed(3)}, min=${d.min?.toFixed(3)}, max=${d.max?.toFixed(3)}`).join("\n");
         };
 
         const prompt = `Eres un ingeniero agronomo experto en agricultura de precision y teledeteccion. Analiza los siguientes indices espectrales de la parcela "${input.parcelName}" y genera un resumen ejecutivo de 6-7 lineas maximo.
 
-Datos del analisis (periodo: ${input.fromDate || "N/A"} a ${input.toDate || "N/A"}):
+Datos del analisis (periodo: ${from || "N/A"} a ${to || "N/A"}):
 
 ${formatData(input.ndviData, "NDVI (Vigor Vegetativo)")}
 
@@ -375,17 +399,28 @@ IMPORTANTE:
 
           if (!response.ok) {
             const errText = await response.text();
-            console.error("[DeepSeek] Error:", response.status, errText);
-            throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Error de DeepSeek API: ${response.status}` });
+            console.error("[IA] Error:", response.status, errText);
+            throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Error de API IA: ${response.status}` });
           }
 
           const result = await response.json();
           const analysis = result.choices?.[0]?.message?.content || "Sin respuesta del modelo";
-          return { analysis, model: result.model || "deepseek-chat", usage: result.usage };
+          const model = result.model || "deepseek-chat";
+
+          // Guardar en cache
+          await drizzle.insert(parcelAiAnalysis).values({
+            parcelId: input.parcelId,
+            analysis,
+            fromDate: from,
+            toDate: to,
+            model,
+          });
+
+          return { analysis, model, cached: false };
         } catch (err: any) {
           if (err.code === "BAD_REQUEST" || err.code === "INTERNAL_SERVER_ERROR") throw err;
-          console.error("[DeepSeek] Fetch error:", err);
-          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Error conectando con DeepSeek API" });
+          console.error("[IA] Fetch error:", err);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Error conectando con API de IA" });
         }
       }),
   }),

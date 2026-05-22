@@ -504,8 +504,8 @@ export default function Settings() {
           {/* Copernicus CDSE - Telemetría Satelital */}
           <CopernicusSection />
 
-          {/* DeepSeek IA - Análisis Inteligente */}
-          <DeepSeekSection />
+          {/* IA - Análisis Inteligente */}
+          <AIApiSection />
 
           {/* Carga Manual */}
           <GlassCard className="p-4 md:p-6">
@@ -1787,8 +1787,8 @@ function CopernicusSection() {
   );
 }
 
-// Componente de DeepSeek IA - Análisis Inteligente
-function DeepSeekSection() {
+// Componente de IA - Análisis Inteligente
+function AIApiSection() {
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
 
@@ -1813,7 +1813,7 @@ function DeepSeekSection() {
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-100">
             <span className="text-lg">🤖</span>
           </div>
-          <h2 className="text-lg md:text-2xl font-semibold text-purple-900">API DeepSeek (IA)</h2>
+          <h2 className="text-lg md:text-2xl font-semibold text-purple-900">API de Inteligencia Artificial</h2>
         </div>
         {config?.hasKey && (
           <span className="flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
@@ -1824,14 +1824,14 @@ function DeepSeekSection() {
       </div>
 
       <p className="mb-4 text-sm text-purple-700">
-        Conecta con DeepSeek para obtener análisis agronómicos automatizados basados en los indices espectrales de cada parcela.
+        Conecta una API de IA para obtener análisis agronómicos automatizados basados en los indices espectrales de cada parcela.
       </p>
 
       <div className="rounded-lg bg-purple-50 p-3 mb-4 text-sm text-purple-800">
         <strong>📋 Cómo obtener la API Key:</strong>
         <ol className="list-decimal list-inside mt-1 space-y-0.5 text-xs text-purple-700">
-          <li>Regístrate en <a href="https://platform.deepseek.com" target="_blank" rel="noopener noreferrer" className="underline font-medium hover:text-purple-900">platform.deepseek.com</a></li>
-          <li>Ve a "API Keys" en el dashboard</li>
+          <li>Regístrate en un proveedor de IA compatible (ej. <a href="https://platform.deepseek.com" target="_blank" rel="noopener noreferrer" className="underline font-medium hover:text-purple-900">DeepSeek</a>)</li>
+          <li>Ve a la sección de API Keys en el dashboard del proveedor</li>
           <li>Crea una nueva API Key</li>
           <li>Copia la clave aquí (empieza con sk-)</li>
         </ol>

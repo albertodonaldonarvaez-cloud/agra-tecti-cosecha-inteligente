@@ -255,6 +255,17 @@ export const parcelDetails = mysqlTable("parcelDetails", {
 export type ParcelDetails = typeof parcelDetails.$inferSelect;
 export type InsertParcelDetails = typeof parcelDetails.$inferInsert;
 
+// Cache de análisis IA por parcela
+export const parcelAiAnalysis = mysqlTable("parcelAiAnalysis", {
+  id: int("id").autoincrement().primaryKey(),
+  parcelId: int("parcelId").notNull(),
+  analysis: text("analysis").notNull(),
+  fromDate: varchar("fromDate", { length: 32 }).notNull(),
+  toDate: varchar("toDate", { length: 32 }).notNull(),
+  model: varchar("model", { length: 64 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 // Tabla de cultivos
 export const crops = mysqlTable("crops", {
   id: int("id").autoincrement().primaryKey(),
