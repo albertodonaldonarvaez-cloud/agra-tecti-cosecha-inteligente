@@ -368,6 +368,41 @@ export const appRouter = router({
             data.map((d: any) => `  ${d.date}: media=${d.mean?.toFixed(3)}, min=${d.min?.toFixed(3)}, max=${d.max?.toFixed(3)}`).join("\n");
         };
 
+        // Buscar datos de cosecha de la parcela
+        let harvestInfo = "";
+        try {
+          const [parcelRow] = await drizzle.select({ code: parcels.code }).from(parcels).where(eq(parcels.id, input.parcelId));
+          const parcelCode = parcelRow?.code || "";
+          if (parcelCode) {
+            const harvestData = await drizzle
+              .select({ weight: boxes.weight, submissionTime: boxes.submissionTime })
+              .from(boxes)
+              .where(eq(boxes.parcelCode, parcelCode))
+              .orderBy(boxes.submissionTime);
+            if (harvestData.length > 0) {
+              const weeklyMap: Record<string, { totalKg: number; count: number }> = {};
+              for (const h of harvestData) {
+                const d = new Date(h.submissionTime);
+                const weekStart = new Date(d);
+                weekStart.setDate(d.getDate() - d.getDay());
+                const weekKey = weekStart.toISOString().split("T")[0];
+                if (!weeklyMap[weekKey]) weeklyMap[weekKey] = { totalKg: 0, count: 0 };
+                weeklyMap[weekKey].totalKg += (h.weight || 0) / 1000;
+                weeklyMap[weekKey].count++;
+              }
+              const firstDate = new Date(harvestData[0].submissionTime).toLocaleDateString("es-MX");
+              const lastDate = new Date(harvestData[harvestData.length - 1].submissionTime).toLocaleDateString("es-MX");
+              const totalKg = harvestData.reduce((s, h) => s + (h.weight || 0), 0) / 1000;
+              const totalBoxes = harvestData.length;
+              const weeks = Object.entries(weeklyMap).sort(([a], [b]) => a.localeCompare(b));
+              const weeklyStr = weeks.map(([w, d]) => `  Semana ${w}: ${d.totalKg.toFixed(1)} kg (${d.count} cajas)`).join("\n");
+              harvestInfo = `\n\nDatos de cosecha (${firstDate} a ${lastDate}):\nTotal: ${totalKg.toFixed(1)} kg en ${totalBoxes} cajas\nDesglose semanal:\n${weeklyStr}`;
+            }
+          }
+        } catch (e) {
+          console.log("[IA] No se pudo obtener datos de cosecha:", e);
+        }
+
         // Buscar info del cultivo y variedad de la parcela
         let cropInfo = "";
         try {
@@ -395,9 +430,9 @@ export const appRouter = router({
           console.log("[IA] No se pudo obtener info del cultivo:", e);
         }
 
-        const prompt = `Eres un ingeniero agronomo experto en agricultura de precision y teledeteccion. Analiza los siguientes indices espectrales de la parcela "${input.parcelName}" y genera un resumen ejecutivo de 6-7 lineas maximo.${cropInfo}
+        const prompt = `Eres un ingeniero agronomo experto en agricultura de precision y teledeteccion con 20 anos de experiencia. Analiza los siguientes datos de la parcela "${input.parcelName}" y genera un resumen ejecutivo de 6-7 lineas maximo. Tu analisis debe correlacionar los indices espectrales con los datos reales de produccion (cosecha) para dar una perspectiva REALISTA de como se fue desarrollando la parcela durante la temporada.${cropInfo}${harvestInfo}
 
-Datos del analisis (periodo: ${from || "N/A"} a ${to || "N/A"}):
+Datos espectrales (periodo: ${from || "N/A"} a ${to || "N/A"}):
 
 ${formatData(input.ndviData, "NDVI (Vigor Vegetativo)")}
 
@@ -405,12 +440,13 @@ ${formatData(input.ndreData, "NDRE (Nitrogeno/Clorofila)")}
 
 ${formatData(input.ndmiData, "NDMI (Estres Hidrico)")}
 
-IMPORTANTE: 
-- Considera el tipo de cultivo y variedad para contextualizar los valores
-- Resume las tendencias principales (mejora, deterioro, estabilidad)
-- Identifica alertas si hay caidas bruscas o valores criticos
-- Da recomendaciones practicas y accionables
-- MAXIMO 6-7 renglones, formato conciso y profesional
+IMPORTANTE:
+- Correlaciona indices espectrales con produccion real: cuando subio/bajo el NDVI que paso con la cosecha?
+- Considera el tipo de cultivo y variedad para contextualizar rangos optimos
+- Resume tendencias principales y su impacto directo en kg producidos
+- Identifica alertas criticas: caidas de NDVI + baja produccion = problema real
+- Da 1-2 recomendaciones practicas para la proxima temporada
+- MAXIMO 6-7 renglones, tono profesional de ingeniero agronomo
 - Responde en espanol`;
 
         try {
@@ -419,9 +455,9 @@ IMPORTANTE:
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
             body: JSON.stringify({
               model: "deepseek-chat",
-              messages: [{ role: "user", content: prompt }],
-              max_tokens: 500,
-              temperature: 0.3,
+              messages: [{ role: "system", content: "Eres un ingeniero agronomo senior especializado en agricultura de precision, teledeteccion satelital y manejo integrado de cultivos. Respondes de forma concisa y profesional." }, { role: "user", content: prompt }],
+              max_tokens: 800,
+              temperature: 0.4,
             }),
           });
 

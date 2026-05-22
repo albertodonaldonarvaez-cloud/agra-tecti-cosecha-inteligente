@@ -2632,41 +2632,34 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
     if (!isFinite(minLat)) return null;
 
     const centerLat = (minLat + maxLat) / 2;
-    const centerLng = (minLng + maxLng) / 2;
     const dLat = maxLat - minLat;
     const dLng = maxLng - minLng;
 
-    // Calcular zoom optimo: que la parcela quepa en ~4 tiles de ancho
-    // Un tile a zoom z cubre 360/2^z grados de longitud
-    const targetTilesAcross = 4;
+    // Zoom alto para que la imagen sea grande y detallada
+    // Buscamos que la parcela quepa en ~8 tiles de ancho = imagen grande
+    const targetTilesAcross = 8;
     const maxSpan = Math.max(dLng, dLat * Math.cos(centerLat * Math.PI / 180));
-    let zoom = 18;
-    for (let z = 20; z >= 10; z--) {
+    let zoom = 19;
+    for (let z = 21; z >= 12; z--) {
       const tileDeg = 360 / Math.pow(2, z);
       if (maxSpan / tileDeg <= targetTilesAcross) { zoom = z; break; }
     }
 
     const n = Math.pow(2, zoom);
-    const centerTileX = Math.floor(((centerLng + 180) / 360) * n);
-    const centerTileY = Math.floor((1 - Math.log(Math.tan(centerLat * Math.PI / 180) + 1 / Math.cos(centerLat * Math.PI / 180)) / Math.PI) / 2 * n);
 
-    // Calcular cuantos tiles necesitamos para cubrir el bbox
+    // Tiles que cubren el bbox exacto
     const minTileX = Math.floor(((minLng + 180) / 360) * n);
     const maxTileX = Math.floor(((maxLng + 180) / 360) * n);
     const minTileY = Math.floor((1 - Math.log(Math.tan(maxLat * Math.PI / 180) + 1 / Math.cos(maxLat * Math.PI / 180)) / Math.PI) / 2 * n);
     const maxTileY = Math.floor((1 - Math.log(Math.tan(minLat * Math.PI / 180) + 1 / Math.cos(minLat * Math.PI / 180)) / Math.PI) / 2 * n);
 
-    // Expandir 1 tile en cada direccion para margen
-    const startX = minTileX - 1;
-    const endX = maxTileX + 1;
-    const startY = minTileY - 1;
-    const endY = maxTileY + 1;
-    const cols = endX - startX + 1;
-    const rows = endY - startY + 1;
+    // Sin margen extra - cubrir solo la parcela
+    const cols = maxTileX - minTileX + 1;
+    const rows = maxTileY - minTileY + 1;
 
     const tiles: string[] = [];
-    for (let ty = startY; ty <= endY; ty++) {
-      for (let tx = startX; tx <= endX; tx++) {
+    for (let ty = minTileY; ty <= maxTileY; ty++) {
+      for (let tx = minTileX; tx <= maxTileX; tx++) {
         tiles.push(`/api/odm-tiles/${mapping.odmProjectId}/${taskUuid}/orthophoto/${zoom}/${tx}/${ty}.png`);
       }
     }
