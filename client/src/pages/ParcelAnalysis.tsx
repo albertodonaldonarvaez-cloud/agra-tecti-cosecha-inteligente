@@ -10,7 +10,7 @@ import {
   ClipboardList, Bug, Droplets, AlertTriangle, Construction, Fence,
   FlaskConical, Mountain, PawPrint, FileText, Camera, CameraOff, Filter,
   Maximize2, Minimize2, Send, ExternalLink, UserPlus, MessageSquare, Users2, ZoomIn,
-  Satellite, Loader2, Info
+  Satellite, Loader2, Info, Sparkles
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LineChart, Line, ReferenceLine, ReferenceArea } from "recharts";
@@ -2476,6 +2476,106 @@ function HistoricalMapThumb({ parcelId, indexType, date, dateLabel }: { parcelId
     </div>
   );
 }
+
+/** Subcomponente: Analisis IA con DeepSeek */
+function AIAnalysisCard({ parcelId, parcelName, ndviStats, ndreStats, ndmiStats }: {
+  parcelId: number; parcelName: string;
+  ndviStats?: any; ndreStats?: any; ndmiStats?: any;
+}) {
+  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const analyzeMut = trpc.copernicus.analyzeWithAI.useMutation({
+    onSuccess: (data: any) => {
+      setAnalysis(data.analysis);
+      setLoading(false);
+      setError(null);
+    },
+    onError: (err: any) => {
+      setError(err.message || "Error al analizar");
+      setLoading(false);
+    },
+  });
+
+  const handleAnalyze = useCallback(() => {
+    if (loading) return;
+    setLoading(true);
+    setError(null);
+    setAnalysis(null);
+    analyzeMut.mutate({
+      parcelId,
+      parcelName,
+      ndviData: ndviStats?.data,
+      ndreData: ndreStats?.data,
+      ndmiData: ndmiStats?.data,
+      fromDate: ndviStats?.fromDate,
+      toDate: ndviStats?.toDate,
+    });
+  }, [parcelId, parcelName, ndviStats, ndreStats, ndmiStats, loading, analyzeMut]);
+
+  const hasData = ndviStats?.data?.length || ndreStats?.data?.length || ndmiStats?.data?.length;
+
+  return (
+    <GlassCard className="p-4 border-2 border-purple-100/50 bg-gradient-to-br from-purple-50/30 to-indigo-50/20" hover={false}>
+      <div className="flex items-center gap-3 mb-3">
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-purple-500 to-indigo-600 shadow-md">
+          <Sparkles className="h-4.5 w-4.5 text-white" />
+        </div>
+        <div className="flex-1">
+          <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+            Analisis IA — DeepSeek
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-600 font-medium">Beta</span>
+          </h3>
+          <p className="text-[10px] text-gray-500">Resumen agronómico automatizado basado en los indices espectrales</p>
+        </div>
+        <button
+          onClick={handleAnalyze}
+          disabled={loading || !hasData}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-sm ${
+            loading
+              ? "bg-purple-100 text-purple-400 cursor-wait"
+              : !hasData
+              ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+              : "bg-gradient-to-r from-purple-500 to-indigo-600 text-white hover:from-purple-600 hover:to-indigo-700 hover:shadow-md"
+          }`}
+        >
+          {loading ? (
+            <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Analizando...</>
+          ) : (
+            <><Sparkles className="w-3.5 h-3.5" /> {analysis ? "Re-analizar" : "Analizar"}</>
+          )}
+        </button>
+      </div>
+
+      {error && (
+        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-xs text-red-700">
+          <strong>Error:</strong> {error}
+        </div>
+      )}
+
+      {analysis && (
+        <div className="rounded-xl bg-white/80 border border-purple-100 p-4 shadow-inner">
+          <div className="flex items-start gap-2">
+            <Sparkles className="w-4 h-4 text-purple-500 mt-0.5 flex-shrink-0" />
+            <div className="text-sm text-gray-800 leading-relaxed whitespace-pre-line">{analysis}</div>
+          </div>
+        </div>
+      )}
+
+      {!analysis && !error && !loading && (
+        <div className="rounded-lg bg-gray-50/50 p-3 text-center">
+          <p className="text-[11px] text-gray-400">
+            {hasData
+              ? "Presiona \"Analizar\" para obtener un resumen agronómico basado en los datos espectrales de esta parcela"
+              : "Esperando datos espectrales..."}
+          </p>
+        </div>
+      )}
+    </GlassCard>
+  );
+}
+
 function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
   const [showLegend, setShowLegend] = useState(true);
   const [timelineIndex, setTimelineIndex] = useState<IdxKey>("NDVI");
@@ -2668,31 +2768,28 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
 
       {/* FILA 1: 4 mapas (Ortofoto Drone + 3 indices) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <GlassCard className="p-3" hover={false}>
-          <div className="flex items-center gap-2 mb-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-sky-400 to-blue-500 shadow-sm">
-              <Camera className="w-3.5 h-3.5 text-white" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h4 className="text-xs font-bold text-gray-800">Ortofoto Drone</h4>
-              <p className="text-[9px] text-gray-400 truncate">RGB · {droneInfo?.flightDate || "Sin vuelo"}</p>
-            </div>
-          </div>
+        <GlassCard className="p-0 overflow-hidden" hover={false}>
           {droneInfo ? (
-            <div className="relative rounded-xl overflow-hidden border border-gray-200/50 shadow-sm">
-              <div className="w-full" style={{ display: "grid", gridTemplateColumns: `repeat(${droneInfo.cols}, 1fr)`, aspectRatio: `${droneInfo.cols}/${droneInfo.rows}` }}>
+            <div className="relative">
+              <div className="w-full" style={{ display: "grid", gridTemplateColumns: `repeat(${droneInfo.cols}, 1fr)` }}>
                 {droneInfo.tiles.map((url: string, i: number) => (
                   <img key={i} src={url} alt="" className="w-full h-full object-cover block" crossOrigin="anonymous" onError={(e) => { (e.target as HTMLImageElement).style.opacity = "0"; }} />
                 ))}
               </div>
-              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-1.5">
-                <p className="text-[9px] text-white/90">Ortofoto de Drone · {droneInfo.flightDate}</p>
+              <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/60 to-transparent p-2">
+                <div className="flex items-center gap-1.5">
+                  <Camera className="w-3 h-3 text-white/90" />
+                  <span className="text-[10px] font-bold text-white/95">Ortofoto Drone</span>
+                </div>
+              </div>
+              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                <p className="text-[9px] text-white/90">RGB · {droneInfo.flightDate}</p>
               </div>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center bg-gray-50 rounded-xl min-h-[140px] p-3">
+            <div className="flex flex-col items-center justify-center bg-gray-50 min-h-[140px] p-3">
               <CameraOff className="w-5 h-5 text-gray-300 mb-1" />
-              <p className="text-[9px] text-gray-400 text-center">Sin vuelo de drone disponible para esta parcela</p>
+              <p className="text-[9px] text-gray-400 text-center">Sin vuelo de drone</p>
             </div>
           )}
         </GlassCard>
@@ -2702,6 +2799,10 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
           </GlassCard>
         ))}
       </div>
+
+      {/* ANALISIS IA — DeepSeek */}
+      <AIAnalysisCard parcelId={parcel.id} parcelName={parcel.name || parcel.code} ndviStats={ndviStats} ndreStats={ndreStats} ndmiStats={ndmiStats} />
+
       {/* FILA 2: Grafica combinada — 3 indices superpuestos */}
       <GlassCard className="p-4" hover={false}>
         <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">

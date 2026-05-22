@@ -18,6 +18,7 @@ const COLUMN_MAP: Record<string, string> = {
   telegramHarvestChatId: "telegramHarvestChatId",
   copernicusClientId: "copernicusClientId",
   copernicusClientSecret: "copernicusClientSecret",
+  deepseekApiKey: "deepseekApiKey",
 };
 
 /**

@@ -504,6 +504,9 @@ export default function Settings() {
           {/* Copernicus CDSE - Telemetría Satelital */}
           <CopernicusSection />
 
+          {/* DeepSeek IA - Análisis Inteligente */}
+          <DeepSeekSection />
+
           {/* Carga Manual */}
           <GlassCard className="p-4 md:p-6">
             <div className="mb-4 flex items-center gap-2">
@@ -1779,6 +1782,97 @@ function CopernicusSection() {
             </Button>
           )}
         </div>
+      </div>
+    </GlassCard>
+  );
+}
+
+// Componente de DeepSeek IA - Análisis Inteligente
+function DeepSeekSection() {
+  const [apiKey, setApiKey] = useState("");
+  const [showKey, setShowKey] = useState(false);
+
+  const { data: config, refetch } = trpc.copernicus.getDeepSeekConfig.useQuery(undefined, {
+    retry: false,
+    onError: () => {},
+  });
+
+  const saveConfig = trpc.copernicus.saveDeepSeekConfig.useMutation({
+    onSuccess: () => {
+      toast.success("API Key de DeepSeek guardada (encriptada)");
+      setApiKey("");
+      refetch();
+    },
+    onError: (error: any) => toast.error(error.message),
+  });
+
+  return (
+    <GlassCard className="p-4 md:p-6 border-2 border-purple-200 bg-purple-50/20">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-100">
+            <span className="text-lg">🤖</span>
+          </div>
+          <h2 className="text-lg md:text-2xl font-semibold text-purple-900">API DeepSeek (IA)</h2>
+        </div>
+        {config?.hasKey && (
+          <span className="flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
+            <CheckCircle className="h-3 w-3" />
+            Configurado
+          </span>
+        )}
+      </div>
+
+      <p className="mb-4 text-sm text-purple-700">
+        Conecta con DeepSeek para obtener análisis agronómicos automatizados basados en los indices espectrales de cada parcela.
+      </p>
+
+      <div className="rounded-lg bg-purple-50 p-3 mb-4 text-sm text-purple-800">
+        <strong>📋 Cómo obtener la API Key:</strong>
+        <ol className="list-decimal list-inside mt-1 space-y-0.5 text-xs text-purple-700">
+          <li>Regístrate en <a href="https://platform.deepseek.com" target="_blank" rel="noopener noreferrer" className="underline font-medium hover:text-purple-900">platform.deepseek.com</a></li>
+          <li>Ve a "API Keys" en el dashboard</li>
+          <li>Crea una nueva API Key</li>
+          <li>Copia la clave aquí (empieza con sk-)</li>
+        </ol>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <Label htmlFor="deepseekApiKey">API Key</Label>
+          <div className="relative">
+            <Input
+              id="deepseekApiKey"
+              type={showKey ? "text" : "password"}
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder={config?.hasKey ? "••••••••••• (ya configurada, ingresa nueva para cambiar)" : "sk-xxxxxxxxxxxxxxxxxxxxxxxx"}
+              className="pr-10"
+            />
+            <button
+              type="button"
+              onClick={() => setShowKey(!showKey)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+          <p className="text-[10px] text-purple-500 mt-1 flex items-center gap-1">
+            🔒 La API Key se encripta con AES-256-GCM antes de almacenarse
+          </p>
+        </div>
+
+        <Button
+          onClick={() => {
+            if (!apiKey) { toast.error("Ingresa la API Key"); return; }
+            saveConfig.mutate({ apiKey });
+          }}
+          disabled={saveConfig.isPending || !apiKey}
+          className="w-full bg-purple-600 hover:bg-purple-700"
+        >
+          <Save className="mr-2 h-4 w-4" />
+          {saveConfig.isPending ? "Encriptando y guardando..." : "Guardar API Key"}
+        </Button>
       </div>
     </GlassCard>
   );

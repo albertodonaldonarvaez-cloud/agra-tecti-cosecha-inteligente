@@ -101,6 +101,23 @@ export const appRouter = router({
       return { success: true, message: "Conexión exitosa con Copernicus CDSE" };
     }),
 
+    // DeepSeek AI config
+    getDeepSeekConfig: adminProcedure.query(async () => {
+      const config = await db.getApiConfig();
+      return { hasKey: !!(config as any)?.deepseekApiKey };
+    }),
+
+    saveDeepSeekConfig: adminProcedure
+      .input(z.object({ apiKey: z.string().min(1) }))
+      .mutation(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const { encryptSecret } = await import("./encryption");
+        const encrypted = encryptSecret(input.apiKey);
+        await drizzle.execute(sql`UPDATE apiConfig SET deepseekApiKey = ${encrypted}`);
+        return { success: true };
+      }),
+
     // Helper: parsear polígono de parcela a GeoJSON
     _parsePolygon: protectedProcedure
       .input(z.object({ parcelId: z.number() }))
@@ -295,6 +312,81 @@ export const appRouter = router({
         const buffer = await getNDVIMapImage(geoPolygon, input.date);
         if (!buffer) return { image: null, message: "Sin mapa NDVI disponible" };
         return { image: `data:image/png;base64,${buffer.toString("base64")}`, message: null };
+      }),
+
+    analyzeWithAI: protectedProcedure
+      .input(z.object({
+        parcelId: z.number(),
+        parcelName: z.string(),
+        ndviData: z.array(z.any()).optional(),
+        ndreData: z.array(z.any()).optional(),
+        ndmiData: z.array(z.any()).optional(),
+        fromDate: z.string().optional(),
+        toDate: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const { getGlobalSetting } = await import("./globalSettings");
+        let apiKey = await getGlobalSetting("deepseekApiKey");
+        if (!apiKey) throw new TRPCError({ code: "BAD_REQUEST", message: "No se ha configurado la API Key de DeepSeek en Configuraciones" });
+
+        // Desencriptar si está encriptado
+        try {
+          const { decryptSecret, isEncrypted } = await import("./encryption");
+          if (isEncrypted(apiKey)) apiKey = decryptSecret(apiKey);
+        } catch (e) {
+          console.error("[DeepSeek] Error desencriptando API key:", e);
+        }
+
+        // Formatear datos para el prompt
+        const formatData = (data: any[] | undefined, label: string) => {
+          if (!data?.length) return `${label}: Sin datos`;
+          return `${label} (${data.length} muestras, ${data[0].date} a ${data[data.length-1].date}):\n` +
+            data.map(d => `  ${d.date}: media=${d.mean?.toFixed(3)}, min=${d.min?.toFixed(3)}, max=${d.max?.toFixed(3)}`).join("\n");
+        };
+
+        const prompt = `Eres un ingeniero agronomo experto en agricultura de precision y teledeteccion. Analiza los siguientes indices espectrales de la parcela "${input.parcelName}" y genera un resumen ejecutivo de 6-7 lineas maximo.
+
+Datos del analisis (periodo: ${input.fromDate || "N/A"} a ${input.toDate || "N/A"}):
+
+${formatData(input.ndviData, "NDVI (Vigor Vegetativo)")}
+
+${formatData(input.ndreData, "NDRE (Nitrogeno/Clorofila)")}
+
+${formatData(input.ndmiData, "NDMI (Estres Hidrico)")}
+
+IMPORTANTE: 
+- Resume las tendencias principales (mejora, deterioro, estabilidad)
+- Identifica alertas si hay caidas bruscas o valores criticos
+- Da recomendaciones practicas y accionables
+- MAXIMO 6-7 renglones, formato conciso y profesional
+- Responde en espanol`;
+
+        try {
+          const response = await fetch("https://api.deepseek.com/chat/completions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+            body: JSON.stringify({
+              model: "deepseek-chat",
+              messages: [{ role: "user", content: prompt }],
+              max_tokens: 500,
+              temperature: 0.3,
+            }),
+          });
+
+          if (!response.ok) {
+            const errText = await response.text();
+            console.error("[DeepSeek] Error:", response.status, errText);
+            throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Error de DeepSeek API: ${response.status}` });
+          }
+
+          const result = await response.json();
+          const analysis = result.choices?.[0]?.message?.content || "Sin respuesta del modelo";
+          return { analysis, model: result.model || "deepseek-chat", usage: result.usage };
+        } catch (err: any) {
+          if (err.code === "BAD_REQUEST" || err.code === "INTERNAL_SERVER_ERROR") throw err;
+          console.error("[DeepSeek] Fetch error:", err);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Error conectando con DeepSeek API" });
+        }
       }),
   }),
 
