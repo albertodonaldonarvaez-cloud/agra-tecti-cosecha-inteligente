@@ -326,7 +326,7 @@ export const appRouter = router({
         toDate: z.string().optional(),
         forceRefresh: z.boolean().optional(),
       }))
-      .query(async ({ input }) => {
+      .mutation(async ({ input }) => {
         const drizzle = await getDb();
         if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 

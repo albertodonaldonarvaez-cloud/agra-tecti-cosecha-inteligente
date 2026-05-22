@@ -2485,43 +2485,31 @@ function AIAnalysisCard({ parcelId, parcelName, ndviStats, ndreStats, ndmiStats 
   const hasData = ndviStats?.data?.length || ndreStats?.data?.length || ndmiStats?.data?.length;
   const fromDate = ndviStats?.fromDate || "";
   const toDate = ndviStats?.toDate || "";
+  const [aiResult, setAiResult] = useState<any>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [triggered, setTriggered] = useState(false);
 
-  // Auto-cargar analisis cacheado o generar uno nuevo
-  const { data: aiData, isLoading, error, refetch } = trpc.copernicus.getAIAnalysis.useQuery(
-    {
-      parcelId,
-      parcelName,
-      ndviData: ndviStats?.data,
-      ndreData: ndreStats?.data,
-      ndmiData: ndmiStats?.data,
-      fromDate,
-      toDate,
-    },
-    {
-      enabled: !!parcelId && !!hasData,
-      staleTime: 30 * 60 * 1000, // 30 min antes de re-fetch
-      retry: false,
-    }
-  );
+  const analyzeMut = trpc.copernicus.getAIAnalysis.useMutation({
+    onSuccess: (data: any) => { setAiResult(data); setAiError(null); },
+    onError: (err: any) => { setAiError(err.message || "Error"); },
+  });
 
-  // Refrescar forzando nueva generacion
-  const { data: refreshData, isLoading: refreshing, refetch: doRefresh } = trpc.copernicus.getAIAnalysis.useQuery(
-    {
-      parcelId,
-      parcelName,
-      ndviData: ndviStats?.data,
-      ndreData: ndreStats?.data,
-      ndmiData: ndmiStats?.data,
-      fromDate,
-      toDate,
-      forceRefresh: true,
-    },
-    { enabled: false, retry: false }
-  );
+  // Auto-trigger cuando hay datos espectrales disponibles
+  useEffect(() => {
+    if (!hasData || !parcelId || triggered || analyzeMut.isPending) return;
+    setTriggered(true);
+    analyzeMut.mutate({ parcelId, parcelName, ndviData: ndviStats?.data, ndreData: ndreStats?.data, ndmiData: ndmiStats?.data, fromDate, toDate });
+  }, [hasData, parcelId]);
 
-  const analysis = refreshData?.analysis || aiData?.analysis;
-  const isCached = refreshData ? refreshData.cached : aiData?.cached;
-  const loading = isLoading || refreshing;
+  const handleRefresh = useCallback(() => {
+    setAiResult(null);
+    setAiError(null);
+    analyzeMut.mutate({ parcelId, parcelName, ndviData: ndviStats?.data, ndreData: ndreStats?.data, ndmiData: ndmiStats?.data, fromDate, toDate, forceRefresh: true });
+  }, [parcelId, parcelName, ndviStats, ndreStats, ndmiStats, fromDate, toDate, analyzeMut]);
+
+  const analysis = aiResult?.analysis;
+  const isCached = aiResult?.cached;
+  const loading = analyzeMut.isPending;
 
   return (
     <GlassCard className="p-4 border border-purple-100/50 bg-gradient-to-br from-purple-50/20 to-indigo-50/10" hover={false}>
@@ -2538,11 +2526,11 @@ function AIAnalysisCard({ parcelId, parcelName, ndviStats, ndreStats, ndmiStats 
         </div>
         {analysis && (
           <button
-            onClick={() => doRefresh()}
-            disabled={refreshing}
+            onClick={handleRefresh}
+            disabled={loading}
             className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium text-purple-600 hover:bg-purple-50 transition"
           >
-            {refreshing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+            {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
             Regenerar
           </button>
         )}
@@ -2555,14 +2543,11 @@ function AIAnalysisCard({ parcelId, parcelName, ndviStats, ndreStats, ndmiStats 
         </div>
       )}
 
-      {error && !analysis && (
+      {aiError && !analysis && (
         <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-700">
-          {(() => {
-            const msg = (error as any)?.message || (error as any)?.data?.message || String(error) || "";
-            if (msg.includes("API Key") || msg.includes("configurado") || msg.includes("BAD_REQUEST"))
-              return "⚙️ Configura la API Key de IA en la sección de Ajustes para activar el análisis inteligente.";
-            return `⚠️ ${msg || "No se pudo generar el análisis. Intenta más tarde."}`;
-          })()}
+          {aiError.includes("API Key") || aiError.includes("configurado") || aiError.includes("BAD_REQUEST")
+            ? "⚙️ Configura la API Key de IA en la sección de Ajustes para activar el análisis inteligente."
+            : `⚠️ ${aiError}`}
         </div>
       )}
 
@@ -2575,7 +2560,7 @@ function AIAnalysisCard({ parcelId, parcelName, ndviStats, ndreStats, ndmiStats 
         </div>
       )}
 
-      {!analysis && !error && !loading && (
+      {!analysis && !aiError && !loading && (
         <div className="rounded-lg bg-gray-50/50 p-3 text-center">
           <p className="text-[11px] text-gray-400">Esperando datos espectrales para generar análisis...</p>
         </div>
