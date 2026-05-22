@@ -6,11 +6,52 @@ import { getProxiedImageUrl } from "@/lib/imageProxy";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Package, TrendingUp, CheckCircle, Cloud, Calendar as CalendarIcon, RefreshCw, ChevronDown, ChevronUp, Sparkles, X, Satellite, MapPin, Wifi, WifiOff, ClipboardList, BookOpen, Users, Brain, Leaf, ArrowRight } from "lucide-react";
+import { Package, TrendingUp, CheckCircle, Cloud, Calendar as CalendarIcon, RefreshCw, ChevronDown, ChevronUp, Sparkles, X, Satellite, MapPin, WifiOff, ClipboardList, BookOpen, Users, Brain, Leaf, ArrowRight, ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState, useCallback } from "react";
+import { useLocation } from "wouter";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
-const UPDATE_VERSION = "2.5.0";
+const UPDATE_VERSION = "2.0";
+
+const TOUR_STEPS = [
+  {
+    title: "¡Bienvenido a AGRA v2.0!",
+    subtitle: "Tu sistema de gestión agrícola ahora es más poderoso",
+    features: [
+      { icon: BookOpen, color: "from-green-400 to-emerald-500", bg: "bg-green-50", border: "border-green-100", title: "Libreta de Campo Digital", desc: "Registra actividades, productos y personal" },
+      { icon: ClipboardList, color: "from-amber-400 to-orange-500", bg: "bg-amber-50", border: "border-amber-100", title: "Notas Georreferenciadas", desc: "Reporta con foto + GPS, asigna al equipo" },
+      { icon: WifiOff, color: "from-blue-400 to-indigo-500", bg: "bg-blue-50", border: "border-blue-100", title: "App Offline", desc: "Trabaja sin internet, sincroniza después" },
+      { icon: Satellite, color: "from-purple-400 to-violet-500", bg: "bg-purple-50", border: "border-purple-100", title: "Telemetría Satelital", desc: "NDVI · NDRE · NDMI con Sentinel-2" },
+      { icon: Brain, color: "from-indigo-400 to-purple-600", bg: "bg-indigo-50", border: "border-indigo-100", title: "Análisis con IA", desc: "Resumen agronómico automático inteligente" },
+      { icon: Users, color: "from-cyan-400 to-blue-500", bg: "bg-cyan-50", border: "border-cyan-100", title: "Equipo y Telegram", desc: "Notificaciones automáticas al personal" },
+    ],
+    action: null,
+  },
+  {
+    title: "📋 Notas de Campo",
+    subtitle: "Reporta observaciones georreferenciadas con foto y GPS",
+    description: "Crea reportes de plagas, daños mecánicos, problemas de riego y más. Cada nota incluye foto obligatoria, ubicación GPS automática y se puede asignar a un colaborador para seguimiento. Las notas aparecen en el mapa de la parcela.",
+    highlights: ["📍 GPS automático al crear nota", "📸 Foto obligatoria como evidencia", "👤 Asigna al personal de campo", "🔔 Notificación por Telegram", "🗺️ Visualización en mapa"],
+    action: "/field-notes",
+    actionLabel: "Ir a Notas de Campo",
+  },
+  {
+    title: "📖 Libreta de Campo",
+    subtitle: "Registro digital de todas las actividades agrícolas",
+    description: "Documenta riegos, fertilizaciones, podas, aplicaciones fitosanitarias y cualquier actividad. Vincula productos del almacén, herramientas y asigna colaboradores responsables. Todo queda registrado con fecha, parcela y evidencia fotográfica.",
+    highlights: ["🌿 Riego, fertilización, podas, control de plagas", "📦 Productos y herramientas del almacén", "👥 Asigna personal responsable", "📸 Fotos de evidencia", "📊 Historial completo por parcela"],
+    action: "/field-notebook",
+    actionLabel: "Ir a Libreta de Campo",
+  },
+  {
+    title: "🛰️ Telemetría Satelital",
+    subtitle: "Monitoreo multiespectral con imágenes Sentinel-2",
+    description: "Analiza el estado de tus parcelas con 3 índices espectrales: NDVI (vigor vegetativo), NDRE (nitrógeno y clorofila) y NDMI (estrés hídrico). Incluye evolución temporal, ortofoto de drone y análisis inteligente con IA que correlaciona datos satelitales con producción real.",
+    highlights: ["🌱 NDVI — Vigor vegetativo", "🧪 NDRE — Nitrógeno y clorofila", "💧 NDMI — Estrés hídrico", "📈 Evolución temporal interactiva", "🤖 Análisis IA con datos de cosecha"],
+    action: "/parcel-analysis",
+    actionLabel: "Ir a Análisis de Parcela",
+  },
+] as const;
 
 export default function Home() {
   return (
@@ -28,6 +69,8 @@ function HomeContent() {
   const [tableSortField, setTableSortField] = useState<string>("dateKey");
   const [tableSortOrder, setTableSortOrder] = useState<"asc" | "desc">("desc");
   const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [tourStep, setTourStep] = useState(0);
+  const [, navigate] = useLocation();
 
   // Mostrar modal de novedades una vez por version
   useEffect(() => {
@@ -41,7 +84,21 @@ function HomeContent() {
   const dismissUpdateModal = useCallback(() => {
     localStorage.setItem(`agra_update_seen_${UPDATE_VERSION}`, "true");
     setShowUpdateModal(false);
+    setTourStep(0);
   }, []);
+
+  const handleTourNext = useCallback(() => {
+    if (tourStep < TOUR_STEPS.length - 1) setTourStep(s => s + 1);
+    else dismissUpdateModal();
+  }, [tourStep, dismissUpdateModal]);
+
+  const handleTourAction = useCallback(() => {
+    const step = TOUR_STEPS[tourStep];
+    if (step.action) {
+      dismissUpdateModal();
+      navigate(step.action);
+    }
+  }, [tourStep, dismissUpdateModal, navigate]);
   
   // ====== OPTIMIZACIÓN: Usar endpoints agregados en lugar de descargar todas las cajas ======
   
@@ -653,108 +710,124 @@ function HomeContent() {
         </DialogContent>
       </Dialog>
 
-      {/* ===== MODAL DE NOVEDADES ===== */}
-      {showUpdateModal && (
+      {/* ===== TOUR DE NOVEDADES ===== */}
+      {showUpdateModal && (() => {
+        const step = TOUR_STEPS[tourStep];
+        const isOverview = tourStep === 0;
+        const isLast = tourStep === TOUR_STEPS.length - 1;
+
+        return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-3 sm:p-4" onClick={dismissUpdateModal}>
-          <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-300" onClick={e => e.stopPropagation()}>
+          <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
             {/* Header gradient */}
-            <div className="relative bg-gradient-to-br from-green-500 via-emerald-500 to-teal-600 px-6 py-7 text-white overflow-hidden">
+            <div className="relative bg-gradient-to-br from-green-500 via-emerald-500 to-teal-600 px-6 py-6 text-white overflow-hidden">
               <div className="absolute inset-0 opacity-10">
                 <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full bg-white/20" />
                 <div className="absolute -bottom-8 -left-8 w-32 h-32 rounded-full bg-white/15" />
               </div>
               <div className="relative">
-                <div className="flex items-center gap-2 mb-1">
-                  <Sparkles className="w-5 h-5 text-yellow-300" />
-                  <span className="text-xs font-bold bg-white/20 px-2.5 py-0.5 rounded-full tracking-wider uppercase">Actualización v{UPDATE_VERSION}</span>
-                </div>
-                <h2 className="text-2xl font-bold mt-2">¡Nuevas herramientas!</h2>
-                <p className="text-sm text-white/80 mt-1">Tu sistema de gestión agrícola ahora es más poderoso</p>
+                {isOverview && (
+                  <div className="flex items-center gap-2 mb-1">
+                    <Sparkles className="w-5 h-5 text-yellow-300" />
+                    <span className="text-xs font-bold bg-white/20 px-2.5 py-0.5 rounded-full tracking-wider uppercase">Actualización v{UPDATE_VERSION}</span>
+                  </div>
+                )}
+                <h2 className="text-xl sm:text-2xl font-bold mt-1">{step.title}</h2>
+                <p className="text-sm text-white/80 mt-1">{step.subtitle}</p>
               </div>
               <button onClick={dismissUpdateModal} className="absolute top-4 right-4 p-1.5 rounded-full bg-white/20 hover:bg-white/30 transition">
                 <X className="w-4 h-4 text-white" />
               </button>
+              {/* Step indicators */}
+              <div className="flex gap-1.5 mt-4 relative">
+                {TOUR_STEPS.map((_, i) => (
+                  <button key={i} onClick={() => setTourStep(i)}
+                    className={`h-1.5 rounded-full transition-all duration-300 ${i === tourStep ? "bg-white w-8" : "bg-white/30 w-4 hover:bg-white/50"}`} />
+                ))}
+                <span className="ml-auto text-[10px] text-white/60">{tourStep + 1} / {TOUR_STEPS.length}</span>
+              </div>
             </div>
 
-            {/* Features */}
-            <div className="px-5 py-4 space-y-3 max-h-[55vh] overflow-y-auto">
-              {/* Feature 1: Libreta de campo */}
-              <div className="flex items-start gap-3 p-3 rounded-2xl bg-green-50/70 border border-green-100/80">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center flex-shrink-0 shadow-sm">
-                  <BookOpen className="w-5 h-5 text-white" />
+            {/* Content */}
+            <div className="px-5 py-4 max-h-[55vh] overflow-y-auto">
+              {isOverview ? (
+                <div className="space-y-2.5">
+                  {(step as any).features.map((f: any, i: number) => {
+                    const FIcon = f.icon;
+                    return (
+                      <div key={i} className={`flex items-center gap-3 p-3 rounded-2xl ${f.bg}/70 border ${f.border}/80`}>
+                        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${f.color} flex items-center justify-center flex-shrink-0 shadow-sm`}>
+                          <FIcon className="w-5 h-5 text-white" />
+                        </div>
+                        <div className="min-w-0">
+                          <h4 className="text-sm font-bold text-gray-900">{f.title}</h4>
+                          <p className="text-xs text-gray-500 leading-snug">{f.desc}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div>
-                  <h4 className="text-sm font-bold text-gray-900">Libreta de Campo Digital</h4>
-                  <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">Registra actividades de campo, aplicaciones de productos, uso de herramientas y asigna personal directamente desde la app.</p>
+              ) : (
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-700 leading-relaxed">
+                    {(step as any).description}
+                  </p>
+                  <div className="bg-gray-50 rounded-2xl p-4 space-y-2">
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Características principales</p>
+                    {(step as any).highlights?.map((h: string, i: number) => (
+                      <div key={i} className="flex items-start gap-2">
+                        <span className="text-sm leading-relaxed text-gray-700">{h}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-
-              {/* Feature 2: Notas de campo */}
-              <div className="flex items-start gap-3 p-3 rounded-2xl bg-amber-50/70 border border-amber-100/80">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center flex-shrink-0 shadow-sm">
-                  <ClipboardList className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-gray-900">Notas de Campo Georreferenciadas</h4>
-                  <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">Reporta plagas, daños o problemas con foto y GPS. Asigna notas al personal de campo para su seguimiento y resolución en tiempo real.</p>
-                </div>
-              </div>
-
-              {/* Feature 3: App Offline */}
-              <div className="flex items-start gap-3 p-3 rounded-2xl bg-blue-50/70 border border-blue-100/80">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center flex-shrink-0 shadow-sm">
-                  <WifiOff className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-gray-900">App Offline – Sin Internet</h4>
-                  <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">Trabaja sin conexión en campo. La app se instala en tu teléfono y sincroniza automáticamente cuando recuperas señal. ¡Sin interrupciones!</p>
-                </div>
-              </div>
-
-              {/* Feature 4: Telemetría satelital */}
-              <div className="flex items-start gap-3 p-3 rounded-2xl bg-purple-50/70 border border-purple-100/80">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-400 to-violet-500 flex items-center justify-center flex-shrink-0 shadow-sm">
-                  <Satellite className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-gray-900">Telemetría Satelital</h4>
-                  <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">Monitorea tus parcelas con imágenes Sentinel-2 del programa Copernicus. Índices NDVI, NDRE y NDMI para vigor, nitrógeno y estrés hídrico.</p>
-                </div>
-              </div>
-
-              {/* Feature 5: Análisis IA */}
-              <div className="flex items-start gap-3 p-3 rounded-2xl bg-indigo-50/70 border border-indigo-100/80">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-400 to-purple-600 flex items-center justify-center flex-shrink-0 shadow-sm">
-                  <Brain className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-gray-900">Análisis Inteligente con IA</h4>
-                  <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">Resumen agronómico automático que correlaciona datos satelitales con producción real para recomendaciones accionables.</p>
-                </div>
-              </div>
-
-              {/* Feature 6: Telegram */}
-              <div className="flex items-start gap-3 p-3 rounded-2xl bg-cyan-50/70 border border-cyan-100/80">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center flex-shrink-0 shadow-sm">
-                  <Users className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-gray-900">Colaboradores y Telegram</h4>
-                  <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">Gestiona tu equipo de campo. Notificaciones automáticas por Telegram cuando se asignan notas o cambian de estado.</p>
-                </div>
-              </div>
+              )}
             </div>
 
             {/* Footer */}
-            <div className="px-5 py-4 bg-gray-50/80 border-t border-gray-100">
-              <button onClick={dismissUpdateModal}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold text-sm shadow-lg hover:shadow-xl transition-all active:scale-[0.98]">
-                <Leaf className="w-4 h-4" /> ¡Explorar ahora! <ArrowRight className="w-4 h-4" />
-              </button>
+            <div className="px-5 py-4 bg-gray-50/80 border-t border-gray-100 space-y-2">
+              {/* Action button (go to page) */}
+              {!isOverview && step.action && (
+                <button onClick={handleTourAction}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-2xl bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold text-sm shadow-lg hover:shadow-xl transition-all active:scale-[0.98]">
+                  <ArrowRight className="w-4 h-4" /> {(step as any).actionLabel}
+                </button>
+              )}
+              {/* Navigation */}
+              <div className="flex items-center gap-2">
+                {tourStep > 0 ? (
+                  <button onClick={() => setTourStep(s => s - 1)}
+                    className="flex items-center gap-1 px-4 py-2.5 rounded-2xl border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-100 transition">
+                    <ChevronLeft className="w-4 h-4" /> Anterior
+                  </button>
+                ) : (
+                  <button onClick={dismissUpdateModal}
+                    className="px-4 py-2.5 rounded-2xl text-gray-400 text-sm hover:text-gray-600 transition">
+                    Omitir tour
+                  </button>
+                )}
+                <button onClick={handleTourNext}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-2xl font-bold text-sm transition-all active:scale-[0.98] ${
+                    isOverview
+                      ? "bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg hover:shadow-xl"
+                      : isLast
+                        ? "bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg hover:shadow-xl"
+                        : "bg-green-50 text-green-700 border border-green-200 hover:bg-green-100"
+                  }`}>
+                  {isOverview ? (
+                    <><Leaf className="w-4 h-4" /> Iniciar recorrido <ArrowRight className="w-4 h-4" /></>
+                  ) : isLast ? (
+                    <><Sparkles className="w-4 h-4" /> ¡Listo, explorar!</>
+                  ) : (
+                    <>Siguiente <ChevronRight className="w-4 h-4" /></>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
