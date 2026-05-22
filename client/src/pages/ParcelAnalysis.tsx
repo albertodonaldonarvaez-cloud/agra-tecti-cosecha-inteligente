@@ -1,4 +1,4 @@
-﻿import { useAuth } from "@/_core/hooks/useAuth";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { GlassCard } from "@/components/GlassCard";
 import { ProtectedPage } from "@/components/ProtectedPage";
 import { APP_LOGO } from "@/const";
@@ -2397,24 +2397,25 @@ function SatelliteTab({ parcel }: { parcel: any }) {
 
   // Merge data para chart combinado
   const combinedChart = useMemo(() => {
-    const dateMap = new Map<string, any>();
+    const dateMap: Record<string, any> = {};
     const addData = (data: any[] | undefined, prefix: string) => {
       if (!data) return;
       for (const d of data) {
-        const existing = dateMap.get(d.date) || {
-          date: d.date,
-          dateLabel: new Date(d.date + "T12:00:00Z").toLocaleDateString("es-MX", { day: "2-digit", month: "short" }),
-        };
-        existing[`${prefix}_mean`] = d.mean;
-        existing[`${prefix}_min`] = d.min;
-        existing[`${prefix}_max`] = d.max;
-        dateMap.set(d.date, existing);
+        if (!dateMap[d.date]) {
+          dateMap[d.date] = {
+            date: d.date,
+            dateLabel: new Date(d.date + "T12:00:00Z").toLocaleDateString("es-MX", { day: "2-digit", month: "short" }),
+          };
+        }
+        dateMap[d.date][`${prefix}_mean`] = d.mean;
+        dateMap[d.date][`${prefix}_min`] = d.min;
+        dateMap[d.date][`${prefix}_max`] = d.max;
       }
     };
     addData(ndviStats?.data, "ndvi");
     addData(ndreStats?.data, "ndre");
     addData(ndmiStats?.data, "ndmi");
-    return Array.from(dateMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+    return Object.values(dateMap).sort((a: any, b: any) => a.date.localeCompare(b.date));
   }, [ndviStats, ndreStats, ndmiStats]);
 
   // Fechas historicas para timeline (cada 15 dias, ultimos 3 meses)
