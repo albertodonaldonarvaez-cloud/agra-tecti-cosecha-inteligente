@@ -123,6 +123,7 @@ export const appRouter = router({
     /**
      * Histórico de índice espectral (NDVI, NDRE, NDMI).
      * Retorna serie de tiempo con mean/min/max/stDev.
+     * Si no se especifica fromDate, usa la fecha de la primera cosecha de la parcela.
      */
     getIndexStats: protectedProcedure
       .input(z.object({
@@ -135,7 +136,7 @@ export const appRouter = router({
         const drizzle = await getDb();
         if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-        const [parcel] = await drizzle.select({ polygon: parcels.polygon }).from(parcels).where(eq(parcels.id, input.parcelId));
+        const [parcel] = await drizzle.select({ polygon: parcels.polygon, code: parcels.code }).from(parcels).where(eq(parcels.id, input.parcelId));
         if (!parcel?.polygon) throw new TRPCError({ code: "BAD_REQUEST", message: "La parcela no tiene polígono definido" });
 
         let geoPolygon: any;
@@ -155,7 +156,28 @@ export const appRouter = router({
         }
 
         const to = input.toDate || new Date().toISOString().split("T")[0];
-        const from = input.fromDate || new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0];
+
+        // Si no hay fromDate, buscar la primera fecha de cosecha de esta parcela
+        let from = input.fromDate;
+        if (!from && parcel.code) {
+          try {
+            const [firstBox] = await drizzle
+              .select({ submissionTime: boxes.submissionTime })
+              .from(boxes)
+              .where(eq(boxes.parcelCode, parcel.code))
+              .orderBy(boxes.submissionTime)
+              .limit(1);
+            if (firstBox?.submissionTime) {
+              from = new Date(firstBox.submissionTime).toISOString().split("T")[0];
+            }
+          } catch (e) {
+            console.log("[Copernicus] No se pudo obtener primera fecha de cosecha:", e);
+          }
+        }
+        // Fallback: últimos 6 meses
+        if (!from) {
+          from = new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0];
+        }
 
         const { getIndexHistory } = await import("./copernicusService");
         const data = await getIndexHistory(geoPolygon, from, to, input.indexType as any);

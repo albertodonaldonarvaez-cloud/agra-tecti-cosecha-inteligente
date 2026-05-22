@@ -2255,7 +2255,7 @@ const INDEX_CONFIGS_UI = {
 
 type IdxKey = "NDVI" | "NDRE" | "NDMI";
 const ALL_INDICES: IdxKey[] = ["NDVI", "NDRE", "NDMI"];
-/** Subcomponente: tarjeta de mapa individual por indice */
+/** Subcomponente: tarjeta de mapa individual por indice con hover de valor */
 function IndexMapCard({ parcelId, indexType, showLegend }: { parcelId: number; indexType: IdxKey; showLegend?: boolean }) {
   const cfg = INDEX_CONFIGS_UI[indexType];
   const { data, isLoading, error } = trpc.copernicus.getIndexMap.useQuery(
@@ -2271,6 +2271,53 @@ function IndexMapCard({ parcelId, indexType, showLegend }: { parcelId: number; i
     return statsData.data[statsData.data.length - 1];
   }, [statsData]);
   const status = lastVal ? cfg.getStatus(lastVal.mean) : null;
+
+  // Canvas para lectura de pixel
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const imgElRef = useRef<HTMLImageElement>(null);
+  const [hoverVal, setHoverVal] = useState<{ x: number; y: number; value: string; desc: string; color: string; visible: boolean }>({ x: 0, y: 0, value: "", desc: "", color: "", visible: false });
+
+  // Parsear hex a RGB
+  const hexToRgb = useCallback((hex: string) => {
+    const n = parseInt(hex.replace("#", ""), 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  }, []);
+
+  // Dibujar imagen en canvas cuando cargue
+  const handleImgLoad = useCallback(() => {
+    if (!imgElRef.current || !canvasRef.current) return;
+    const img = imgElRef.current;
+    const canvas = canvasRef.current;
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext("2d");
+    if (ctx) ctx.drawImage(img, 0, 0);
+  }, []);
+
+  // Hover: leer pixel del canvas y mapear al color más cercano de la leyenda
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!canvasRef.current || !imgElRef.current) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const scaleX = canvasRef.current.width / rect.width;
+    const scaleY = canvasRef.current.height / rect.height;
+    const ctx = canvasRef.current.getContext("2d");
+    if (!ctx) return;
+    const pixel = ctx.getImageData(Math.floor(x * scaleX), Math.floor(y * scaleY), 1, 1).data;
+    const pr = pixel[0], pg = pixel[1], pb = pixel[2], pa = pixel[3];
+    if (pa < 10) { setHoverVal(p => ({ ...p, visible: false })); return; }
+
+    // Encontrar el color más cercano de la leyenda
+    let bestDist = Infinity;
+    let bestStop = cfg.colorStops[0];
+    for (const stop of cfg.colorStops) {
+      const rgb = hexToRgb(stop.color);
+      const dist = Math.sqrt((pr - rgb.r) ** 2 + (pg - rgb.g) ** 2 + (pb - rgb.b) ** 2);
+      if (dist < bestDist) { bestDist = dist; bestStop = stop; }
+    }
+    setHoverVal({ x, y, value: bestStop.label, desc: bestStop.desc, color: bestStop.color, visible: true });
+  }, [cfg, hexToRgb]);
 
   return (
     <div className="flex flex-col h-full">
@@ -2299,8 +2346,21 @@ function IndexMapCard({ parcelId, indexType, showLegend }: { parcelId: number; i
           </p>
         </div>
       ) : data?.image ? (
-        <div className="relative rounded-xl overflow-hidden border border-gray-200/50 shadow-sm">
-          <img src={data.image} alt={`Mapa ${indexType}`} className="w-full h-auto" />
+        <div
+          className="relative rounded-xl overflow-hidden border border-gray-200/50 shadow-sm cursor-crosshair"
+          onMouseMove={handleMouseMove}
+          onMouseLeave={() => setHoverVal(p => ({ ...p, visible: false }))}
+        >
+          <canvas ref={canvasRef} className="hidden" />
+          <img ref={imgElRef} src={data.image} alt={`Mapa ${indexType}`} className="w-full h-auto" onLoad={handleImgLoad} crossOrigin="anonymous" />
+          {hoverVal.visible && (
+            <div
+              className="absolute pointer-events-none bg-black/85 text-white text-[10px] px-2 py-1 rounded-lg shadow-xl z-10 whitespace-nowrap backdrop-blur-sm"
+              style={{ left: Math.min(hoverVal.x + 10, 140), top: Math.max(hoverVal.y - 28, 4) }}
+            >
+              <span style={{ color: hoverVal.color }}>●</span> {indexType} {hoverVal.value} · {hoverVal.desc}
+            </div>
+          )}
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent p-1.5">
             <p className="text-[9px] text-white/80">{cfg.formula}</p>
           </div>
@@ -2339,21 +2399,73 @@ function IndexMapCard({ parcelId, indexType, showLegend }: { parcelId: number; i
   );
 }
 
-/** Subcomponente: mapa historico thumbnail */
+/** Subcomponente: mapa historico thumbnail con hover */
 function HistoricalMapThumb({ parcelId, indexType, date, dateLabel }: { parcelId: number; indexType: IdxKey; date: string; dateLabel: string }) {
+  const cfg = INDEX_CONFIGS_UI[indexType];
   const { data, isLoading } = trpc.copernicus.getIndexMap.useQuery(
     { parcelId, indexType, date },
     { staleTime: 30 * 60 * 1000, retry: 1 }
   );
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const [hover, setHover] = useState<{ x: number; y: number; value: string; desc: string; color: string; visible: boolean }>({ x: 0, y: 0, value: "", desc: "", color: "", visible: false });
+
+  const hexToRgb = useCallback((hex: string) => {
+    const n = parseInt(hex.replace("#", ""), 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  }, []);
+
+  const handleLoad = useCallback(() => {
+    if (!imgRef.current || !canvasRef.current) return;
+    const c = canvasRef.current;
+    c.width = imgRef.current.naturalWidth;
+    c.height = imgRef.current.naturalHeight;
+    const ctx = c.getContext("2d");
+    if (ctx) ctx.drawImage(imgRef.current, 0, 0);
+  }, []);
+
+  const handleMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!canvasRef.current || !imgRef.current) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    const sx = canvasRef.current.width / rect.width, sy = canvasRef.current.height / rect.height;
+    const ctx = canvasRef.current.getContext("2d");
+    if (!ctx) return;
+    const px = ctx.getImageData(Math.floor(x * sx), Math.floor(y * sy), 1, 1).data;
+    if (px[3] < 10) { setHover(p => ({ ...p, visible: false })); return; }
+    let best = Infinity, stop = cfg.colorStops[0];
+    for (const s of cfg.colorStops) {
+      const c = hexToRgb(s.color);
+      const d = Math.sqrt((px[0]-c.r)**2 + (px[1]-c.g)**2 + (px[2]-c.b)**2);
+      if (d < best) { best = d; stop = s; }
+    }
+    setHover({ x, y, value: stop.label, desc: stop.desc, color: stop.color, visible: true });
+  }, [cfg, hexToRgb]);
+
   return (
     <div className="flex flex-col items-center gap-1">
-      <div className="relative w-full aspect-square rounded-lg overflow-hidden border border-gray-200/50 shadow-sm bg-gray-50">
+      <div
+        className="relative w-full aspect-square rounded-lg overflow-hidden border border-gray-200/50 shadow-sm bg-gray-50 cursor-crosshair"
+        onMouseMove={handleMove}
+        onMouseLeave={() => setHover(p => ({ ...p, visible: false }))}
+      >
+        <canvas ref={canvasRef} className="hidden" />
         {isLoading ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <Loader2 className="w-4 h-4 animate-spin text-gray-300" />
           </div>
         ) : data?.image ? (
-          <img src={data.image} alt={`${indexType} ${dateLabel}`} className="w-full h-full object-cover" />
+          <>
+            <img ref={imgRef} src={data.image} alt={`${indexType} ${dateLabel}`} className="w-full h-full object-cover" onLoad={handleLoad} crossOrigin="anonymous" />
+            {hover.visible && (
+              <div
+                className="absolute pointer-events-none bg-black/85 text-white text-[9px] px-1.5 py-0.5 rounded shadow-lg z-10 whitespace-nowrap"
+                style={{ left: Math.min(hover.x + 6, 80), top: Math.max(hover.y - 20, 2) }}
+              >
+                <span style={{ color: hover.color }}>●</span> {hover.value}
+              </div>
+            )}
+          </>
         ) : (
           <div className="absolute inset-0 flex items-center justify-center">
             <CameraOff className="w-3 h-3 text-gray-300" />
@@ -2418,19 +2530,27 @@ function SatelliteTab({ parcel }: { parcel: any }) {
     return Object.values(dateMap).sort((a: any, b: any) => a.date.localeCompare(b.date));
   }, [ndviStats, ndreStats, ndmiStats]);
 
-  // Fechas historicas para timeline (cada 15 dias, ultimos 3 meses)
+  // Fechas historicas para timeline — desde primera cosecha hasta hoy
   const timelineDates = useMemo(() => {
     const dates: { date: string; label: string }[] = [];
     const now = new Date();
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getTime() - i * 15 * 86400000);
+    // Usar la fecha de inicio real (primera cosecha) si está disponible
+    const startStr = ndviStats?.fromDate;
+    const start = startStr ? new Date(startStr + "T12:00:00Z") : new Date(now.getTime() - 90 * 86400000);
+    const totalDays = Math.max(Math.floor((now.getTime() - start.getTime()) / 86400000), 30);
+    // Generar hasta 8 snapshots distribuidos uniformemente
+    const numSnapshots = Math.min(8, Math.max(4, Math.floor(totalDays / 15)));
+    const stepDays = Math.floor(totalDays / (numSnapshots - 1));
+    for (let i = 0; i < numSnapshots; i++) {
+      const d = new Date(start.getTime() + i * stepDays * 86400000);
+      if (d > now) break;
       dates.push({
         date: d.toISOString().split("T")[0],
-        label: d.toLocaleDateString("es-MX", { day: "2-digit", month: "short" }),
+        label: d.toLocaleDateString("es-MX", { day: "2-digit", month: "short", year: totalDays > 365 ? "2-digit" : undefined }),
       });
     }
     return dates;
-  }, []);
+  }, [ndviStats]);
 
   const chartsLoading = ndviLoading || ndreLoading || ndmiLoading;
 
@@ -2460,7 +2580,7 @@ function SatelliteTab({ parcel }: { parcel: any }) {
           </div>
           <div className="flex-1">
             <h2 className="text-lg font-bold text-gray-900">Dashboard Multiespectral</h2>
-            <p className="text-[11px] text-gray-500">Sentinel-2 L2A · NDVI + NDRE + NDMI · Comparacion simultanea</p>
+            <p className="text-[11px] text-gray-500">Sentinel-2 L2A · NDVI + NDRE + NDMI{ndviStats?.fromDate ? ` · Desde ${ndviStats.fromDate}` : " · Comparacion simultanea"}</p>
           </div>
           <button
             onClick={() => setShowLegend(!showLegend)}
