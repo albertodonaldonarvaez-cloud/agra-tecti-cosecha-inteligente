@@ -2354,12 +2354,12 @@ function IndexMapCard({ parcelId, indexType, showLegend }: { parcelId: number; i
         </div>
       ) : data?.image ? (
         <div
-          className="relative rounded-xl overflow-hidden border border-gray-200/50 shadow-sm cursor-crosshair"
+          className="relative rounded-xl overflow-hidden border border-gray-200/50 shadow-sm cursor-crosshair aspect-[4/3] bg-gray-900"
           onMouseMove={handleMouseMove}
           onMouseLeave={() => setHoverVal(p => ({ ...p, visible: false }))}
         >
           <canvas ref={canvasRef} className="hidden" />
-          <img ref={imgElRef} src={data.image} alt={`Mapa ${indexType}`} className="w-full h-auto" onLoad={handleImgLoad} crossOrigin="anonymous" />
+          <img ref={imgElRef} src={data.image} alt={`Mapa ${indexType}`} className="absolute inset-0 w-full h-full object-contain" onLoad={handleImgLoad} crossOrigin="anonymous" />
           {hoverVal.visible && (
             <div
               className="absolute pointer-events-none bg-black/85 text-white text-[10px] px-2 py-1 rounded-lg shadow-xl z-10 whitespace-nowrap backdrop-blur-sm"
@@ -2759,33 +2759,39 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
         </div>
       </GlassCard>
 
-      {/* FILA 1: 4 mapas (Ortofoto Drone + 3 indices) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <GlassCard className="p-0 overflow-hidden" hover={false}>
-          {droneInfo ? (
-            <div className="relative aspect-square">
-              <div className="absolute inset-0" style={{ display: "grid", gridTemplateColumns: `repeat(${droneInfo.cols}, 1fr)`, gridTemplateRows: `repeat(${droneInfo.rows}, 1fr)` }}>
-                {droneInfo.tiles.map((url: string, i: number) => (
-                  <img key={i} src={url} alt="" className="w-full h-full object-cover block" crossOrigin="anonymous" onError={(e) => { (e.target as HTMLImageElement).style.opacity = "0"; }} />
-                ))}
-              </div>
-              <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/60 to-transparent p-2 z-10">
-                <div className="flex items-center gap-1.5">
-                  <Camera className="w-3 h-3 text-white/90" />
-                  <span className="text-[10px] font-bold text-white/95">Ortofoto Drone</span>
+      {/* ORTOFOTO DRONE — Card prominente */}
+      <GlassCard className="p-0 overflow-hidden" hover={false}>
+        {droneInfo ? (
+          <div className="relative" style={{ aspectRatio: `${droneInfo.cols} / ${droneInfo.rows}`, maxHeight: "380px" }}>
+            <div className="absolute inset-0" style={{ display: "grid", gridTemplateColumns: `repeat(${droneInfo.cols}, 1fr)`, gridTemplateRows: `repeat(${droneInfo.rows}, 1fr)` }}>
+              {droneInfo.tiles.map((url: string, i: number) => (
+                <img key={i} src={url} alt="" className="w-full h-full object-cover block" crossOrigin="anonymous" onError={(e) => { (e.target as HTMLImageElement).style.opacity = "0"; }} />
+              ))}
+            </div>
+            <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/60 via-black/20 to-transparent p-3 z-10">
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 backdrop-blur-sm">
+                  <Camera className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <span className="text-xs font-bold text-white">Ortofoto Drone</span>
+                  <p className="text-[10px] text-white/70">RGB · {droneInfo.flightDate}</p>
                 </div>
               </div>
-              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2 z-10">
-                <p className="text-[9px] text-white/90">RGB · {droneInfo.flightDate}</p>
-              </div>
             </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center bg-gray-50 aspect-square p-3">
-              <CameraOff className="w-5 h-5 text-gray-300 mb-1" />
-              <p className="text-[9px] text-gray-400 text-center">Sin vuelo de drone</p>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center bg-gray-50/50 py-10 gap-2">
+            <div className="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center">
+              <CameraOff className="w-6 h-6 text-gray-300" />
             </div>
-          )}
-        </GlassCard>
+            <p className="text-xs text-gray-400">Sin vuelo de drone disponible</p>
+          </div>
+        )}
+      </GlassCard>
+
+      {/* FILA INDICES: 3 mapas espectrales con altura uniforme */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {ALL_INDICES.map((idx) => (
           <GlassCard key={idx} className="p-3" hover={false}>
             <IndexMapCard parcelId={parcel.id} indexType={idx} showLegend={showLegend} />
