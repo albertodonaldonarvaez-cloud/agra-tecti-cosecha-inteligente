@@ -2760,6 +2760,7 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
       {/* ORTOFOTO DRONE — Card prominente */}
       <GlassCard className="p-0 overflow-hidden" hover={false}>
         {droneInfo ? (
+          <div className="mx-auto max-w-lg">
           <div className="relative" style={{ display: "grid", gridTemplateColumns: `repeat(${droneInfo.cols}, 1fr)`, gridTemplateRows: `repeat(${droneInfo.rows}, 1fr)` }}>
             {droneInfo.tiles.map((url: string, i: number) => (
               <img key={i} src={url} alt="" className="w-full h-full object-cover block" crossOrigin="anonymous" onError={(e) => { (e.target as HTMLImageElement).style.opacity = "0"; }} />
@@ -2775,6 +2776,7 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
                 </div>
               </div>
             </div>
+          </div>
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center bg-gray-50/50 py-10 gap-2">
