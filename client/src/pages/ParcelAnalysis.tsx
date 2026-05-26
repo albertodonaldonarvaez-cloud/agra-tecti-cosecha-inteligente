@@ -2642,25 +2642,23 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
     const dLat = maxLat - minLat;
     const dLng = maxLng - minLng;
 
-    // Zoom moderado para ver la parcela COMPLETA con contexto
-    // ~4 tiles de ancho = parcela entera visible con margen
-    const targetTilesAcross = 4;
+    // Zoom equilibrado: parcela completa visible con buen detalle
+    const targetTilesAcross = 6;
     const maxSpan = Math.max(dLng, dLat * Math.cos(centerLat * Math.PI / 180));
-    let zoom = 17;
-    for (let z = 18; z >= 12; z--) {
+    let zoom = 18;
+    for (let z = 19; z >= 13; z--) {
       const tileDeg = 360 / Math.pow(2, z);
       if (maxSpan / tileDeg <= targetTilesAcross) { zoom = z; break; }
     }
 
     const n = Math.pow(2, zoom);
 
-    // Tiles que cubren el bbox + 1 tile de margen para que no se corte
-    const minTileX = Math.floor(((minLng + 180) / 360) * n) - 1;
-    const maxTileX = Math.floor(((maxLng + 180) / 360) * n) + 1;
-    const minTileY = Math.floor((1 - Math.log(Math.tan(maxLat * Math.PI / 180) + 1 / Math.cos(maxLat * Math.PI / 180)) / Math.PI) / 2 * n) - 1;
-    const maxTileY = Math.floor((1 - Math.log(Math.tan(minLat * Math.PI / 180) + 1 / Math.cos(minLat * Math.PI / 180)) / Math.PI) / 2 * n) + 1;
+    // Tiles que cubren el bbox de la parcela
+    const minTileX = Math.floor(((minLng + 180) / 360) * n);
+    const maxTileX = Math.floor(((maxLng + 180) / 360) * n);
+    const minTileY = Math.floor((1 - Math.log(Math.tan(maxLat * Math.PI / 180) + 1 / Math.cos(maxLat * Math.PI / 180)) / Math.PI) / 2 * n);
+    const maxTileY = Math.floor((1 - Math.log(Math.tan(minLat * Math.PI / 180) + 1 / Math.cos(minLat * Math.PI / 180)) / Math.PI) / 2 * n);
 
-    // Cubrir parcela completa con margen
     const cols = maxTileX - minTileX + 1;
     const rows = maxTileY - minTileY + 1;
 
@@ -2762,22 +2760,18 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
       {/* ORTOFOTO DRONE — Card prominente */}
       <GlassCard className="p-0 overflow-hidden" hover={false}>
         {droneInfo ? (
-          <div className="bg-gray-900 flex items-center justify-center" style={{ maxHeight: "400px" }}>
-            <div className="relative w-full" style={{ aspectRatio: `${droneInfo.cols} / ${droneInfo.rows}`, maxHeight: "400px", maxWidth: "100%" }}>
-              <div className="absolute inset-0" style={{ display: "grid", gridTemplateColumns: `repeat(${droneInfo.cols}, 1fr)`, gridTemplateRows: `repeat(${droneInfo.rows}, 1fr)` }}>
-                {droneInfo.tiles.map((url: string, i: number) => (
-                  <img key={i} src={url} alt="" className="w-full h-full object-cover block" crossOrigin="anonymous" onError={(e) => { (e.target as HTMLImageElement).style.opacity = "0"; }} />
-                ))}
-              </div>
-              <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/60 via-black/20 to-transparent p-3 z-10">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 backdrop-blur-sm">
-                    <Camera className="w-4 h-4 text-white" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold text-white">Ortofoto Drone</span>
-                    <p className="text-[10px] text-white/70">RGB · {droneInfo.flightDate}</p>
-                  </div>
+          <div className="relative" style={{ display: "grid", gridTemplateColumns: `repeat(${droneInfo.cols}, 1fr)`, gridTemplateRows: `repeat(${droneInfo.rows}, 1fr)` }}>
+            {droneInfo.tiles.map((url: string, i: number) => (
+              <img key={i} src={url} alt="" className="w-full h-full object-cover block" crossOrigin="anonymous" onError={(e) => { (e.target as HTMLImageElement).style.opacity = "0"; }} />
+            ))}
+            <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/60 via-black/20 to-transparent p-3 z-10">
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 backdrop-blur-sm">
+                  <Camera className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <span className="text-xs font-bold text-white">Ortofoto Drone</span>
+                  <p className="text-[10px] text-white/70">RGB · {droneInfo.flightDate}</p>
                 </div>
               </div>
             </div>
