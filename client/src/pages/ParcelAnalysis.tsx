@@ -2642,25 +2642,25 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
     const dLat = maxLat - minLat;
     const dLng = maxLng - minLng;
 
-    // Zoom alto para que la imagen sea grande y detallada
-    // Buscamos que la parcela quepa en ~8 tiles de ancho = imagen grande
-    const targetTilesAcross = 8;
+    // Zoom moderado para ver la parcela COMPLETA con contexto
+    // ~4 tiles de ancho = parcela entera visible con margen
+    const targetTilesAcross = 4;
     const maxSpan = Math.max(dLng, dLat * Math.cos(centerLat * Math.PI / 180));
-    let zoom = 19;
-    for (let z = 21; z >= 12; z--) {
+    let zoom = 17;
+    for (let z = 18; z >= 12; z--) {
       const tileDeg = 360 / Math.pow(2, z);
       if (maxSpan / tileDeg <= targetTilesAcross) { zoom = z; break; }
     }
 
     const n = Math.pow(2, zoom);
 
-    // Tiles que cubren el bbox exacto
-    const minTileX = Math.floor(((minLng + 180) / 360) * n);
-    const maxTileX = Math.floor(((maxLng + 180) / 360) * n);
-    const minTileY = Math.floor((1 - Math.log(Math.tan(maxLat * Math.PI / 180) + 1 / Math.cos(maxLat * Math.PI / 180)) / Math.PI) / 2 * n);
-    const maxTileY = Math.floor((1 - Math.log(Math.tan(minLat * Math.PI / 180) + 1 / Math.cos(minLat * Math.PI / 180)) / Math.PI) / 2 * n);
+    // Tiles que cubren el bbox + 1 tile de margen para que no se corte
+    const minTileX = Math.floor(((minLng + 180) / 360) * n) - 1;
+    const maxTileX = Math.floor(((maxLng + 180) / 360) * n) + 1;
+    const minTileY = Math.floor((1 - Math.log(Math.tan(maxLat * Math.PI / 180) + 1 / Math.cos(maxLat * Math.PI / 180)) / Math.PI) / 2 * n) - 1;
+    const maxTileY = Math.floor((1 - Math.log(Math.tan(minLat * Math.PI / 180) + 1 / Math.cos(minLat * Math.PI / 180)) / Math.PI) / 2 * n) + 1;
 
-    // Sin margen extra - cubrir solo la parcela
+    // Cubrir parcela completa con margen
     const cols = maxTileX - minTileX + 1;
     const rows = maxTileY - minTileY + 1;
 
