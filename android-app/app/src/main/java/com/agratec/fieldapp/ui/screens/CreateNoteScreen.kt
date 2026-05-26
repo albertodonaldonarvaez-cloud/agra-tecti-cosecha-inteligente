@@ -108,20 +108,43 @@ fun CreateNoteScreen(onBack: () -> Unit) {
         LocationServices.getFusedLocationProviderClient(context)
     }
 
-    // Location callback
+    // Track best location seen so far
+    var bestLocation by remember { mutableStateOf<Location?>(null) }
+    var gpsStartTime by remember { mutableStateOf(0L) }
+
+    // Location callback — sub-meter precision
     val locationCallback = remember {
         object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val loc = result.lastLocation ?: return
                 locationAccuracy = loc.accuracy
-                if (loc.accuracy <= 5f) {
-                    // GPS con precisión menor a 5m — aceptar
+
+                // Track the best location we've seen
+                if (bestLocation == null || loc.accuracy < (bestLocation?.accuracy ?: Float.MAX_VALUE)) {
+                    bestLocation = loc
+                }
+
+                if (loc.accuracy <= 1.0f) {
+                    // Sub-meter precision achieved — accept
                     currentLocation = loc
-                    locationStatus = "GPS listo (±${loc.accuracy.toInt()}m)"
-                    // Stop updates once we have good accuracy
+                    locationStatus = "📍 GPS preciso (±${String.format("%.1f", loc.accuracy)}m)"
                     fusedLocationClient.removeLocationUpdates(this)
+                } else if (loc.accuracy <= 3.0f) {
+                    locationStatus = "Afinando... (±${String.format("%.1f", loc.accuracy)}m) — espera"
+                } else if (loc.accuracy <= 10.0f) {
+                    locationStatus = "Mejorando... (±${loc.accuracy.toInt()}m)"
                 } else {
-                    locationStatus = "Mejorando precisión (±${loc.accuracy.toInt()}m)..."
+                    locationStatus = "Buscando satélites (±${loc.accuracy.toInt()}m)..."
+                }
+
+                // Timeout: after 2 minutes, accept best available if <3m
+                val elapsed = System.currentTimeMillis() - gpsStartTime
+                if (elapsed > 120_000 && currentLocation == null && bestLocation != null) {
+                    if ((bestLocation?.accuracy ?: Float.MAX_VALUE) <= 3.0f) {
+                        currentLocation = bestLocation
+                        locationStatus = "📍 GPS listo (±${String.format("%.1f", bestLocation!!.accuracy)}m) — mejor disponible"
+                        fusedLocationClient.removeLocationUpdates(this)
+                    }
                 }
             }
         }
@@ -130,10 +153,12 @@ fun CreateNoteScreen(onBack: () -> Unit) {
     // Start GPS when location permission is granted
     @SuppressLint("MissingPermission")
     fun startGpsUpdates() {
-        locationStatus = "Obteniendo ubicación..."
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L)
-            .setMinUpdateIntervalMillis(500L)
-            .setMaxUpdates(60) // max 60 updates (1 min)
+        locationStatus = "Iniciando GPS de alta precisión..."
+        gpsStartTime = System.currentTimeMillis()
+        bestLocation = null
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 500L)
+            .setMinUpdateIntervalMillis(200L)
+            .setWaitForAccurateLocation(true)
             .build()
         fusedLocationClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
     }
