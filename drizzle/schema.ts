@@ -266,6 +266,19 @@ export const parcelAiAnalysis = mysqlTable("parcelAiAnalysis", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+// Cache de datos satelitales (Copernicus) por parcela
+export const parcelSatelliteCache = mysqlTable("parcelSatelliteCache", {
+  id: int("id").autoincrement().primaryKey(),
+  parcelId: int("parcelId").notNull(),
+  dataType: varchar("dataType", { length: 16 }).notNull(), // 'stats' or 'map'
+  indexType: varchar("indexType", { length: 8 }).notNull(), // 'NDVI', 'NDRE', 'NDMI'
+  mapDate: varchar("mapDate", { length: 32 }),
+  data: text("data").notNull(), // JSON string or base64
+  fromDate: varchar("fromDate", { length: 32 }),
+  toDate: varchar("toDate", { length: 32 }),
+  fetchedAt: timestamp("fetchedAt").defaultNow().notNull(),
+});
+
 // Tabla de cultivos
 export const crops = mysqlTable("crops", {
   id: int("id").autoincrement().primaryKey(),

@@ -153,6 +153,22 @@ export const appRouter = router({
         const drizzle = await getDb();
         if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
+        // 1. Buscar en cache (< 7 días)
+        try {
+          const cached = await drizzle.execute(
+            sql`SELECT data, fromDate, toDate, fetchedAt FROM parcelSatelliteCache WHERE parcelId = ${input.parcelId} AND dataType = 'stats' AND indexType = ${input.indexType} AND mapDate IS NULL ORDER BY fetchedAt DESC LIMIT 1`
+          );
+          const row = (cached as any)?.[0] || (cached as any)?.rows?.[0];
+          if (row?.fetchedAt) {
+            const age = Date.now() - new Date(row.fetchedAt).getTime();
+            if (age < 7 * 24 * 60 * 60 * 1000) {
+              console.log(`[Copernicus] Cache HIT stats ${input.indexType} parcela ${input.parcelId} (${Math.round(age / 3600000)}h)`);
+              return { data: JSON.parse(row.data), fromDate: row.fromDate, toDate: row.toDate, indexType: input.indexType, cached: true };
+            }
+          }
+        } catch (e) { console.log("[Copernicus] Cache check error:", e); }
+
+        // 2. No hay cache -> llamar API
         const [parcel] = await drizzle.select({ polygon: parcels.polygon, code: parcels.code }).from(parcels).where(eq(parcels.id, input.parcelId));
         if (!parcel?.polygon) throw new TRPCError({ code: "BAD_REQUEST", message: "La parcela no tiene polígono definido" });
 
@@ -165,40 +181,31 @@ export const appRouter = router({
             geoPolygon = { type: "Polygon", coordinates: [ring] };
           } else if (polyData.type === "Polygon") {
             geoPolygon = polyData;
-          } else {
-            throw new Error("Formato no reconocido");
-          }
-        } catch (e) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Error al parsear el polígono" });
-        }
+          } else { throw new Error("Formato no reconocido"); }
+        } catch (e) { throw new TRPCError({ code: "BAD_REQUEST", message: "Error al parsear el polígono" }); }
 
         const to = input.toDate || new Date().toISOString().split("T")[0];
-
-        // Si no hay fromDate, buscar la primera fecha de cosecha de esta parcela
         let from = input.fromDate;
         if (!from && parcel.code) {
           try {
-            const [firstBox] = await drizzle
-              .select({ submissionTime: boxes.submissionTime })
-              .from(boxes)
-              .where(eq(boxes.parcelCode, parcel.code))
-              .orderBy(boxes.submissionTime)
-              .limit(1);
-            if (firstBox?.submissionTime) {
-              from = new Date(firstBox.submissionTime).toISOString().split("T")[0];
-            }
-          } catch (e) {
-            console.log("[Copernicus] No se pudo obtener primera fecha de cosecha:", e);
-          }
+            const [firstBox] = await drizzle.select({ submissionTime: boxes.submissionTime }).from(boxes).where(eq(boxes.parcelCode, parcel.code)).orderBy(boxes.submissionTime).limit(1);
+            if (firstBox?.submissionTime) { from = new Date(firstBox.submissionTime).toISOString().split("T")[0]; }
+          } catch (e) { console.log("[Copernicus] No se pudo obtener primera fecha de cosecha:", e); }
         }
-        // Fallback: últimos 6 meses
-        if (!from) {
-          from = new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0];
-        }
+        if (!from) { from = new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0]; }
 
         const { getIndexHistory } = await import("./copernicusService");
         const data = await getIndexHistory(geoPolygon, from, to, input.indexType as any);
-        return { data, fromDate: from, toDate: to, indexType: input.indexType };
+
+        // 3. Guardar en cache
+        try {
+          await drizzle.execute(
+            sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, data, fromDate, toDate, fetchedAt) VALUES (${input.parcelId}, 'stats', ${input.indexType}, NULL, ${JSON.stringify(data)}, ${from}, ${to}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), fromDate = VALUES(fromDate), toDate = VALUES(toDate), fetchedAt = NOW()`
+          );
+          console.log(`[Copernicus] Cache SAVED stats ${input.indexType} parcela ${input.parcelId}`);
+        } catch (e) { console.log("[Copernicus] Cache save error:", e); }
+
+        return { data, fromDate: from, toDate: to, indexType: input.indexType, cached: false };
       }),
 
     // Backward compat: getNDVI → getIndexStats with NDVI
@@ -272,6 +279,25 @@ export const appRouter = router({
       .query(async ({ input }) => {
         const drizzle = await getDb();
         if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const mapDateKey = input.date || "latest";
+
+        // 1. Buscar en cache
+        try {
+          const cached = await drizzle.execute(
+            sql`SELECT data, fetchedAt FROM parcelSatelliteCache WHERE parcelId = ${input.parcelId} AND dataType = 'map' AND indexType = ${input.indexType} AND mapDate = ${mapDateKey} ORDER BY fetchedAt DESC LIMIT 1`
+          );
+          const row = (cached as any)?.[0] || (cached as any)?.rows?.[0];
+          if (row?.fetchedAt) {
+            const age = Date.now() - new Date(row.fetchedAt).getTime();
+            if (age < 7 * 24 * 60 * 60 * 1000) {
+              console.log(`[Copernicus] Cache HIT map ${input.indexType} parcela ${input.parcelId} (${Math.round(age / 3600000)}h)`);
+              return { image: row.data, message: null, cached: true };
+            }
+          }
+        } catch (e) { console.log("[Copernicus] Map cache check error:", e); }
+
+        // 2. No hay cache -> llamar API
         const [parcel] = await drizzle.select({ polygon: parcels.polygon }).from(parcels).where(eq(parcels.id, input.parcelId));
         if (!parcel?.polygon) throw new TRPCError({ code: "BAD_REQUEST", message: "La parcela no tiene polígono definido" });
         let geoPolygon: any;
@@ -287,7 +313,17 @@ export const appRouter = router({
         const { getIndexMapImage } = await import("./copernicusService");
         const buffer = await getIndexMapImage(geoPolygon, input.indexType as any, input.date);
         if (!buffer) return { image: null, message: `Sin mapa ${input.indexType} disponible` };
-        return { image: `data:image/png;base64,${buffer.toString("base64")}`, message: null };
+        const imageB64 = `data:image/png;base64,${buffer.toString("base64")}`;
+
+        // 3. Guardar en cache
+        try {
+          await drizzle.execute(
+            sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, data, fetchedAt) VALUES (${input.parcelId}, 'map', ${input.indexType}, ${mapDateKey}, ${imageB64}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), fetchedAt = NOW()`
+          );
+          console.log(`[Copernicus] Cache SAVED map ${input.indexType} parcela ${input.parcelId}`);
+        } catch (e) { console.log("[Copernicus] Map cache save error:", e); }
+
+        return { image: imageB64, message: null, cached: false };
       }),
 
     // Backward compat: getNDVIMap
@@ -487,6 +523,84 @@ IMPORTANTE:
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Error conectando con API de IA" });
         }
       }),
+
+    // Sincronización semanal de datos satelitales para todas las parcelas
+    syncAllParcels: adminProcedure.mutation(async () => {
+      const drizzle = await getDb();
+      if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const allParcels = await drizzle.select({ id: parcels.id, name: parcels.name, code: parcels.code, polygon: parcels.polygon }).from(parcels);
+      const withPolygon = allParcels.filter((p: any) => p.polygon);
+      console.log(`[Satellite Sync] Iniciando sync de ${withPolygon.length} parcelas...`);
+
+      let updated = 0;
+      let errors = 0;
+      const indices: ("NDVI" | "NDRE" | "NDMI")[] = ["NDVI", "NDRE", "NDMI"];
+
+      for (const parcel of withPolygon) {
+        let geoPolygon: any;
+        try {
+          const polyData = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon as string) : parcel.polygon;
+          if (Array.isArray(polyData)) {
+            const ring = polyData.map((p: any) => [p.lng || p.longitude || p[1], p.lat || p.latitude || p[0]]);
+            if (ring.length > 0 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])) ring.push([...ring[0]]);
+            geoPolygon = { type: "Polygon", coordinates: [ring] };
+          } else if (polyData.type === "Polygon") { geoPolygon = polyData; }
+          else { continue; }
+        } catch { errors++; continue; }
+
+        const to = new Date().toISOString().split("T")[0];
+        let from: string;
+        try {
+          const [firstBox] = await drizzle.select({ submissionTime: boxes.submissionTime }).from(boxes).where(eq(boxes.parcelCode, parcel.code || "")).orderBy(boxes.submissionTime).limit(1);
+          from = firstBox?.submissionTime ? new Date(firstBox.submissionTime).toISOString().split("T")[0] : new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0];
+        } catch { from = new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0]; }
+
+        const { getIndexHistory, getIndexMapImage } = await import("./copernicusService");
+
+        for (const idx of indices) {
+          try {
+            const data = await getIndexHistory(geoPolygon, from, to, idx);
+            await drizzle.execute(
+              sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, data, fromDate, toDate, fetchedAt) VALUES (${parcel.id}, 'stats', ${idx}, NULL, ${JSON.stringify(data)}, ${from}, ${to}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), fromDate = VALUES(fromDate), toDate = VALUES(toDate), fetchedAt = NOW()`
+            );
+            const buffer = await getIndexMapImage(geoPolygon, idx);
+            if (buffer) {
+              const imageB64 = `data:image/png;base64,${buffer.toString("base64")}`;
+              await drizzle.execute(
+                sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, data, fetchedAt) VALUES (${parcel.id}, 'map', ${idx}, 'latest', ${imageB64}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), fetchedAt = NOW()`
+              );
+            }
+            console.log(`[Satellite Sync] ✓ ${parcel.name || parcel.code} - ${idx}`);
+          } catch (e) {
+            console.error(`[Satellite Sync] ✗ ${parcel.name || parcel.code} - ${idx}:`, e);
+            errors++;
+          }
+        }
+        updated++;
+      }
+
+      // Notificar por Telegram
+      try {
+        const { getGlobalSetting } = await import("./globalSettings");
+        const botToken = await getGlobalSetting("telegramBotToken");
+        const groupChatId = await getGlobalSetting("telegramGroupChatId");
+        if (botToken && groupChatId) {
+          const now = new Date().toLocaleString("es-MX", { timeZone: "America/Mexico_City" });
+          const nextSync = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString("es-MX", { timeZone: "America/Mexico_City", day: "2-digit", month: "short", year: "numeric" });
+          const msg = `🛰️ *SINCRONIZACIÓN SATELITAL*\n\n✅ ${updated} parcelas actualizadas\n${errors > 0 ? `⚠️ ${errors} errores\n` : ""}📊 NDVI · NDRE · NDMI\n⏰ ${now}\n\n📅 Próxima sync: ${nextSync}`;
+          await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: groupChatId, text: msg, parse_mode: "Markdown" }),
+          });
+          console.log(`[Satellite Sync] Telegram notificado`);
+        }
+      } catch (e) { console.error("[Satellite Sync] Error Telegram:", e); }
+
+      console.log(`[Satellite Sync] Completado: ${updated} parcelas, ${errors} errores`);
+      return { updated, errors, total: withPolygon.length };
+    }),
   }),
 
   // Sincronización automática
