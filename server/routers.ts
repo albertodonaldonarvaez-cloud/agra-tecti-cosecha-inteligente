@@ -163,12 +163,12 @@ export const appRouter = router({
             const age = Date.now() - new Date(row.fetchedAt).getTime();
             if (age < 7 * 24 * 60 * 60 * 1000) {
               console.log(`[Copernicus] Cache HIT stats ${input.indexType} parcela ${input.parcelId} (${Math.round(age / 3600000)}h)`);
-              return { data: JSON.parse(row.data), fromDate: row.fromDate, toDate: row.toDate, indexType: input.indexType, cached: true };
+              return { data: JSON.parse((cached as any).data), fromDate: (cached as any).fromDate, toDate: (cached as any).toDate, indexType: input.indexType, cached: true };
             }
           }
         } catch (e) { console.log("[Copernicus] Cache check error:", e); }
 
-        // 2. No hay cache -> llamar API
+        // 2. No hay cache o es viejo -> llamar API
         const [parcel] = await drizzle.select({ polygon: parcels.polygon, code: parcels.code }).from(parcels).where(eq(parcels.id, input.parcelId));
         if (!parcel?.polygon) throw new TRPCError({ code: "BAD_REQUEST", message: "La parcela no tiene polígono definido" });
 
@@ -181,18 +181,34 @@ export const appRouter = router({
             geoPolygon = { type: "Polygon", coordinates: [ring] };
           } else if (polyData.type === "Polygon") {
             geoPolygon = polyData;
-          } else { throw new Error("Formato no reconocido"); }
-        } catch (e) { throw new TRPCError({ code: "BAD_REQUEST", message: "Error al parsear el polígono" }); }
+          } else {
+            throw new Error("Formato no reconocido");
+          }
+        } catch (e) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Error al parsear el polígono" });
+        }
 
         const to = input.toDate || new Date().toISOString().split("T")[0];
+
         let from = input.fromDate;
         if (!from && parcel.code) {
           try {
-            const [firstBox] = await drizzle.select({ submissionTime: boxes.submissionTime }).from(boxes).where(eq(boxes.parcelCode, parcel.code)).orderBy(boxes.submissionTime).limit(1);
-            if (firstBox?.submissionTime) { from = new Date(firstBox.submissionTime).toISOString().split("T")[0]; }
-          } catch (e) { console.log("[Copernicus] No se pudo obtener primera fecha de cosecha:", e); }
+            const [firstBox] = await drizzle
+              .select({ submissionTime: boxes.submissionTime })
+              .from(boxes)
+              .where(eq(boxes.parcelCode, parcel.code))
+              .orderBy(boxes.submissionTime)
+              .limit(1);
+            if (firstBox?.submissionTime) {
+              from = new Date(firstBox.submissionTime).toISOString().split("T")[0];
+            }
+          } catch (e) {
+            console.log("[Copernicus] No se pudo obtener primera fecha de cosecha:", e);
+          }
         }
-        if (!from) { from = new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0]; }
+        if (!from) {
+          from = new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0];
+        }
 
         const { getIndexHistory } = await import("./copernicusService");
         const data = await getIndexHistory(geoPolygon, from, to, input.indexType as any);
@@ -284,18 +300,17 @@ export const appRouter = router({
 
         // 1. Buscar en cache
         try {
-          const cached = await drizzle.execute(
+          const [cached] = await drizzle.execute(
             sql`SELECT data, fetchedAt FROM parcelSatelliteCache WHERE parcelId = ${input.parcelId} AND dataType = 'map' AND indexType = ${input.indexType} AND mapDate = ${mapDateKey} ORDER BY fetchedAt DESC LIMIT 1`
           );
-          const row = (cached as any)?.[0] || (cached as any)?.rows?.[0];
-          if (row?.fetchedAt) {
-            const age = Date.now() - new Date(row.fetchedAt).getTime();
+          if (cached && (cached as any).fetchedAt) {
+            const age = Date.now() - new Date((cached as any).fetchedAt).getTime();
             if (age < 7 * 24 * 60 * 60 * 1000) {
               console.log(`[Copernicus] Cache HIT map ${input.indexType} parcela ${input.parcelId} (${Math.round(age / 3600000)}h)`);
-              return { image: row.data, message: null, cached: true };
+              return { image: (cached as any).data, message: null, cached: true };
             }
           }
-        } catch (e) { console.log("[Copernicus] Map cache check error:", e); }
+        } catch (e) { console.log("[Copernicus] Cache check error:", e); }
 
         // 2. No hay cache -> llamar API
         const [parcel] = await drizzle.select({ polygon: parcels.polygon }).from(parcels).where(eq(parcels.id, input.parcelId));
@@ -321,7 +336,7 @@ export const appRouter = router({
             sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, data, fetchedAt) VALUES (${input.parcelId}, 'map', ${input.indexType}, ${mapDateKey}, ${imageB64}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), fetchedAt = NOW()`
           );
           console.log(`[Copernicus] Cache SAVED map ${input.indexType} parcela ${input.parcelId}`);
-        } catch (e) { console.log("[Copernicus] Map cache save error:", e); }
+        } catch (e) { console.log("[Copernicus] Cache save error:", e); }
 
         return { image: imageB64, message: null, cached: false };
       }),
@@ -529,6 +544,7 @@ IMPORTANTE:
       const drizzle = await getDb();
       if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
+      // Obtener todas las parcelas con polígono
       const allParcels = await drizzle.select({ id: parcels.id, name: parcels.name, code: parcels.code, polygon: parcels.polygon }).from(parcels);
       const withPolygon = allParcels.filter((p: any) => p.polygon);
       console.log(`[Satellite Sync] Iniciando sync de ${withPolygon.length} parcelas...`);
@@ -560,10 +576,12 @@ IMPORTANTE:
 
         for (const idx of indices) {
           try {
+            // Stats
             const data = await getIndexHistory(geoPolygon, from, to, idx);
             await drizzle.execute(
               sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, data, fromDate, toDate, fetchedAt) VALUES (${parcel.id}, 'stats', ${idx}, NULL, ${JSON.stringify(data)}, ${from}, ${to}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), fromDate = VALUES(fromDate), toDate = VALUES(toDate), fetchedAt = NOW()`
             );
+            // Mapa actual
             const buffer = await getIndexMapImage(geoPolygon, idx);
             if (buffer) {
               const imageB64 = `data:image/png;base64,${buffer.toString("base64")}`;

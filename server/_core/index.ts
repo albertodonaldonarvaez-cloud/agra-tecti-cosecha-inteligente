@@ -332,6 +332,101 @@ async function startServer() {
     }).catch((err) => {
       console.error("Error al iniciar TelegramFieldNotesBot:", err);
     });
+
+    // Sincronizar datos satelitales al iniciar (30s después para que la BD esté lista)
+    // Luego se puede programar semanalmente desde Settings
+    setTimeout(async () => {
+      try {
+        console.log("[Satellite Sync] Ejecutando sync inicial al arrancar...");
+        const { getDb } = await import("../db");
+        const { parcels, boxes } = await import("../../drizzle/schema");
+        const { eq, sql } = await import("drizzle-orm");
+        const drizzle = await getDb();
+        if (!drizzle) { console.log("[Satellite Sync] DB no disponible, saltando sync inicial"); return; }
+
+        // Verificar si hay credenciales de Copernicus
+        const [apiCfg] = await drizzle.execute(sql`SELECT copernicusClientId, copernicusClientSecret FROM apiConfig LIMIT 1`);
+        const cfg = apiCfg as any;
+        if (!cfg?.copernicusClientId || !cfg?.copernicusClientSecret) {
+          console.log("[Satellite Sync] Sin credenciales Copernicus, saltando sync inicial");
+          return;
+        }
+
+        // Verificar si ya hay cache reciente (< 24h) para no re-sincronizar en cada restart rápido
+        const [recentCache] = await drizzle.execute(
+          sql`SELECT COUNT(*) as cnt FROM parcelSatelliteCache WHERE fetchedAt > DATE_SUB(NOW(), INTERVAL 24 HOUR)`
+        );
+        if ((recentCache as any)?.cnt > 0) {
+          console.log(`[Satellite Sync] Cache reciente encontrado (${(recentCache as any).cnt} registros < 24h), saltando sync`);
+          return;
+        }
+
+        // Ejecutar sync
+        const allParcels = await drizzle.select({ id: parcels.id, name: parcels.name, code: parcels.code, polygon: parcels.polygon }).from(parcels);
+        const withPolygon = allParcels.filter((p: any) => p.polygon);
+        console.log(`[Satellite Sync] Sincronizando ${withPolygon.length} parcelas...`);
+
+        let updated = 0, errors = 0;
+        const indices: ("NDVI" | "NDRE" | "NDMI")[] = ["NDVI", "NDRE", "NDMI"];
+        const { getIndexHistory, getIndexMapImage } = await import("../copernicusService");
+
+        for (const parcel of withPolygon) {
+          let geoPolygon: any;
+          try {
+            const polyData = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon as string) : parcel.polygon;
+            if (Array.isArray(polyData)) {
+              const ring = polyData.map((p: any) => [p.lng || p.longitude || p[1], p.lat || p.latitude || p[0]]);
+              if (ring.length > 0 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])) ring.push([...ring[0]]);
+              geoPolygon = { type: "Polygon", coordinates: [ring] };
+            } else if (polyData.type === "Polygon") { geoPolygon = polyData; }
+            else { continue; }
+          } catch { errors++; continue; }
+
+          const to = new Date().toISOString().split("T")[0];
+          let from: string;
+          try {
+            const [firstBox] = await drizzle.select({ submissionTime: boxes.submissionTime }).from(boxes).where(eq(boxes.parcelCode, parcel.code || "")).orderBy(boxes.submissionTime).limit(1);
+            from = firstBox?.submissionTime ? new Date(firstBox.submissionTime).toISOString().split("T")[0] : new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0];
+          } catch { from = new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0]; }
+
+          for (const idx of indices) {
+            try {
+              const data = await getIndexHistory(geoPolygon, from, to, idx);
+              await drizzle.execute(
+                sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, data, fromDate, toDate, fetchedAt) VALUES (${parcel.id}, 'stats', ${idx}, NULL, ${JSON.stringify(data)}, ${from}, ${to}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), fromDate = VALUES(fromDate), toDate = VALUES(toDate), fetchedAt = NOW()`
+              );
+              const buffer = await getIndexMapImage(geoPolygon, idx);
+              if (buffer) {
+                const imageB64 = `data:image/png;base64,${buffer.toString("base64")}`;
+                await drizzle.execute(
+                  sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, data, fetchedAt) VALUES (${parcel.id}, 'map', ${idx}, 'latest', ${imageB64}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), fetchedAt = NOW()`
+                );
+              }
+            } catch (e) { errors++; }
+          }
+          updated++;
+        }
+
+        console.log(`[Satellite Sync] Sync inicial completada: ${updated} parcelas, ${errors} errores`);
+
+        // Notificar por Telegram
+        try {
+          const { getGlobalSetting } = await import("../globalSettings");
+          const botToken = await getGlobalSetting("telegramBotToken");
+          const groupChatId = await getGlobalSetting("telegramGroupChatId");
+          if (botToken && groupChatId) {
+            const now = new Date().toLocaleString("es-MX", { timeZone: "America/Mexico_City" });
+            const msg = `🛰️ *SYNC SATELITAL (AUTO)*\n\n✅ ${updated} parcelas actualizadas\n${errors > 0 ? `⚠️ ${errors} errores\n` : ""}📊 NDVI · NDRE · NDMI\n⏰ ${now}\n🔄 Al iniciar sistema`;
+            await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ chat_id: groupChatId, text: msg, parse_mode: "Markdown" }),
+            });
+          }
+        } catch {}
+      } catch (err) {
+        console.error("[Satellite Sync] Error en sync inicial:", err);
+      }
+    }, 30000); // 30 segundos después del arranque
   });
 
   // ============================================

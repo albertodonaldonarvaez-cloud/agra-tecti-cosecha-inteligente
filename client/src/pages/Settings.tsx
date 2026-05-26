@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save, Clock, Timer, CheckCircle, XCircle, Zap, Send, MessageCircle, Eye, EyeOff, Plane, Link2, Unlink, Wheat, ClipboardList } from "lucide-react";
+import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save, Clock, Timer, CheckCircle, XCircle, Zap, Send, MessageCircle, Eye, EyeOff, Plane, Link2, Unlink, Wheat, ClipboardList, Loader2 } from "lucide-react";
 import LocationMapPicker from "@/components/LocationMapPicker";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -1682,6 +1682,11 @@ function CopernicusSection() {
     onError: (error: any) => toast.error("Error de conexión: " + error.message),
   });
 
+  const syncParcels = trpc.copernicus.syncAllParcels.useMutation({
+    onSuccess: (data: any) => toast.success(`🛰️ Sync completada: ${data.updated} parcelas actualizadas${data.errors > 0 ? `, ${data.errors} errores` : ""}`),
+    onError: (error: any) => toast.error("Error en sync: " + error.message),
+  });
+
   useEffect(() => {
     if (config) {
       setClientId(config.clientId || "");
@@ -1782,6 +1787,41 @@ function CopernicusSection() {
             </Button>
           )}
         </div>
+
+        {/* Botón de sincronización satelital manual */}
+        {config?.hasSecret && (
+          <div className="border-t border-indigo-200 pt-3 mt-3">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <p className="text-sm font-medium text-indigo-800">📡 Sincronización Satelital</p>
+                <p className="text-[10px] text-indigo-500">Descarga datos NDVI, NDRE y NDMI de todas las parcelas y los guarda en cache</p>
+              </div>
+            </div>
+            <Button
+              onClick={() => {
+                toast.loading("🛰️ Sincronizando datos satelitales... esto puede tardar varios minutos", { id: "sat-sync" });
+                syncParcels.mutate(undefined, {
+                  onSettled: () => toast.dismiss("sat-sync"),
+                });
+              }}
+              disabled={syncParcels.isPending}
+              variant="outline"
+              className="w-full border-indigo-300 text-indigo-700 hover:bg-indigo-100"
+            >
+              {syncParcels.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Sincronizando parcelas...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Sincronizar Datos Satelitales Ahora
+                </>
+              )}
+            </Button>
+          </div>
+        )}
       </div>
     </GlassCard>
   );
