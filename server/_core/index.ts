@@ -366,11 +366,13 @@ async function startServer() {
         const withPolygon = allParcels.filter((p: any) => p.polygon);
         console.log(`[Satellite Sync] Sincronizando ${withPolygon.length} parcelas...`);
 
-        let updated = 0, errors = 0;
+        let updated = 0, errorCount = 0;
+        const errorDetails: string[] = [];
         const indices: ("NDVI" | "NDRE" | "NDMI")[] = ["NDVI", "NDRE", "NDMI"];
         const { getIndexHistory, getIndexMapImage } = await import("../copernicusService");
 
         for (const parcel of withPolygon) {
+          const parcelLabel = parcel.name || parcel.code || `ID:${parcel.id}`;
           let geoPolygon: any;
           try {
             const polyData = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon as string) : parcel.polygon;
@@ -379,8 +381,8 @@ async function startServer() {
               if (ring.length > 0 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])) ring.push([...ring[0]]);
               geoPolygon = { type: "Polygon", coordinates: [ring] };
             } else if (polyData.type === "Polygon") { geoPolygon = polyData; }
-            else { continue; }
-          } catch { errors++; continue; }
+            else { errorCount++; errorDetails.push(`${parcelLabel}: formato no reconocido`); continue; }
+          } catch { errorCount++; errorDetails.push(`${parcelLabel}: error parseando polígono`); continue; }
 
           const to = new Date().toISOString().split("T")[0];
           let from: string;
@@ -402,24 +404,29 @@ async function startServer() {
                   sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, data, fetchedAt) VALUES (${parcel.id}, 'map', ${idx}, 'latest', ${imageB64}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), fetchedAt = NOW()`
                 );
               }
-            } catch (e) { errors++; }
+            } catch (e: any) { errorCount++; errorDetails.push(`${parcelLabel} (${idx}): ${e?.message?.substring(0, 80) || "error"}`); }
           }
           updated++;
         }
 
-        console.log(`[Satellite Sync] Sync inicial completada: ${updated} parcelas, ${errors} errores`);
+        console.log(`[Satellite Sync] Sync inicial completada: ${updated} parcelas, ${errorCount} errores`);
 
-        // Notificar por Telegram
+        // Notificar por Telegram al grupo de reportes
         try {
           const { getGlobalSetting } = await import("../globalSettings");
           const botToken = await getGlobalSetting("telegramBotToken");
-          const groupChatId = await getGlobalSetting("telegramGroupChatId");
-          if (botToken && groupChatId) {
+          const chatId = await getGlobalSetting("telegramChatId");
+          if (botToken && chatId) {
             const now = new Date().toLocaleString("es-MX", { timeZone: "America/Mexico_City" });
-            const msg = `🛰️ *SYNC SATELITAL (AUTO)*\n\n✅ ${updated} parcelas actualizadas\n${errors > 0 ? `⚠️ ${errors} errores\n` : ""}📊 NDVI · NDRE · NDMI\n⏰ ${now}\n🔄 Al iniciar sistema`;
+            let msg = `🛰️ *SYNC SATELITAL (AUTO)*\n\n✅ ${updated} parcelas procesadas\n📊 NDVI · NDRE · NDMI\n⏰ ${now}\n🔄 Al iniciar sistema`;
+            if (errorCount > 0) {
+              const errorList = errorDetails.slice(0, 20).map(e => `  • ${e}`).join("\n");
+              msg += `\n\n⚠️ *${errorCount} errores:*\n${errorList}`;
+              if (errorDetails.length > 20) msg += `\n  ... y ${errorDetails.length - 20} más`;
+            }
             await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
               method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ chat_id: groupChatId, text: msg, parse_mode: "Markdown" }),
+              body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: "Markdown" }),
             });
           }
         } catch {}

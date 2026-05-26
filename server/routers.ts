@@ -530,7 +530,6 @@ IMPORTANTE:
             toDate: to,
             model,
           });
-
           return { analysis, model, cached: false };
         } catch (err: any) {
           if (err.code === "BAD_REQUEST" || err.code === "INTERNAL_SERVER_ERROR") throw err;
@@ -544,16 +543,17 @@ IMPORTANTE:
       const drizzle = await getDb();
       if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-      // Obtener todas las parcelas con polígono
       const allParcels = await drizzle.select({ id: parcels.id, name: parcels.name, code: parcels.code, polygon: parcels.polygon }).from(parcels);
       const withPolygon = allParcels.filter((p: any) => p.polygon);
       console.log(`[Satellite Sync] Iniciando sync de ${withPolygon.length} parcelas...`);
 
       let updated = 0;
-      let errors = 0;
+      let errorCount = 0;
+      const errorDetails: string[] = [];
       const indices: ("NDVI" | "NDRE" | "NDMI")[] = ["NDVI", "NDRE", "NDMI"];
 
       for (const parcel of withPolygon) {
+        const parcelLabel = parcel.name || parcel.code || `ID:${parcel.id}`;
         let geoPolygon: any;
         try {
           const polyData = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon as string) : parcel.polygon;
@@ -562,8 +562,8 @@ IMPORTANTE:
             if (ring.length > 0 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])) ring.push([...ring[0]]);
             geoPolygon = { type: "Polygon", coordinates: [ring] };
           } else if (polyData.type === "Polygon") { geoPolygon = polyData; }
-          else { continue; }
-        } catch { errors++; continue; }
+          else { errorCount++; errorDetails.push(`${parcelLabel}: polígono formato no reconocido`); continue; }
+        } catch (e: any) { errorCount++; errorDetails.push(`${parcelLabel}: error parseando polígono`); continue; }
 
         const to = new Date().toISOString().split("T")[0];
         let from: string;
@@ -576,12 +576,10 @@ IMPORTANTE:
 
         for (const idx of indices) {
           try {
-            // Stats
             const data = await getIndexHistory(geoPolygon, from, to, idx);
             await drizzle.execute(
               sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, data, fromDate, toDate, fetchedAt) VALUES (${parcel.id}, 'stats', ${idx}, NULL, ${JSON.stringify(data)}, ${from}, ${to}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), fromDate = VALUES(fromDate), toDate = VALUES(toDate), fetchedAt = NOW()`
             );
-            // Mapa actual
             const buffer = await getIndexMapImage(geoPolygon, idx);
             if (buffer) {
               const imageB64 = `data:image/png;base64,${buffer.toString("base64")}`;
@@ -589,35 +587,42 @@ IMPORTANTE:
                 sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, data, fetchedAt) VALUES (${parcel.id}, 'map', ${idx}, 'latest', ${imageB64}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), fetchedAt = NOW()`
               );
             }
-            console.log(`[Satellite Sync] ✓ ${parcel.name || parcel.code} - ${idx}`);
-          } catch (e) {
-            console.error(`[Satellite Sync] ✗ ${parcel.name || parcel.code} - ${idx}:`, e);
-            errors++;
+            console.log(`[Satellite Sync] ✓ ${parcelLabel} - ${idx}`);
+          } catch (e: any) {
+            const reason = e?.message?.substring(0, 80) || "error desconocido";
+            console.error(`[Satellite Sync] ✗ ${parcelLabel} - ${idx}:`, reason);
+            errorCount++;
+            errorDetails.push(`${parcelLabel} (${idx}): ${reason}`);
           }
         }
         updated++;
       }
 
-      // Notificar por Telegram
+      // Notificar por Telegram al grupo de reportes (telegramChatId)
       try {
         const { getGlobalSetting } = await import("./globalSettings");
         const botToken = await getGlobalSetting("telegramBotToken");
-        const groupChatId = await getGlobalSetting("telegramGroupChatId");
-        if (botToken && groupChatId) {
+        const chatId = await getGlobalSetting("telegramChatId");
+        if (botToken && chatId) {
           const now = new Date().toLocaleString("es-MX", { timeZone: "America/Mexico_City" });
           const nextSync = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString("es-MX", { timeZone: "America/Mexico_City", day: "2-digit", month: "short", year: "numeric" });
-          const msg = `🛰️ *SINCRONIZACIÓN SATELITAL*\n\n✅ ${updated} parcelas actualizadas\n${errors > 0 ? `⚠️ ${errors} errores\n` : ""}📊 NDVI · NDRE · NDMI\n⏰ ${now}\n\n📅 Próxima sync: ${nextSync}`;
+          let msg = `🛰️ *SINCRONIZACIÓN SATELITAL*\n\n✅ ${updated} parcelas procesadas\n📊 NDVI · NDRE · NDMI\n⏰ ${now}\n📅 Próxima sync: ${nextSync}`;
+          if (errorCount > 0) {
+            const errorList = errorDetails.slice(0, 20).map(e => `  • ${e}`).join("\n");
+            msg += `\n\n⚠️ *${errorCount} errores:*\n${errorList}`;
+            if (errorDetails.length > 20) msg += `\n  ... y ${errorDetails.length - 20} más`;
+          }
           await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chat_id: groupChatId, text: msg, parse_mode: "Markdown" }),
+            body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: "Markdown" }),
           });
           console.log(`[Satellite Sync] Telegram notificado`);
         }
       } catch (e) { console.error("[Satellite Sync] Error Telegram:", e); }
 
-      console.log(`[Satellite Sync] Completado: ${updated} parcelas, ${errors} errores`);
-      return { updated, errors, total: withPolygon.length };
+      console.log(`[Satellite Sync] Completado: ${updated} parcelas, ${errorCount} errores`);
+      return { updated, errors: errorCount, errorDetails, total: withPolygon.length };
     }),
   }),
 
