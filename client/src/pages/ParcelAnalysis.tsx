@@ -2762,20 +2762,22 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
       {/* ORTOFOTO DRONE — Card prominente */}
       <GlassCard className="p-0 overflow-hidden" hover={false}>
         {droneInfo ? (
-          <div className="relative" style={{ aspectRatio: `${droneInfo.cols} / ${droneInfo.rows}`, maxHeight: "380px" }}>
-            <div className="absolute inset-0" style={{ display: "grid", gridTemplateColumns: `repeat(${droneInfo.cols}, 1fr)`, gridTemplateRows: `repeat(${droneInfo.rows}, 1fr)` }}>
-              {droneInfo.tiles.map((url: string, i: number) => (
-                <img key={i} src={url} alt="" className="w-full h-full object-cover block" crossOrigin="anonymous" onError={(e) => { (e.target as HTMLImageElement).style.opacity = "0"; }} />
-              ))}
-            </div>
-            <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/60 via-black/20 to-transparent p-3 z-10">
-              <div className="flex items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 backdrop-blur-sm">
-                  <Camera className="w-4 h-4 text-white" />
-                </div>
-                <div>
-                  <span className="text-xs font-bold text-white">Ortofoto Drone</span>
-                  <p className="text-[10px] text-white/70">RGB · {droneInfo.flightDate}</p>
+          <div className="bg-gray-900 flex items-center justify-center" style={{ maxHeight: "400px" }}>
+            <div className="relative w-full" style={{ aspectRatio: `${droneInfo.cols} / ${droneInfo.rows}`, maxHeight: "400px", maxWidth: "100%" }}>
+              <div className="absolute inset-0" style={{ display: "grid", gridTemplateColumns: `repeat(${droneInfo.cols}, 1fr)`, gridTemplateRows: `repeat(${droneInfo.rows}, 1fr)` }}>
+                {droneInfo.tiles.map((url: string, i: number) => (
+                  <img key={i} src={url} alt="" className="w-full h-full object-cover block" crossOrigin="anonymous" onError={(e) => { (e.target as HTMLImageElement).style.opacity = "0"; }} />
+                ))}
+              </div>
+              <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/60 via-black/20 to-transparent p-3 z-10">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 backdrop-blur-sm">
+                    <Camera className="w-4 h-4 text-white" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-white">Ortofoto Drone</span>
+                    <p className="text-[10px] text-white/70">RGB · {droneInfo.flightDate}</p>
+                  </div>
                 </div>
               </div>
             </div>
