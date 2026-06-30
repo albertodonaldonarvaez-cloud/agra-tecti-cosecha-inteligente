@@ -100,7 +100,10 @@ const SEVERITY_COLORS: Record<string, string> = {
 
 function formatDate(dateStr: string) {
   if (!dateStr) return "-";
-  const d = new Date(dateStr);
+  // Fix: dates like "2026-06-29" are parsed as UTC midnight, which becomes June 28 in Mexico (UTC-6).
+  // Adding T12:00:00 ensures the date stays on the correct day in any timezone.
+  const safeDateStr = dateStr.length === 10 ? dateStr + "T12:00:00" : dateStr;
+  const d = new Date(safeDateStr);
   return d.toLocaleDateString("es-MX", { day: "2-digit", month: "short", year: "numeric", timeZone: "America/Mexico_City" });
 }
 
