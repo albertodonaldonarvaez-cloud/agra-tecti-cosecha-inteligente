@@ -3695,5 +3695,129 @@ IMPORTANTE:
         .orderBy(parcels.name);
     }),
   }),
+
+  // ============================================
+  // REPORTS — Datos agregados para reportes PDF
+  // ============================================
+  reports: router({
+    getWeeklyData: protectedProcedure
+      .input(z.object({
+        parcelId: z.number(),
+        parcelCode: z.string(),
+        fromDate: z.string(),
+        toDate: z.string(),
+      }))
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB no disponible" });
+
+        // 1. Datos de parcela
+        const [parcel] = await drizzle.select().from(parcels).where(eq(parcels.id, input.parcelId));
+
+        // 2. Cosecha - stats generales
+        const harvestStats = await webodm.getParcelHarvestStats(input.parcelCode);
+
+        // 3. Cosecha diaria (filtrar por rango)
+        const allDaily = await webodm.getParcelDailyHarvest(input.parcelCode);
+        const dailyHarvest = (allDaily || []).filter((d: any) => {
+          return d.date >= input.fromDate && d.date <= input.toDate;
+        });
+
+        // 4. Datos satelitales del cache
+        const satelliteData: Record<string, any> = {};
+        const satelliteMaps: Record<string, string | null> = {};
+        const indices = ["NDVI", "NDRE", "NDMI"];
+        for (const idx of indices) {
+          try {
+            const [statsRow] = await drizzle.execute(
+              sql`SELECT data, fromDate, toDate, fetchedAt FROM parcelSatelliteCache WHERE parcelId = ${input.parcelId} AND dataType = 'stats' AND indexType = ${idx} AND mapDate IS NULL ORDER BY fetchedAt DESC LIMIT 1`
+            );
+            if (statsRow) {
+              const row = statsRow as any;
+              const parsed = typeof row.data === "string" ? JSON.parse(row.data) : row.data;
+              satelliteData[idx] = { data: parsed, fetchedAt: row.fetchedAt };
+            }
+          } catch (e) { console.error(`[Reports] Error loading ${idx} stats:`, e); }
+
+          try {
+            const [mapRow] = await drizzle.execute(
+              sql`SELECT data FROM parcelSatelliteCache WHERE parcelId = ${input.parcelId} AND dataType = 'map' AND indexType = ${idx} ORDER BY fetchedAt DESC LIMIT 1`
+            );
+            satelliteMaps[idx] = mapRow ? (mapRow as any).data : null;
+          } catch (e) { satelliteMaps[idx] = null; }
+        }
+
+        // 5. Notas de campo del período
+        const notes = await drizzle.select({
+          id: fieldNotes.id,
+          folio: fieldNotes.folio,
+          description: fieldNotes.description,
+          category: fieldNotes.category,
+          severity: fieldNotes.severity,
+          status: fieldNotes.status,
+          createdAt: fieldNotes.createdAt,
+          updatedAt: fieldNotes.updatedAt,
+          resolvedAt: fieldNotes.resolvedAt,
+          resolutionNotes: fieldNotes.resolutionNotes,
+        })
+          .from(fieldNotes)
+          .where(
+            and(
+              eq(fieldNotes.parcelId, input.parcelId),
+              gte(fieldNotes.createdAt, new Date(input.fromDate + "T00:00:00")),
+              lte(fieldNotes.createdAt, new Date(input.toDate + "T23:59:59")),
+            )
+          )
+          .orderBy(desc(fieldNotes.createdAt));
+
+        // 6. Clima del período
+        let weatherData: any[] = [];
+        try {
+          const { getWeatherData } = await import("./weatherService");
+          const locationConfig = await dbExt.getLocationConfig();
+          if (locationConfig) {
+            weatherData = await getWeatherData(
+              locationConfig.latitude,
+              locationConfig.longitude,
+              input.fromDate,
+              input.toDate,
+              locationConfig.timezone
+            );
+          }
+        } catch (e) { console.error("[Reports] Error loading weather:", e); }
+
+        // 7. Análisis IA del cache
+        let aiAnalysis: string | null = null;
+        try {
+          const [cached] = await drizzle.select()
+            .from(parcelAiAnalysis)
+            .where(eq(parcelAiAnalysis.parcelId, input.parcelId))
+            .orderBy(desc(parcelAiAnalysis.createdAt))
+            .limit(1);
+          if (cached) {
+            aiAnalysis = cached.analysis;
+          }
+        } catch (e) { console.error("[Reports] Error loading AI analysis:", e); }
+
+        return {
+          parcel: parcel ? {
+            id: parcel.id,
+            code: parcel.code,
+            name: parcel.name,
+            crop: (parcel as any).crop || null,
+            variety: (parcel as any).variety || null,
+            hectares: (parcel as any).hectares || (parcel as any).productiveHa || null,
+          } : null,
+          harvestStats,
+          dailyHarvest,
+          satelliteData,
+          satelliteMaps,
+          fieldNotes: notes,
+          weatherData,
+          aiAnalysis,
+          period: { from: input.fromDate, to: input.toDate },
+        };
+      }),
+  }),
 });
 export type AppRouter = typeof appRouter;

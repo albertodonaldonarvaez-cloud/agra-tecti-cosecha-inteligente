@@ -27,6 +27,7 @@ import {
   BookOpen,
   Warehouse as WarehouseIcon,
   ClipboardList,
+  FileText,
   UsersRound,
   type LucideIcon
 } from "lucide-react";
@@ -228,6 +229,18 @@ export const PAGES_CONFIG: PageConfig[] = [
     showInNav: true,
   },
   {
+    permissionKey: "canViewReports",
+    path: "/reports",
+    icon: FileText,
+    label: "Reportes",
+    fullName: "Reportes PDF",
+    description: "Generar reportes semanales en PDF con datos de cosecha, satélite y notas",
+    adminOnly: false,
+    defaultValue: true,
+    order: 15,
+    showInNav: true,
+  },
+  {
     permissionKey: "canViewCrops",
     path: "/crops",
     icon: Sprout,
@@ -236,7 +249,7 @@ export const PAGES_CONFIG: PageConfig[] = [
     description: "Gestionar cultivos y sus variedades",
     adminOnly: true,
     defaultValue: false,
-    order: 15,
+    order: 16,
     showInNav: true,
   },
   {
@@ -248,7 +261,7 @@ export const PAGES_CONFIG: PageConfig[] = [
     description: "Ver y resolver errores de sincronización",
     adminOnly: true,
     defaultValue: false,
-    order: 15,
+    order: 16,
     showInNav: false, // No mostrar en nav por ahora
   },
 ];
