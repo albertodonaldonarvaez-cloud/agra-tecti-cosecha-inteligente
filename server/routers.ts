@@ -3987,6 +3987,94 @@ Da un análisis ejecutivo de 5-6 líneas máximo: estado general de la operació
         };
       }),
 
+    getSpatialAnalysis: protectedProcedure
+      .input(z.object({ parcelId: z.number() }))
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) return { quadrants: [], summary: null };
+        try {
+          const [parcel] = await drizzle.select().from(parcels).where(eq(parcels.id, input.parcelId));
+          if (!parcel || !parcel.polygon) return { quadrants: [], summary: null };
+          
+          const polyData = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon as string) : parcel.polygon;
+          let coords: [number, number][];
+          if (Array.isArray(polyData) && polyData.length > 0 && (polyData[0].lat !== undefined || polyData[0].latitude !== undefined)) {
+            coords = polyData.map((pt: any) => [pt.lng || pt.longitude || pt[1], pt.lat || pt.latitude || pt[0]]);
+          } else if (polyData.type === "Polygon") {
+            coords = polyData.coordinates[0];
+          } else return { quadrants: [], summary: null };
+          
+          // Get bounding box
+          const lngs = coords.map(c => c[0]);
+          const lats = coords.map(c => c[1]);
+          const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+          const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+          const dLng = (maxLng - minLng) / 3;
+          const dLat = (maxLat - minLat) / 3;
+          
+          const { getIndexHistory } = await import("./copernicusService");
+          const toDate = new Date().toISOString().split("T")[0];
+          const fromDate = new Date(Date.now() - 30 * 86400000).toISOString().split("T")[0];
+          
+          const labels = ["NO", "N", "NE", "O", "Centro", "E", "SO", "S", "SE"];
+          const quadrants: any[] = [];
+          
+          for (let row = 0; row < 3; row++) {
+            for (let col = 0; col < 3; col++) {
+              const qMinLng = minLng + col * dLng;
+              const qMaxLng = minLng + (col + 1) * dLng;
+              const qMinLat = maxLat - (row + 1) * dLat; // top-down
+              const qMaxLat = maxLat - row * dLat;
+              const qPoly = {
+                type: "Polygon",
+                coordinates: [[
+                  [qMinLng, qMinLat], [qMaxLng, qMinLat],
+                  [qMaxLng, qMaxLat], [qMinLng, qMaxLat],
+                  [qMinLng, qMinLat]
+                ]]
+              };
+              const label = labels[row * 3 + col];
+              const result: any = { label, row, col, ndvi: null, ndre: null, ndmi: null };
+              try {
+                for (const idx of ["NDVI", "NDRE", "NDMI"] as const) {
+                  const hist = await getIndexHistory(qPoly, fromDate, toDate, idx);
+                  if (hist && hist.length > 0) {
+                    const lastPt = hist.filter((d: any) => d.mean != null).pop();
+                    result[idx.toLowerCase()] = lastPt ? {
+                      mean: Math.round(lastPt.mean * 10000) / 10000,
+                      min: lastPt.min != null ? Math.round(lastPt.min * 10000) / 10000 : null,
+                      max: lastPt.max != null ? Math.round(lastPt.max * 10000) / 10000 : null,
+                      stDev: lastPt.stDev != null ? Math.round(lastPt.stDev * 10000) / 10000 : null,
+                    } : null;
+                  }
+                }
+              } catch (e) { console.log(`[SpatialAnalysis] Error for quadrant ${label}:`, e); }
+              quadrants.push(result);
+            }
+          }
+          
+          // Identify problem zones (low NDVI or high variability)
+          const withNdvi = quadrants.filter(q => q.ndvi?.mean != null);
+          const avgNdvi = withNdvi.length ? withNdvi.reduce((s, q) => s + q.ndvi.mean, 0) / withNdvi.length : null;
+          const problemZones = withNdvi
+            .filter(q => avgNdvi && q.ndvi.mean < avgNdvi * 0.85)
+            .map(q => ({ label: q.label, ndvi: q.ndvi.mean, diff: avgNdvi ? Math.round((q.ndvi.mean - avgNdvi) * 10000) / 10000 : 0 }));
+          
+          return {
+            quadrants,
+            summary: {
+              avgNdvi: avgNdvi ? Math.round(avgNdvi * 10000) / 10000 : null,
+              problemZones,
+              totalQuadrants: quadrants.length,
+              withData: withNdvi.length,
+            }
+          };
+        } catch (e) {
+          console.error("[SpatialAnalysis] Error:", e);
+          return { quadrants: [], summary: null };
+        }
+      }),
+
     // Mapa satelital individual (separado para no sobrecargar)
     getSatelliteMap: protectedProcedure
       .input(z.object({ parcelId: z.number(), indexType: z.string() }))

@@ -223,7 +223,7 @@ export default function Reports() {
   );
   const { data: ndviMap } = trpc.reports.getSatelliteMap.useQuery(
     { parcelId: selectedParcelId!, indexType: "NDVI" },
-    { enabled: !isGeneral && !!selectedParcelId && reportMode === "extended" }
+    { enabled: !isGeneral && !!selectedParcelId }
   );
   const { data: ndreMap } = trpc.reports.getSatelliteMap.useQuery(
     { parcelId: selectedParcelId!, indexType: "NDRE" },
@@ -231,6 +231,10 @@ export default function Reports() {
   );
   const { data: ndmiMap } = trpc.reports.getSatelliteMap.useQuery(
     { parcelId: selectedParcelId!, indexType: "NDMI" },
+    { enabled: !isGeneral && !!selectedParcelId && reportMode === "extended" }
+  );
+  const { data: spatialData } = trpc.reports.getSpatialAnalysis.useQuery(
+    { parcelId: selectedParcelId! },
     { enabled: !isGeneral && !!selectedParcelId && reportMode === "extended" }
   );
   const satMaps = { NDVI: ndviMap?.image, NDRE: ndreMap?.image, NDMI: ndmiMap?.image };
@@ -276,7 +280,7 @@ export default function Reports() {
   const aiText = isGeneral ? (generalData as any)?.aiAnalysis : reportData?.aiAnalysis;
   const now = new Date().toLocaleDateString("es-MX",{day:"2-digit",month:"long",year:"numeric",timeZone:"America/Mexico_City"});
   const titleName = isGeneral ? "Todas las Parcelas" : (reportData?.parcel?.name || "...");
-  const totalPages = reportMode==="compact"?1:(isGeneral?3:4);
+  const totalPages = reportMode==="compact"?1:(isGeneral?3:5);
 
   // Computed for general
   const generalParcels = useMemo(()=>{
@@ -302,10 +306,10 @@ export default function Reports() {
 
       // ── PAGE 1 ──
       pdfHeader(pdf, titleName, isGeneral?"Reporte General":"Reporte por Parcela", period, logoB64);
-      let y = 76;
+      let y = 78;
       const kw=(CW-24)/4;
       [[`Cosecha Total`,`${weeklyHarvestTotal.toFixed(1)} kg`,5,150,105],[`1ra Calidad`,`${firstQPct}%`,4,120,87],[`Cajas`,`${weeklyBoxes}`,13,148,136],[isGeneral?`Parcelas`:`Dias Activos`,isGeneral?`${generalData?.totals?.parcelsCount||0}`:`${reportData?.dailyHarvest?.length||0}`,8,145,178]].forEach((k:any,i)=>pdfKpi(pdf,ML+i*(kw+8),y,kw,k[0],k[1],k[2],k[3],k[4]));
-      y+=54;
+      y+=58;
 
       if(isGeneral){
         const{active:withH,inactive:noH,risk:riskP}=generalParcels;
@@ -325,7 +329,7 @@ export default function Reports() {
           pdf.text(safe(`MAYOR RIESGO: ${riskP.name}`),ML+28,y+10);
           pdf.setFontSize(7);pdf.setFont("helvetica","normal");pdf.setTextColor(185,28,28);
           pdf.text(safe(`NDVI ${(riskP.ndviLast||riskP.ndviAvg||0).toFixed(3)} | ${riskP.notesOpen} notas abiertas`),ML+28,y+17);
-          y+=26;
+          y+=30;
         }
         if(withH.length>0){
           pdfSection(pdf,ML,y,`Parcelas con Cosecha (${withH.length})`);y+=22;
@@ -334,14 +338,14 @@ export default function Reports() {
           const rc=withH.map((p:any)=>riskP&&p.id===riskP.id?[254,226,226] as [number,number,number]:[235,251,242] as [number,number,number]);
           y=pdfTable(pdf,ML,y,["Parcela","kg","1ra Cal.","Cajas","NDVI Ult.","NDVI Prom","Notas"],gRows,gw,rc);
           y=pdfTotalRow(pdf,ML,y,["SUBTOTAL",`${withH.reduce((s:number,p:any)=>s+p.weekTotal,0).toFixed(1)}`,`${withH.reduce((s:number,p:any)=>s+p.weekFirstQ,0).toFixed(1)}`,`${withH.reduce((s:number,p:any)=>s+p.weekBoxes,0)}`,"-","-",`${withH.reduce((s:number,p:any)=>s+p.notesCount,0)}`],gw);
-          y+=8;
+          y+=14;
         }
         if(noH.length>0){
           pdfSection(pdf,ML,y,`Sin Cosecha esta semana (${noH.length})`);y+=22;
           const gw2=[CW*0.35,CW*0.18,CW*0.18,CW*0.29];
           const gRows2=noH.map((p:any)=>[p.name||p.code,(p.ndviLast||p.ndviAvg)?(p.ndviLast||p.ndviAvg).toFixed(3):"-",p.ndviAvg?p.ndviAvg.toFixed(3):"-",`${p.notesCount} (${p.notesOpen} abiertas)`]);
           y=pdfTable(pdf,ML,y,["Parcela","NDVI Ult.","NDVI Prom","Notas"],gRows2,gw2,noH.map(()=>[245,245,245] as [number,number,number]));
-          y+=4;
+          y+=10;
         }
         // Total summary bar
         pdf.setFillColor(4,80,58);pdf.roundedRect(ML+1,y+1,CW,22,R,R,"F"); // shadow
@@ -350,7 +354,7 @@ export default function Reports() {
         pdf.setFillColor(6,95,70);pdf.rect(ML,y+3,CW,3,"F"); // flatten
         pdf.setFontSize(9);pdf.setFont("helvetica","bold");pdf.setTextColor(255,255,255);
         pdf.text(safe(`TOTAL: ${generalData?.totals?.harvest} kg  |  ${generalData?.totals?.boxes} cajas  |  ${generalData?.totals?.notes} notas  |  ${generalData?.totals?.parcelsCount} parcelas`),ML+12,y+16);
-        y+=28;
+        y+=32;
       } else {
         const leftW=CW*0.54;const rightX=ML+leftW+12;const rightW=CW-leftW-12;
         pdfSection(pdf,ML,y,"Cosecha Diaria");y+=22;
@@ -375,17 +379,17 @@ export default function Reports() {
         });
         ry+=32;
         if(slaSummary?.avgSla){pdf.setFontSize(7);pdf.setFont("helvetica","normal");pdf.setTextColor(55,65,81);pdf.text(safe(`SLA promedio: ${slaSummary.avgSla}h`),rightX,ry+6);}
-        y=Math.max(tEnd,ry)+10;
+        y=Math.max(tEnd,ry)+16;
       }
 
       if(weatherSummary){
-        pdfSection(pdf,ML,y,"Clima");y+=16;
+        pdfSection(pdf,ML,y,"Clima");y+=22;
         pdf.setFontSize(7.5);pdf.setFont("helvetica","normal");pdf.setTextColor(55,65,81);
         pdf.text(safe(`Temp. Max prom: ${weatherSummary.avgMax} C  |  Min prom: ${weatherSummary.avgMin} C  |  Lluvia acum: ${weatherSummary.totalRain} mm`),ML+8,y+6);
-        y+=14;
+        y+=18;
       }
 
-      if(aiText){y=pdfAiBox(pdf,ML,y,CW,aiText)+4;}
+      if(aiText){y=pdfAiBox(pdf,ML,y,CW,aiText)+8;}
       pdfFooter(pdf,1,totalPages,now,logoB64);
 
       // Extended pages - PER PARCEL
@@ -396,7 +400,7 @@ export default function Reports() {
         y=pdfTable(pdf,ML,y,["Fecha","Cajas","Total (kg)","1ra Cal.","2da Cal.","Desperdicio"],h2R,h2w);
         const sQ=(reportData.dailyHarvest||[]).reduce((s:number,d:any)=>s+(d.secondQualityWeight||0),0);
         const wa=(reportData.dailyHarvest||[]).reduce((s:number,d:any)=>s+(d.wasteWeight||0),0);
-        y=pdfTotalRow(pdf,ML,y,["TOTAL",`${weeklyBoxes}`,weeklyHarvestTotal.toFixed(2),weeklyFirstQ.toFixed(2),sQ.toFixed(2),wa.toFixed(2)],h2w);y+=16;
+        y=pdfTotalRow(pdf,ML,y,["TOTAL",`${weeklyBoxes}`,weeklyHarvestTotal.toFixed(2),weeklyFirstQ.toFixed(2),sQ.toFixed(2),wa.toFixed(2)],h2w);y+=20;
         if(weatherSummary&&reportData.weatherData){
           pdfSection(pdf,ML,y,"Clima Diario");y+=22;
           const wbw=(CW-24)/4;
@@ -421,10 +425,83 @@ export default function Reports() {
         y+=30+mapW*0.75+10;
         const stw=[CW*0.13,CW*0.17,CW*0.17,CW*0.17,CW*0.17,CW*0.19];
         const stR=["NDVI","NDRE","NDMI"].map(idx=>{const pts=(reportData.satelliteData?.[idx]?.data||[]).filter((d:any)=>d.mean!=null);const means=pts.map((d:any)=>d.mean);const avg=means.length?means.reduce((a:number,b:number)=>a+b,0)/means.length:null;const tr=getSatTrend(reportData.satelliteData?.[idx]);return[idx,avg?.toFixed(4)||"-",means.length?Math.min(...means).toFixed(4):"-",means.length?Math.max(...means).toFixed(4):"-",means.length?means[means.length-1].toFixed(4):"-",`${tr.t} ${tr.l}`];});
-        y=pdfTable(pdf,ML,y,["Indice","Media","Min","Max","Ultimo","Tendencia"],stR,stw);y+=12;
-        if(reportData.aiAnalysis){y=pdfAiBox(pdf,ML,y,CW,reportData.aiAnalysis)+4;}
-        pdfFooter(pdf,3,4,now,logoB64);
+        y=pdfTable(pdf,ML,y,["Indice","Media","Min","Max","Ultimo","Tendencia"],stR,stw);y+=16;
+        if(reportData.aiAnalysis){y=pdfAiBox(pdf,ML,y,CW,reportData.aiAnalysis)+8;}
+        pdfFooter(pdf,3,5,now,logoB64);
 
+        // Page 4: Spatial Analysis (3x3 quadrant grid)
+        pdf.addPage();pdfSubHeader(pdf,"Analisis Espacial por Cuadrante",`${titleName} | ${period}`,logoB64);y=50;
+
+        // NDVI map image if available
+        const ndviImg = satMaps.NDVI;
+        if(ndviImg){
+          pdfSection(pdf,ML,y,"Mapa NDVI");y+=22;
+          const imgW = CW*0.5; const imgH = imgW*0.7;
+          try{pdf.addImage(ndviImg,"PNG",ML+(CW-imgW)/2,y,imgW,imgH,undefined,"FAST");}catch{}
+          y+=imgH+16;
+        }
+
+        // Quadrant grid
+        if(spatialData?.quadrants?.length){
+          pdfSection(pdf,ML,y,"Cuadrantes Espaciales (3x3)");y+=22;
+          const cellW=(CW-16)/3; const cellH=50;
+          const quads = spatialData.quadrants as any[];
+          for(let row=0;row<3;row++){
+            for(let col=0;col<3;col++){
+              const qi=row*3+col;
+              const q=quads[qi];if(!q)continue;
+              const cx=ML+8+col*(cellW+4);const cy=y+row*(cellH+4);
+              const ndviVal = q.ndvi?.mean;
+              // Color by NDVI health: green=good, yellow=ok, red=bad
+              const isLow = spatialData.summary?.problemZones?.some((pz:any)=>pz.label===q.label);
+              if(isLow){pdf.setFillColor(254,242,242);}
+              else if(ndviVal!=null&&ndviVal>=0.4){pdf.setFillColor(240,253,244);}
+              else if(ndviVal!=null){pdf.setFillColor(255,251,235);}
+              else{pdf.setFillColor(249,250,251);}
+              pdf.roundedRect(cx,cy,cellW,cellH,4,4,"F");
+              pdf.setDrawColor(isLow?252:220,isLow?165:240,isLow?165:230);
+              pdf.setLineWidth(isLow?0.8:0.3);
+              pdf.roundedRect(cx,cy,cellW,cellH,4,4,"S");
+              // Label
+              pdf.setFontSize(8);pdf.setFont("helvetica","bold");
+              pdf.setTextColor(isLow?153:6,isLow?27:95,isLow?27:70);
+              pdf.text(safe(q.label),cx+4,cy+12);
+              // NDVI value
+              pdf.setFontSize(14);pdf.setFont("helvetica","bold");
+              pdf.setTextColor(isLow?220:16,isLow?38:185,isLow?38:129);
+              pdf.text(ndviVal!=null?ndviVal.toFixed(3):"-",cx+cellW/2,cy+30,{align:"center"});
+              // NDRE/NDMI small
+              pdf.setFontSize(6);pdf.setFont("helvetica","normal");pdf.setTextColor(107,114,128);
+              const ndre = q.ndre?.mean; const ndmi = q.ndmi?.mean;
+              pdf.text(`RE:${ndre!=null?ndre.toFixed(3):"-"} MI:${ndmi!=null?ndmi.toFixed(3):"-"}`,cx+4,cy+44);
+            }
+          }
+          y+=3*(cellH+4)+12;
+
+          // Problem zones alert
+          if(spatialData.summary?.problemZones?.length>0){
+            const pz = spatialData.summary.problemZones;
+            pdf.setFillColor(250,230,230);pdf.roundedRect(ML+1,y+1,CW,20,R,R,"F");
+            pdf.setFillColor(254,242,242);pdf.roundedRect(ML,y,CW,20,R,R,"F");
+            pdf.setDrawColor(252,165,165);pdf.setLineWidth(0.8);pdf.roundedRect(ML,y,CW,20,R,R,"S");
+            pdf.setFillColor(239,68,68);pdf.circle(ML+14,y+10,5,"F");
+            pdf.setFontSize(8);pdf.setFont("helvetica","bold");pdf.setTextColor(255,255,255);
+            pdf.text("!",ML+12.5,y+13);
+            pdf.setFontSize(7.5);pdf.setFont("helvetica","bold");pdf.setTextColor(153,27,27);
+            const zoneNames = pz.map((z:any)=>z.label).join(", ");
+            pdf.text(safe(`ZONAS CON BAJO NDVI: ${zoneNames}`),ML+24,y+10);
+            pdf.setFontSize(6.5);pdf.setFont("helvetica","normal");pdf.setTextColor(185,28,28);
+            pdf.text(safe(`Promedio parcela: ${spatialData.summary.avgNdvi?.toFixed(4)||"-"} | Umbral: <85% del promedio`),ML+24,y+17);
+            y+=28;
+          }
+        } else {
+          pdf.setFontSize(8);pdf.setFont("helvetica","normal");pdf.setTextColor(156,163,175);
+          pdf.text("Analisis espacial no disponible - requiere poligono de parcela",PW/2,y+20,{align:"center"});
+          y+=40;
+        }
+        pdfFooter(pdf,4,5,now,logoB64);
+
+        // Page 5: Notes
         pdf.addPage();pdfSubHeader(pdf,"Notas de Campo & SLA",`${titleName} | ${period}`,logoB64);y=48;
         const skw=(CW-24)/4;
         [{l:"Total",v:`${slaSummary?.total||0}`,r:245,g:158,b:11},{l:"Resueltas",v:`${slaSummary?.resolved||0}`,r:16,g:185,b:129},{l:"Abiertas",v:`${slaSummary?.open||0}`,r:239,g:68,b:68},{l:"SLA Prom",v:slaSummary?.avgSla?`${slaSummary.avgSla}h`:"N/A",r:139,g:92,b:246}].forEach((k,i)=>pdfKpi(pdf,ML+i*(skw+8),y,skw,k.l,k.v,k.r,k.g,k.b));
@@ -437,7 +514,7 @@ export default function Reports() {
           y=pdfTable(pdf,ML,y,["Folio","Categoria","Prior.","Estado","Fecha","SLA","Descripcion"],nR,nw);
         }else{pdf.setFontSize(8);pdf.setFont("helvetica","normal");pdf.setTextColor(156,163,175);pdf.text("Sin notas en este periodo",PW/2,y+16,{align:"center"});y+=24;}
         if(slaSummary&&Object.keys(slaSummary.catCounts).length>0){y+=8;pdfSection(pdf,ML,y,"Distribucion por Categoria");y+=22;let cx=ML;Object.entries(slaSummary.catCounts).sort((a,b)=>b[1]-a[1]).forEach(([cat,count])=>{const label=catLabels[cat]||cat;const bw=Math.max(55,label.length*5+30);if(cx+bw>PW-MR){cx=ML;y+=22;}pdf.setFillColor(245,252,248);pdf.roundedRect(cx,y,bw,16,4,4,"F");pdf.setDrawColor(209,250,229);pdf.roundedRect(cx,y,bw,16,4,4,"S");pdf.setFontSize(10);pdf.setFont("helvetica","bold");pdf.setTextColor(6,95,70);pdf.text(`${count}`,cx+6,y+12);pdf.setFontSize(6);pdf.setFont("helvetica","normal");pdf.setTextColor(55,65,81);pdf.text(safe(label),cx+18,y+11);cx+=bw+6;});}
-        pdfFooter(pdf,4,4,now,logoB64);
+        pdfFooter(pdf,5,5,now,logoB64);
       }
 
       // Extended pages - GENERAL
@@ -474,7 +551,7 @@ export default function Reports() {
           `${gParcels.reduce((s:number,p:any)=>s+p.notesCount,0)}`,
           `${gParcels.reduce((s:number,p:any)=>s+p.notesOpen,0)}`
         ],dw);
-        y+=16;
+        y+=20;
 
         // Weather detail
         if(weatherSummary&&generalData.weatherData){
@@ -509,7 +586,7 @@ export default function Reports() {
           ]);
           const nnC=parcelsWithNotes.map((p:any)=>p.notesOpen>0?[254,242,242] as [number,number,number]:[235,251,242] as [number,number,number]);
           y=pdfTable(pdf,ML,y,["Parcela","Total","Abiertas","Estado"],nnR,nnw,nnC);
-          y+=12;
+          y+=16;
         }
 
         // Full AI analysis
