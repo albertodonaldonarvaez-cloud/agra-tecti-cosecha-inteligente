@@ -505,7 +505,7 @@ IMPORTANTE:
             method: "POST",
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
             body: JSON.stringify({
-              model: "deepseek-chat",
+              model: "deepseek-v4-flash",
               messages: [{ role: "system", content: "Eres un ingeniero agronomo senior especializado en agricultura de precision, teledeteccion satelital y manejo integrado de cultivos. Respondes de forma concisa y profesional." }, { role: "user", content: prompt }],
               max_tokens: 800,
               temperature: 0.4,
@@ -520,7 +520,7 @@ IMPORTANTE:
 
           const result = await response.json();
           const analysis = result.choices?.[0]?.message?.content || "Sin respuesta del modelo";
-          const model = result.model || "deepseek-chat";
+          const model = result.model || "deepseek-v4-flash";
 
           // Guardar en cache
           await drizzle.insert(parcelAiAnalysis).values({
@@ -3898,7 +3898,54 @@ IMPORTANTE:
           }
         } catch (e) { /* ignore */ }
 
+        // IA: Análisis semanal general
+        let aiAnalysis: string | null = null;
+        try {
+          const { getGlobalSetting } = await import("./globalSettings");
+          let apiKey = await getGlobalSetting("deepseekApiKey");
+          if (apiKey) {
+            // Decrypt if needed
+            if (apiKey.includes(":")) {
+              try {
+                const { decrypt } = await import("./_core/encryption");
+                apiKey = decrypt(apiKey);
+              } catch (e) { /* use as-is */ }
+            }
+            const summaryLines = parcelSummaries.map((p: any) =>
+              `${p.name}: ${p.weekTotal}kg cosechados, ${p.weekBoxes} cajas, NDVI prom ${p.ndviAvg || 'N/D'}, ${p.notesCount} notas (${p.notesOpen} abiertas)`
+            ).join('\n');
+            const weatherLine = weatherData.length > 0
+              ? `Clima: Temp max prom ${(weatherData.reduce((s: any, d: any) => s + (d.temperatureMax || 0), 0) / weatherData.length).toFixed(1)}°C, min prom ${(weatherData.reduce((s: any, d: any) => s + (d.temperatureMin || 0), 0) / weatherData.length).toFixed(1)}°C, lluvia acum ${weatherData.reduce((s: any, d: any) => s + (d.precipitation || 0), 0).toFixed(1)}mm`
+              : '';
+            const prompt = `Analiza el estado semanal de esta operación agrícola (${input.fromDate} a ${input.toDate}):
+
+Resumen por parcela:
+${summaryLines}
+
+Totales: ${totalHarvest.toFixed(1)}kg cosechados, ${totalBoxes} cajas, ${totalNotes} notas de campo (${totalNotesOpen} abiertas)
+${weatherLine}
+
+Da un análisis ejecutivo de 5-6 líneas máximo: estado general de la operación, parcelas que requieren atención (bajo NDVI o muchas notas abiertas), impacto del clima, y 1-2 recomendaciones. Tono profesional de ingeniero agrónomo. Responde en español.`;
+
+            const response = await fetch("https://api.deepseek.com/chat/completions", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+              body: JSON.stringify({
+                model: "deepseek-v4-flash",
+                messages: [{ role: "system", content: "Eres un ingeniero agrónomo senior. Respondes de forma concisa y profesional en español." }, { role: "user", content: prompt }],
+                max_tokens: 600,
+                temperature: 0.4,
+              }),
+            });
+            if (response.ok) {
+              const result = await response.json();
+              aiAnalysis = result.choices?.[0]?.message?.content || null;
+            }
+          }
+        } catch (e) { console.error("[Reports] Error generating AI analysis:", e); }
+
         return {
+          aiAnalysis,
           parcels: parcelSummaries,
           totals: {
             harvest: Math.round(totalHarvest * 100) / 100,

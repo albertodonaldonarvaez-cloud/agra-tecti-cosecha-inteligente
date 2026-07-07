@@ -419,17 +419,21 @@ export default function Reports() {
               </div>
             )}
 
-            {/* AI Analysis (compact version - truncated) */}
-            {!isGeneral && reportData?.aiAnalysis && (
-              <div style={{ padding: "6px 40px" }}>
-                <div style={{ background: "#f0fdf4", borderRadius: 8, border: "1px solid #bbf7d0", padding: "8px 12px" }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#065f46", marginBottom: 4 }}>🧠 Análisis IA (DeepSeek)</div>
-                  <div style={{ fontSize: 9, lineHeight: 1.5, color: "#1f2937", whiteSpace: "pre-wrap", maxHeight: reportMode === "compact" ? 120 : 200, overflow: "hidden" }}>
-                    {reportData.aiAnalysis.substring(0, reportMode === "compact" ? 600 : 1200)}{reportData.aiAnalysis.length > 600 ? "..." : ""}
+            {/* AI Analysis */}
+            {(() => {
+              const ai = isGeneral ? (generalData as any)?.aiAnalysis : reportData?.aiAnalysis;
+              if (!ai) return null;
+              return (
+                <div style={{ padding: "6px 40px" }}>
+                  <div style={{ background: "#f0fdf4", borderRadius: 8, border: "1px solid #bbf7d0", padding: "8px 12px" }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#065f46", marginBottom: 4 }}>🧠 Análisis IA (DeepSeek v4-flash)</div>
+                    <div style={{ fontSize: 9, lineHeight: 1.5, color: "#1f2937", whiteSpace: "pre-wrap", maxHeight: reportMode === "compact" ? 130 : 200, overflow: "hidden" }}>
+                      {ai.substring(0, reportMode === "compact" ? 700 : 1200)}{ai.length > 700 ? "..." : ""}
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Footer */}
             <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "10px 40px", background: "#f9fafb", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between" }}>
@@ -545,7 +549,7 @@ export default function Reports() {
                 {reportData.aiAnalysis && (
                   <div style={{ padding: "14px 40px" }}>
                     <div style={{ background: "#f0fdf4", borderRadius: 10, border: "1px solid #bbf7d0", padding: "12px 16px" }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#065f46", marginBottom: 6 }}>🧠 Análisis IA</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#065f46", marginBottom: 6 }}>🧠 Análisis IA (DeepSeek v4-flash)</div>
                       <div style={{ fontSize: 9, lineHeight: 1.5, color: "#1f2937", whiteSpace: "pre-wrap", maxHeight: 280, overflow: "hidden" }}>
                         {reportData.aiAnalysis.substring(0, 1500)}
                       </div>
