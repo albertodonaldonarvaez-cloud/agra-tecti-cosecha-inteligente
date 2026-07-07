@@ -286,7 +286,7 @@ export default function Reports() {
             {slaSummary && slaSummary.overSla > 0 && (
               <div className="flex items-center gap-2 bg-red-50 border border-red-200/50 rounded-xl px-4 py-2 text-sm text-red-700">
                 <AlertTriangle className="h-4 w-4" />
-                <span><strong>{slaSummary.overSla}</strong> notas exceden SLA (>48h sin resolver)</span>
+                <span><strong>{slaSummary.overSla}</strong> notas exceden SLA ({">"}48h sin resolver)</span>
               </div>
             )}
           </GlassCard>
