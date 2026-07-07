@@ -159,7 +159,19 @@ function getReportCss(): string {
     .ia-card-header svg { width: 18px; height: 18px; color: var(--primary-light); }
     .ia-card-header .ia-title { font-size: 11px; font-weight: 700; color: var(--primary); }
     .ia-card-header .ia-sub { font-size: 8px; color: var(--text-muted); margin-left: 8px; }
-    .ia-card-body { padding: 6px 16px 14px 16px; font-size: 9px; line-height: 1.6; color: var(--text-dark); white-space: pre-wrap; }
+    .ia-card-body { padding: 6px 16px 14px 16px; font-size: 8.5px; line-height: 1.55; color: var(--text-dark); white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word; }
+
+    /* NDVI Bar Chart */
+    .ndvi-chart-container { background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
+    .ndvi-chart-title { font-size: 9px; font-weight: 700; color: var(--primary); margin-bottom: 8px; }
+    .ndvi-bar-row { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+    .ndvi-bar-label { font-size: 7.5px; font-weight: 600; color: var(--text-dark); width: 70px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
+    .ndvi-bar-track { flex: 1; height: 14px; background: rgba(240,253,244,0.5); border-radius: 7px; overflow: hidden; position: relative; }
+    .ndvi-bar-fill { height: 100%; border-radius: 7px; transition: width 0.3s; }
+    .ndvi-bar-fill.healthy { background: linear-gradient(90deg, #10b981, #059669); }
+    .ndvi-bar-fill.moderate { background: linear-gradient(90deg, #f59e0b, #d97706); }
+    .ndvi-bar-fill.critical { background: linear-gradient(90deg, #ef4444, #dc2626); }
+    .ndvi-bar-val { font-size: 7.5px; font-weight: 700; width: 38px; text-align: left; flex-shrink: 0; }
 
     /* Summary Bar */
     .summary-bar { background: linear-gradient(135deg, var(--primary), #065f46); border-radius: 12px; padding: 12px 20px; color: white; font-size: 11px; font-weight: 700; margin-bottom: 14px; display: flex; align-items: center; gap: 6px; }
@@ -430,7 +442,7 @@ export default function Reports() {
     html += '<div class="metrics-grid">';
     html += buildMetricCard('Cosecha Total', `${weeklyHarvestTotal.toLocaleString('es-MX', {maximumFractionDigits:1})} kg`, 'kilogramos', 'green');
     html += buildMetricCard('1ra Calidad', `${firstQPct}%`, `${weeklyFirstQ.toFixed(1)} kg`, 'green');
-    html += buildMetricCard('Cajas', `${weeklyBoxes.toLocaleString('es-MX')}`, 'total periodo', 'amber');
+    html += buildMetricCard('Cajas', `${weeklyBoxes.toLocaleString('es-MX')}`, 'total periodo', 'cyan');
     if (isGeneral) {
       html += buildMetricCard('Parcelas', `${generalData?.totals?.parcelsCount || 0}`, 'activas', 'blue');
     } else {
@@ -481,13 +493,23 @@ export default function Reports() {
         html += '</tr></tfoot></table></div>';
       }
 
-      // Inactive parcels
+      // Inactive parcels — NDVI bar chart
       if (noH.length > 0) {
-        html += `<div class="section-title">Sin Cosecha esta semana (${noH.length})</div>`;
-        html += '<div class="inactive-chips">';
-        noH.forEach((p: any) => {
+        html += `<div class="section-title">Sin Cosecha esta semana (${noH.length}) - NDVI</div>`;
+        html += '<div class="ndvi-chart-container">';
+        // Sort by NDVI ascending so worst is on top
+        const sorted = [...noH].sort((a: any, b: any) => (a.ndviLast || a.ndviAvg || 0) - (b.ndviLast || b.ndviAvg || 0));
+        sorted.forEach((p: any) => {
           const ndvi = p.ndviLast || p.ndviAvg;
-          html += `<span class="inactive-chip">${safe(p.name || p.code)}${ndvi ? ` &middot; NDVI ${ndvi.toFixed(3)}` : ''}</span>`;
+          const val = ndvi || 0;
+          const pct = Math.min(val * 100, 100);
+          const cls = ndviBadgeClass(val);
+          const color = val < 0.4 ? '#991b1b' : val <= 0.5 ? '#854d0e' : '#166534';
+          html += '<div class="ndvi-bar-row">';
+          html += `<span class="ndvi-bar-label">${safe(p.name || p.code)}</span>`;
+          html += `<div class="ndvi-bar-track"><div class="ndvi-bar-fill ${cls}" style="width:${pct}%"></div></div>`;
+          html += `<span class="ndvi-bar-val" style="color:${color}">${ndvi ? ndvi.toFixed(3) : 'N/A'}</span>`;
+          html += '</div>';
         });
         html += '</div>';
       }
@@ -542,7 +564,7 @@ export default function Reports() {
       html += buildClimateStrip(weatherSummary);
     }
 
-    // AI card
+    // AI card — always show if available, for both compact and extended
     if (aiText) {
       html += buildAiCard(aiText);
     }
