@@ -112,7 +112,8 @@ function pdfSectionTitle(pdf: jsPDF, x: number, y: number, title: string) {
   pdf.text(safe(title), x + 8, y + 9);
 }
 
-function pdfTable(pdf: jsPDF, x: number, y: number, headers: string[], rows: string[][], widths: number[]): number {
+// rowColors: optional array of [r,g,b] per row for background tinting
+function pdfTable(pdf: jsPDF, x: number, y: number, headers: string[], rows: string[][], widths: number[], rowColors?: ([number,number,number]|null)[]): number {
   const rh = 13; const hh = 15;
   const tw = widths.reduce((a,b)=>a+b,0);
   // header
@@ -122,7 +123,9 @@ function pdfTable(pdf: jsPDF, x: number, y: number, headers: string[], rows: str
   headers.forEach((h,i) => { pdf.text(safe(h), cx+4, y+10); cx += widths[i]; });
   let cy = y + hh;
   rows.forEach((row, ri) => {
-    if (ri % 2 === 0) { pdf.setFillColor(245,250,248); pdf.rect(x, cy, tw, rh, "F"); }
+    const rc = rowColors?.[ri];
+    if (rc) { pdf.setFillColor(rc[0],rc[1],rc[2]); pdf.rect(x, cy, tw, rh, "F"); }
+    else if (ri % 2 === 0) { pdf.setFillColor(245,250,248); pdf.rect(x, cy, tw, rh, "F"); }
     pdf.setDrawColor(229,241,234); pdf.setLineWidth(0.3); pdf.line(x, cy+rh, x+tw, cy+rh);
     cx = x;
     row.forEach((cell, ci) => {
@@ -284,16 +287,64 @@ export default function Reports() {
       y += 48;
 
       if (isGeneral) {
-        // General table
-        pdfSectionTitle(pdf, ML, y, "Rendimiento por Parcela"); y += 18;
-        const gw = [CW*0.28, CW*0.13, CW*0.13, CW*0.12, CW*0.16, CW*0.18];
-        const gRows = (generalData?.parcels||[]).map((p:any) => [
-          p.name||p.code||`P-${p.id}`, `${p.weekTotal}`, `${p.weekFirstQ}`, `${p.weekBoxes}`,
-          p.ndviAvg ? p.ndviAvg.toFixed(3) : "-", `${p.notesCount} (${p.notesOpen})`
-        ]);
-        y = pdfTable(pdf, ML, y, ["Parcela","kg","1ra Cal.","Cajas","NDVI","Notas"], gRows, gw);
-        y = pdfTotalRow(pdf, ML, y, ["TOTAL",`${generalData?.totals?.harvest}`,`${generalData?.totals?.firstQ}`,`${generalData?.totals?.boxes}`,"-",`${generalData?.totals?.notes}`], gw);
-        y += 10;
+        // Separate parcels with/without harvest
+        const allP = (generalData?.parcels||[]) as any[];
+        const withHarvest = allP.filter((p:any) => p.weekTotal > 0);
+        const noHarvest = allP.filter((p:any) => p.weekTotal <= 0);
+        // Risk: lowest NDVI among harvest parcels, or most open notes
+        let riskParcel: any = null;
+        if (withHarvest.length > 0) {
+          const withNdvi = withHarvest.filter((p:any) => p.ndviLast || p.ndviAvg);
+          if (withNdvi.length) riskParcel = withNdvi.reduce((a:any,b:any) => ((b.ndviLast||b.ndviAvg||1) < (a.ndviLast||a.ndviAvg||1)) ? b : a);
+        }
+
+        // Risk callout
+        if (riskParcel) {
+          pdf.setFillColor(254,242,242); pdf.roundedRect(ML, y, CW, 16, 3, 3, "F");
+          pdf.setDrawColor(252,165,165); pdf.roundedRect(ML, y, CW, 16, 3, 3, "S");
+          pdf.setFillColor(239,68,68); pdf.roundedRect(ML, y+3, 3, 10, 1, 1, "F");
+          pdf.setFontSize(7); pdf.setFont("helvetica","bold"); pdf.setTextColor(153,27,27);
+          pdf.text(safe(`MAYOR RIESGO: ${riskParcel.name} - NDVI ${(riskParcel.ndviLast||riskParcel.ndviAvg||0).toFixed(3)} | ${riskParcel.notesOpen} notas abiertas`), ML+10, y+11);
+          y += 20;
+        }
+
+        // Active harvest parcels
+        if (withHarvest.length > 0) {
+          pdfSectionTitle(pdf, ML, y, `Parcelas con Cosecha (${withHarvest.length})`); y += 18;
+          const gw = [CW*0.24, CW*0.11, CW*0.11, CW*0.10, CW*0.12, CW*0.14, CW*0.18];
+          const gRows = withHarvest.map((p:any) => [
+            p.name||p.code, `${p.weekTotal}`, `${p.weekFirstQ}`, `${p.weekBoxes}`,
+            (p.ndviLast||p.ndviAvg) ? (p.ndviLast||p.ndviAvg).toFixed(3) : "-",
+            (p.ndviAvg) ? p.ndviAvg.toFixed(3) : "-",
+            `${p.notesCount} (${p.notesOpen})`
+          ]);
+          const rowColors = withHarvest.map((p:any) => {
+            if (riskParcel && p.id === riskParcel.id) return [254,226,226] as [number,number,number]; // red tint for risk
+            return [235,251,242] as [number,number,number]; // green tint for active
+          });
+          y = pdfTable(pdf, ML, y, ["Parcela","kg","1ra Cal.","Cajas","NDVI Ult.","NDVI Prom","Notas"], gRows, gw, rowColors);
+          y = pdfTotalRow(pdf, ML, y, ["SUBTOTAL",`${withHarvest.reduce((s:number,p:any)=>s+p.weekTotal,0).toFixed(1)}`,`${withHarvest.reduce((s:number,p:any)=>s+p.weekFirstQ,0).toFixed(1)}`,`${withHarvest.reduce((s:number,p:any)=>s+p.weekBoxes,0)}`,"-","-",`${withHarvest.reduce((s:number,p:any)=>s+p.notesCount,0)}`], gw);
+          y += 8;
+        }
+
+        // Inactive parcels (no harvest)
+        if (noHarvest.length > 0) {
+          pdfSectionTitle(pdf, ML, y, `Sin Cosecha esta semana (${noHarvest.length})`); y += 18;
+          const gw2 = [CW*0.35, CW*0.18, CW*0.18, CW*0.29];
+          const gRows2 = noHarvest.map((p:any) => [
+            p.name||p.code, (p.ndviLast||p.ndviAvg) ? (p.ndviLast||p.ndviAvg).toFixed(3) : "-",
+            p.ndviAvg ? p.ndviAvg.toFixed(3) : "-", `${p.notesCount} (${p.notesOpen} abiertas)`
+          ]);
+          const grayColors = noHarvest.map(() => [245,245,245] as [number,number,number]);
+          y = pdfTable(pdf, ML, y, ["Parcela","NDVI Ult.","NDVI Prom","Notas"], gRows2, gw2, grayColors);
+          y += 4;
+        }
+
+        // Total row
+        pdf.setFillColor(6, 95, 70); pdf.roundedRect(ML, y, CW, 18, 2, 2, "F");
+        pdf.setFontSize(8); pdf.setFont("helvetica","bold"); pdf.setTextColor(255,255,255);
+        pdf.text(safe(`TOTAL: ${generalData?.totals?.harvest} kg | ${generalData?.totals?.boxes} cajas | ${generalData?.totals?.notes} notas | ${generalData?.totals?.parcelsCount} parcelas`), ML+8, y+12);
+        y += 22;
       } else {
         // Two columns
         const leftW = CW * 0.54;
@@ -557,20 +608,74 @@ export default function Reports() {
 
         {dataReady && (
           <GlassCard className="p-4" hover={false}>
-            <h3 className="text-xs font-semibold text-green-700 mb-2 flex items-center gap-1.5"><BarChart3 className="h-3.5 w-3.5"/> Vista previa · {titleName}</h3>
+            <h3 className="text-xs font-semibold text-green-700 mb-3 flex items-center gap-1.5"><BarChart3 className="h-3.5 w-3.5"/> Vista previa · {titleName}</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
               <MiniKPI icon={Package} label="Cosecha" value={`${weeklyHarvestTotal.toFixed(1)} kg`} color="from-green-400 to-emerald-500"/>
               <MiniKPI icon={TrendingUp} label="1ra Calidad" value={`${firstQPct}%`} color="from-emerald-400 to-green-500"/>
               <MiniKPI icon={ClipboardList} label="Notas" value={`${slaSummary?.total||0}`} color="from-yellow-400 to-orange-500"/>
               <MiniKPI icon={CloudSun} label="Lluvia" value={weatherSummary?`${weatherSummary.totalRain} mm`:"N/D"} color="from-blue-400 to-cyan-500"/>
             </div>
+
+            {/* General preview table */}
+            {isGeneral && generalData?.parcels && (
+              <div className="mb-3">
+                {(() => {
+                  const ps = generalData.parcels as any[];
+                  const active = ps.filter((p:any) => p.weekTotal > 0);
+                  const inactive = ps.filter((p:any) => p.weekTotal <= 0);
+                  const risk = active.filter((p:any) => p.ndviLast || p.ndviAvg).sort((a:any,b:any) => (a.ndviLast||a.ndviAvg||1) - (b.ndviLast||b.ndviAvg||1))[0];
+                  return (
+                    <>
+                      {risk && (
+                        <div className="bg-red-50/80 backdrop-blur-sm rounded-xl border border-red-200/40 p-2.5 mb-2 flex items-center gap-2">
+                          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-red-400 to-red-500 shadow-sm"><span className="text-white text-xs font-bold">!</span></div>
+                          <div>
+                            <span className="text-[10px] font-bold text-red-700">Mayor riesgo: </span>
+                            <span className="text-[10px] text-red-600">{risk.name} — NDVI {(risk.ndviLast||risk.ndviAvg||0).toFixed(3)} | {risk.notesOpen} notas abiertas</span>
+                          </div>
+                        </div>
+                      )}
+                      <div className="overflow-hidden rounded-xl border border-green-200/30 backdrop-blur-sm">
+                        <table className="w-full text-[11px]">
+                          <thead><tr className="bg-gradient-to-r from-green-600 to-emerald-600 text-white">
+                            <th className="px-2 py-1.5 text-left font-semibold">Parcela</th>
+                            <th className="px-2 py-1.5 text-right font-semibold">kg</th>
+                            <th className="px-2 py-1.5 text-right font-semibold">NDVI</th>
+                            <th className="px-2 py-1.5 text-right font-semibold">Notas</th>
+                          </tr></thead>
+                          <tbody>
+                            {active.map((p:any,i:number) => (
+                              <tr key={p.id} className={`${risk&&p.id===risk.id?'bg-red-50/60':'bg-green-50/40'} ${i%2===0?'bg-opacity-60':'bg-opacity-30'} border-b border-green-100/30`}>
+                                <td className="px-2 py-1 font-semibold text-green-800">{p.name}</td>
+                                <td className="px-2 py-1 text-right font-bold text-green-700">{p.weekTotal}</td>
+                                <td className={`px-2 py-1 text-right font-semibold ${(p.ndviLast||p.ndviAvg||0)>0.5?'text-green-600':(p.ndviLast||p.ndviAvg||0)>0.3?'text-yellow-600':'text-red-500'}`}>{(p.ndviLast||p.ndviAvg) ? (p.ndviLast||p.ndviAvg).toFixed(3) : '-'}</td>
+                                <td className={`px-2 py-1 text-right ${p.notesOpen>0?'text-red-500 font-bold':'text-green-600'}`}>{p.notesCount}{p.notesOpen>0?` (${p.notesOpen})`:''}</td>
+                              </tr>
+                            ))}
+                            {inactive.length > 0 && (
+                              <tr className="bg-gray-100/60 border-t-2 border-gray-200">
+                                <td colSpan={4} className="px-2 py-1 text-[10px] text-gray-500 font-medium">{inactive.length} parcela(s) sin cosecha: {inactive.map((p:any)=>p.name||p.code).join(', ')}</td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+
             {aiText && (
-              <div className="bg-green-50/80 rounded-xl border border-green-200/40 p-3">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <Brain className="h-3.5 w-3.5 text-green-600"/>
-                  <span className="text-[10px] font-semibold text-green-700">IA Agra Tec-ti · Análisis Semanal</span>
+              <div className="relative overflow-hidden bg-green-50/60 backdrop-blur-xl rounded-xl border border-green-200/30 p-3">
+                <div className="absolute inset-0 bg-gradient-to-br from-white/40 via-transparent to-transparent pointer-events-none" />
+                <div className="relative z-10">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <Brain className="h-3.5 w-3.5 text-green-600"/>
+                    <span className="text-[10px] font-semibold text-green-700">IA Agra Tec-ti · Análisis Semanal</span>
+                  </div>
+                  <p className="text-xs text-green-800 leading-relaxed line-clamp-4">{stripMd(aiText).substring(0,400)}...</p>
                 </div>
-                <p className="text-xs text-green-800 leading-relaxed line-clamp-3">{stripMd(aiText).substring(0,300)}...</p>
               </div>
             )}
           </GlassCard>

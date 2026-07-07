@@ -3858,21 +3858,45 @@ IMPORTANTE:
           const open = notes.filter(n => !n.resolvedAt);
           totalNotes += notes.length; totalNotesResolved += resolved.length; totalNotesOpen += open.length;
 
-          // NDVI promedio
+          // NDVI promedio y ultimo de la semana
           let ndviAvg: number | null = null;
+          let ndviLast: number | null = null;
           try {
+            let parsed: any[] | null = null;
+            // 1. Try cache
             const rows = await drizzle.execute(
               sql`SELECT data FROM parcelSatelliteCache WHERE parcelId = ${p.id} AND dataType = 'stats' AND indexType = 'NDVI' AND mapDate IS NULL ORDER BY fetchedAt DESC LIMIT 1`
             );
             const statsRow = Array.isArray(rows) && Array.isArray(rows[0]) ? rows[0][0] : (rows as any)[0];
             if (statsRow) {
-              const parsed = typeof (statsRow as any).data === "string" ? JSON.parse((statsRow as any).data) : (statsRow as any).data;
-              if (Array.isArray(parsed) && parsed.length > 0) {
-                const means = parsed.filter((d: any) => d.mean != null).map((d: any) => d.mean);
-                ndviAvg = means.length > 0 ? means.reduce((a: number, b: number) => a + b, 0) / means.length : null;
-              }
+              parsed = typeof (statsRow as any).data === "string" ? JSON.parse((statsRow as any).data) : (statsRow as any).data;
             }
-          } catch (e) { /* ignore */ }
+            // 2. Fallback: call copernicus API if no cache
+            if (!parsed && p.polygon) {
+              try {
+                let geoPolygon: any = null;
+                const polyData = typeof p.polygon === "string" ? JSON.parse(p.polygon as string) : p.polygon;
+                if (Array.isArray(polyData)) {
+                  const ring = polyData.map((pt: any) => [pt.lng || pt.longitude || pt[1], pt.lat || pt.latitude || pt[0]]);
+                  if (ring.length > 0 && (ring[0][0] !== ring[ring.length-1][0] || ring[0][1] !== ring[ring.length-1][1])) ring.push([...ring[0]]);
+                  geoPolygon = { type: "Polygon", coordinates: [ring] };
+                } else if (polyData.type === "Polygon") { geoPolygon = polyData; }
+                if (geoPolygon) {
+                  const { getIndexHistory } = await import("./copernicusService");
+                  const from90 = new Date(Date.now() - 90 * 86400000).toISOString().split("T")[0];
+                  const toNow = new Date().toISOString().split("T")[0];
+                  parsed = await getIndexHistory(geoPolygon, from90, toNow, "NDVI");
+                }
+              } catch (e2) { console.log(`[Reports] Copernicus fallback error for ${p.code}:`, e2); }
+            }
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              const means = parsed.filter((d: any) => d.mean != null).map((d: any) => d.mean);
+              ndviAvg = means.length > 0 ? means.reduce((a: number, b: number) => a + b, 0) / means.length : null;
+              // Last data point for weekly snapshot
+              const lastPt = parsed.filter((d: any) => d.mean != null).pop();
+              ndviLast = lastPt ? lastPt.mean : null;
+            }
+          } catch (e) { console.log(`[Reports] NDVI error for ${p.code}:`, e); }
 
           parcelSummaries.push({
             id: p.id, code: p.code, name: p.name || p.code || `Parcela ${p.id}`,
@@ -3883,8 +3907,10 @@ IMPORTANTE:
             weekBoxes,
             activeDays: daily.length,
             ndviAvg: ndviAvg ? Math.round(ndviAvg * 10000) / 10000 : null,
+            ndviLast: ndviLast ? Math.round(ndviLast * 10000) / 10000 : null,
             notesCount: notes.length,
             notesOpen: open.length,
+            hasHarvest: weekTotal > 0,
           });
         }
 
