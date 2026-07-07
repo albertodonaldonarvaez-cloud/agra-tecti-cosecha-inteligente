@@ -9,7 +9,7 @@ import {
   BarChart3, Globe, Filter, Satellite, AlertTriangle,
   CheckCircle, Leaf, Droplets, Thermometer, Box, Layers
 } from "lucide-react";
-import jsPDF from "jspdf";
+
 
 // ── Helpers ──
 function fmtDate(ds: string) { if (!ds) return "-"; const s = ds.length===10?ds+"T12:00:00":ds; return new Date(s).toLocaleDateString("es-MX",{day:"2-digit",month:"short",year:"numeric",timeZone:"America/Mexico_City"}); }
@@ -43,158 +43,205 @@ function useLogoBase64() {
 }
 
 // ════════════════════════════════════════════════
-// jsPDF helpers
+// HTML Report Builder (Liquid Glass design)
 // ════════════════════════════════════════════════
-const PW = 612; const PH = 792; const ML = 40; const MR = 40; const CW = PW-ML-MR;
-const R = 6; // global corner radius
-
-function pdfHeader(pdf: jsPDF, title: string, subtitle: string, period: string, logo: string|null) {
-  // Main header background
-  pdf.setFillColor(6,95,70); pdf.rect(0,0,PW,64,"F");
-  // Accent stripe
-  pdf.setFillColor(16,185,129); pdf.rect(0,62,PW,3,"F");
-  // Decorative circle (top-right)
-  pdf.setFillColor(16,185,129); pdf.circle(PW - 30, 30, 40, "F");
-  pdf.setFillColor(6,95,70); pdf.circle(PW - 30, 30, 36, "F");
-  // Logo
-  if (logo) { try { pdf.addImage(logo,"PNG",ML,12,38,38); } catch {} }
-  const lx = ML+(logo?46:0);
-  // Brand
-  pdf.setFont("helvetica","bold"); pdf.setFontSize(18); pdf.setTextColor(255,255,255);
-  pdf.text("AGRA TEC-TI", lx, 30);
-  pdf.setFontSize(7.5); pdf.setFont("helvetica","normal"); pdf.setTextColor(167,243,208);
-  pdf.text(safe(subtitle.toUpperCase()), lx, 42);
-  // Right side info
-  pdf.setFont("helvetica","bold"); pdf.setFontSize(10); pdf.setTextColor(255,255,255);
-  pdf.text(safe(title), PW-MR-50, 26, {align:"right"});
-  pdf.setFontSize(7.5); pdf.setFont("helvetica","normal"); pdf.setTextColor(167,243,208);
-  pdf.text(safe(period), PW-MR-50, 38, {align:"right"});
-  // Type badge
-  const badgeW = 65;
-  pdf.setFillColor(16,185,129); pdf.roundedRect(PW-MR-50-badgeW/2-2, 44, badgeW, 12, 3, 3, "F");
-  pdf.setFontSize(6); pdf.setFont("helvetica","bold"); pdf.setTextColor(255,255,255);
-  pdf.text("REPORTE SEMANAL", PW-MR-50, 52, {align:"center"});
+function ndviBadgeClass(v: number|null|undefined): string {
+  if (v == null) return "";
+  if (v < 0.4) return "critical";
+  if (v <= 0.5) return "moderate";
+  return "healthy";
 }
 
-function pdfSubHeader(pdf: jsPDF, title: string, info: string, logo: string|null) {
-  pdf.setFillColor(6,95,70); pdf.rect(0,0,PW,38,"F");
-  pdf.setFillColor(16,185,129); pdf.rect(0,36,PW,3,"F");
-  if (logo) { try { pdf.addImage(logo,"PNG",ML,7,22,22); } catch {} }
-  pdf.setFont("helvetica","bold"); pdf.setFontSize(13); pdf.setTextColor(255,255,255);
-  pdf.text(safe(title), ML+(logo?30:0), 24);
-  pdf.setFont("helvetica","normal"); pdf.setFontSize(7); pdf.setTextColor(167,243,208);
-  pdf.text(safe(info), PW-MR, 22, {align:"right"});
+function getReportCss(): string {
+  return `
+    :root {
+      --primary: #064e3b;
+      --primary-light: #10b981;
+      --accent: #00a8e8;
+      --bg-glass: rgba(255,255,255,0.55);
+      --border-glass: rgba(255,255,255,0.5);
+      --text-dark: #1e293b;
+      --text-muted: #64748b;
+    }
+    @page { size: letter; margin: 0; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: #f0fdf4; color: var(--text-dark); -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    .page { width: 8.5in; min-height: 11in; position: relative; overflow: hidden; padding: 0; margin: 0 auto; background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 30%, #f8fafc 100%); page-break-after: always; }
+    .page:last-child { page-break-after: auto; }
+    .glass-bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: hidden; }
+    .blob { position: absolute; border-radius: 50%; filter: blur(60px); opacity: 0.5; }
+    .blob-1 { width: 350px; height: 350px; top: -80px; right: -60px; background: radial-gradient(circle, rgba(16,185,129,0.25), transparent 70%); }
+    .blob-2 { width: 300px; height: 300px; bottom: 40px; left: -80px; background: radial-gradient(circle, rgba(0,168,232,0.15), transparent 70%); }
+    .blob-3 { width: 200px; height: 200px; top: 40%; left: 50%; background: radial-gradient(circle, rgba(6,78,59,0.1), transparent 70%); }
+    .main-content { position: relative; z-index: 1; padding: 28px 36px 60px 36px; }
+
+    /* Header */
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand img { height: 44px; width: 44px; border-radius: 12px; }
+    .brand-text h1 { font-size: 20px; font-weight: 800; color: var(--primary); letter-spacing: -0.5px; }
+    .brand-text span { font-size: 9px; color: var(--primary-light); text-transform: uppercase; letter-spacing: 2px; font-weight: 600; }
+    .header-right { text-align: right; }
+    .header-right .report-type { font-size: 10px; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: 1px; }
+    .header-right .report-name { font-size: 13px; font-weight: 600; color: var(--text-dark); margin-top: 2px; }
+
+    /* Date Banner */
+    .date-banner { background: linear-gradient(135deg, var(--primary), #065f46); color: white; border-radius: 12px; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .date-banner .period { font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    .date-banner .badge { background: var(--primary-light); border-radius: 20px; padding: 3px 12px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+    .date-banner svg { width: 16px; height: 16px; }
+
+    /* Metric Cards */
+    .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+    .metric-card { background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 14px; padding: 12px 14px; position: relative; overflow: hidden; }
+    .metric-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px; border-radius: 14px 14px 0 0; }
+    .metric-card.green::before { background: linear-gradient(90deg, #10b981, #059669); }
+    .metric-card.blue::before { background: linear-gradient(90deg, #3b82f6, #2563eb); }
+    .metric-card.amber::before { background: linear-gradient(90deg, #f59e0b, #d97706); }
+    .metric-card.purple::before { background: linear-gradient(90deg, #8b5cf6, #7c3aed); }
+    .metric-card.red::before { background: linear-gradient(90deg, #ef4444, #dc2626); }
+    .metric-card.cyan::before { background: linear-gradient(90deg, #06b6d4, #0891b2); }
+    .metric-label { font-size: 8.5px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 4px; margin-top: 4px; }
+    .metric-value { font-size: 20px; font-weight: 800; color: var(--primary); }
+    .metric-sub { font-size: 8px; color: var(--text-muted); margin-top: 2px; }
+
+    /* Section Titles */
+    .section-title { font-size: 12px; font-weight: 700; color: var(--primary); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; padding-bottom: 4px; position: relative; }
+    .section-title::after { content: ''; flex: 1; height: 2px; background: linear-gradient(90deg, rgba(16,185,129,0.3), transparent); border-radius: 2px; }
+    .section-title svg { width: 14px; height: 14px; color: var(--primary-light); }
+
+    /* Glass Table */
+    .glass-table-container { background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 12px; overflow: hidden; margin-bottom: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 9px; }
+    thead tr { background: linear-gradient(135deg, var(--primary), #065f46); }
+    thead th { color: white; padding: 7px 10px; font-weight: 600; text-align: left; font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.5px; }
+    thead th.text-right { text-align: right; }
+    tbody tr { border-bottom: 1px solid rgba(16,185,129,0.08); transition: background 0.2s; }
+    tbody tr:nth-child(even) { background: rgba(240,253,244,0.4); }
+    tbody tr:nth-child(odd) { background: rgba(255,255,255,0.3); }
+    tbody tr.risk-row { background: rgba(254,226,226,0.4) !important; }
+    tbody td { padding: 6px 10px; color: var(--text-dark); }
+    tbody td.text-right { text-align: right; }
+    tbody td.font-bold { font-weight: 700; }
+    tbody td.parcel-name { font-weight: 600; color: var(--primary); }
+    tfoot tr { background: linear-gradient(135deg, var(--primary), #065f46); }
+    tfoot td { color: white; padding: 7px 10px; font-weight: 700; font-size: 8.5px; }
+    tfoot td.text-right { text-align: right; }
+
+    /* NDVI Badges */
+    .ndvi-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 8.5px; font-weight: 700; }
+    .ndvi-badge.healthy { background: #dcfce7; color: #166534; }
+    .ndvi-badge.moderate { background: #fef9c3; color: #854d0e; }
+    .ndvi-badge.critical { background: #fee2e2; color: #991b1b; }
+
+    /* Risk Alert */
+    .risk-alert { background: rgba(254,226,226,0.5); backdrop-filter: blur(12px); border: 1px solid rgba(252,165,165,0.5); border-radius: 12px; padding: 10px 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
+    .risk-icon { width: 28px; height: 28px; background: linear-gradient(135deg, #ef4444, #dc2626); border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .risk-icon svg { width: 14px; height: 14px; color: white; }
+    .risk-text strong { font-size: 10px; color: #991b1b; display: block; }
+    .risk-text span { font-size: 8.5px; color: #b91c1c; }
+
+    /* Climate Strip */
+    .climate-strip { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+    .climate-item { flex: 1; min-width: 100px; background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 10px; padding: 8px 12px; display: flex; align-items: center; gap: 8px; }
+    .climate-item svg { width: 18px; height: 18px; flex-shrink: 0; }
+    .climate-item .cl-label { font-size: 8px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .climate-item .cl-value { font-size: 13px; font-weight: 700; }
+    .cl-temp-max { color: #dc2626; }
+    .cl-temp-min { color: #2563eb; }
+    .cl-rain { color: #0891b2; }
+    .cl-days { color: #059669; }
+
+    /* AI Card */
+    .ia-card { background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 14px; padding: 0; overflow: hidden; margin-bottom: 12px; }
+    .ia-card-bar { height: 4px; background: linear-gradient(90deg, var(--primary-light), var(--primary)); }
+    .ia-card-header { display: flex; align-items: center; gap: 8px; padding: 10px 16px 4px 16px; }
+    .ia-card-header svg { width: 18px; height: 18px; color: var(--primary-light); }
+    .ia-card-header .ia-title { font-size: 11px; font-weight: 700; color: var(--primary); }
+    .ia-card-header .ia-sub { font-size: 8px; color: var(--text-muted); margin-left: 8px; }
+    .ia-card-body { padding: 6px 16px 14px 16px; font-size: 9px; line-height: 1.6; color: var(--text-dark); white-space: pre-wrap; }
+
+    /* Summary Bar */
+    .summary-bar { background: linear-gradient(135deg, var(--primary), #065f46); border-radius: 12px; padding: 12px 20px; color: white; font-size: 11px; font-weight: 700; margin-bottom: 14px; display: flex; align-items: center; gap: 6px; }
+    .summary-bar svg { width: 16px; height: 16px; }
+
+    /* Two Column Layout */
+    .two-col { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 14px; margin-bottom: 12px; }
+
+    /* Notes KPIs inline */
+    .notes-kpis { display: flex; gap: 8px; margin-bottom: 10px; }
+    .note-kpi { flex: 1; background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 10px; padding: 8px; text-align: center; }
+    .note-kpi .nk-val { font-size: 18px; font-weight: 800; }
+    .note-kpi .nk-label { font-size: 7.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+
+    /* Spatial Grid */
+    .spatial-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+    .spatial-cell { background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 10px; padding: 10px; text-align: center; position: relative; }
+    .spatial-cell.problem { border-color: rgba(252,165,165,0.6); background: rgba(254,242,242,0.5); }
+    .spatial-cell .sc-label { font-size: 8px; font-weight: 700; color: var(--primary); margin-bottom: 4px; }
+    .spatial-cell.problem .sc-label { color: #991b1b; }
+    .spatial-cell .sc-ndvi { font-size: 20px; font-weight: 800; color: var(--primary-light); }
+    .spatial-cell.problem .sc-ndvi { color: #dc2626; }
+    .spatial-cell .sc-sub { font-size: 7px; color: var(--text-muted); margin-top: 2px; }
+
+    /* Maps Row */
+    .maps-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
+    .map-card { background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 12px; overflow: hidden; text-align: center; }
+    .map-card .map-title { font-size: 11px; font-weight: 700; color: var(--primary); padding: 8px 0 4px 0; }
+    .map-card img { width: 100%; max-height: 140px; object-fit: contain; padding: 0 8px 4px 8px; }
+    .map-card .map-no-img { padding: 30px 10px; font-size: 9px; color: var(--text-muted); }
+    .map-card .map-trend { font-size: 9px; font-weight: 600; padding: 4px 0 8px 0; }
+    .trend-up { color: #10b981; }
+    .trend-down { color: #ef4444; }
+    .trend-stable { color: #f59e0b; }
+
+    /* Category pills */
+    .cat-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+    .cat-pill { background: rgba(240,253,244,0.7); border: 1px solid rgba(209,250,229,0.6); border-radius: 8px; padding: 4px 10px; display: flex; align-items: center; gap: 6px; }
+    .cat-pill .cp-count { font-size: 13px; font-weight: 800; color: var(--primary); }
+    .cat-pill .cp-label { font-size: 8px; color: var(--text-dark); }
+
+    /* Footer */
+    .page-footer { position: absolute; bottom: 0; left: 0; right: 0; padding: 8px 36px; border-top: 1px solid rgba(16,185,129,0.15); display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.6); backdrop-filter: blur(8px); z-index: 2; }
+    .footer-brand { font-size: 7.5px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+    .footer-brand img { height: 12px; width: 12px; border-radius: 3px; }
+    .page-pill { background: var(--primary); color: white; border-radius: 10px; padding: 3px 10px; font-size: 7.5px; font-weight: 700; }
+
+    /* Liquid line */
+    .liquid-line { position: absolute; bottom: 28px; left: 36px; right: 36px; height: 4px; background: linear-gradient(90deg, var(--primary-light), var(--accent), var(--primary-light)); border-radius: 4px; opacity: 0.3; z-index: 2; }
+
+    /* Sub-header for subsequent pages */
+    .sub-header { background: linear-gradient(135deg, var(--primary), #065f46); padding: 10px 36px; display: flex; align-items: center; justify-content: space-between; }
+    .sub-header h2 { color: white; font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .sub-header h2 img { height: 22px; width: 22px; border-radius: 6px; }
+    .sub-header .sh-info { font-size: 8px; color: #a7f3d0; }
+    .sub-header + .main-content { padding-top: 14px; }
+
+    /* SLA alert */
+    .sla-alert { background: rgba(254,242,242,0.5); border: 1px solid rgba(252,165,165,0.4); border-radius: 10px; padding: 8px 14px; font-size: 9px; font-weight: 600; color: #991b1b; margin-bottom: 10px; }
+
+    /* Inactive parcels chips */
+    .inactive-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+    .inactive-chip { background: rgba(245,245,245,0.7); border: 1px solid rgba(220,220,220,0.5); border-radius: 8px; padding: 3px 8px; font-size: 8px; color: #6b7280; }
+
+    @media print {
+      body { background: white; }
+      .page { box-shadow: none; }
+      .no-print { display: none !important; }
+    }
+    @media screen {
+      .page { box-shadow: 0 4px 30px rgba(0,0,0,0.08); margin-bottom: 20px; }
+    }
+  `;
 }
 
-function pdfFooter(pdf: jsPDF, page: number, total: number, dateStr: string, logo: string|null) {
-  const y = PH-20;
-  // Footer background bar
-  pdf.setFillColor(245,252,248); pdf.rect(0,y-6,PW,26,"F");
-  pdf.setFillColor(16,185,129); pdf.rect(0,y-6,PW,1,"F");
-  if (logo) { try { pdf.addImage(logo,"PNG",ML,y-1,10,10); } catch {} }
-  pdf.setFontSize(6); pdf.setFont("helvetica","normal"); pdf.setTextColor(107,114,128);
-  pdf.text(`AGRA TEC-TI  |  ${safe(dateStr)}  |  Confidencial`, ML+14, y+6);
-  // Page number pill
-  const pageText = `${page} / ${total}`;
-  const ptw = pdf.getTextWidth(pageText) + 10;
-  pdf.setFillColor(6,95,70); pdf.roundedRect(PW-MR-ptw, y-1, ptw, 12, 3, 3, "F");
-  pdf.setFontSize(6); pdf.setFont("helvetica","bold"); pdf.setTextColor(255,255,255);
-  pdf.text(pageText, PW-MR-ptw/2, y+7, {align:"center"});
-}
-
-function pdfKpi(pdf: jsPDF, x: number, y: number, w: number, label: string, value: string, r: number, g: number, b: number) {
-  // Shadow simulation
-  pdf.setFillColor(230,230,230); pdf.roundedRect(x+1,y+1,w,40,R,R,"F");
-  // Card
-  pdf.setFillColor(255,255,255); pdf.roundedRect(x,y,w,40,R,R,"F");
-  pdf.setDrawColor(240,240,240); pdf.roundedRect(x,y,w,40,R,R,"S");
-  // Top colored bar
-  pdf.setFillColor(r,g,b); pdf.roundedRect(x,y,w,4,R,R,"F");
-  pdf.setFillColor(255,255,255); pdf.rect(x,y+3,w,2,"F"); // flatten bottom of bar
-  // Label
-  pdf.setFontSize(6.5); pdf.setFont("helvetica","normal"); pdf.setTextColor(107,114,128);
-  pdf.text(safe(label.toUpperCase()), x+8, y+17);
-  // Value
-  pdf.setFontSize(16); pdf.setFont("helvetica","bold"); pdf.setTextColor(r,g,b);
-  pdf.text(safe(value), x+8, y+33);
-}
-
-function pdfSection(pdf: jsPDF, x: number, y: number, title: string) {
-  // Pill-style section header
-  const tw = pdf.getTextWidth(safe(title)) * 1.2 + 16;
-  pdf.setFillColor(240,253,244); pdf.roundedRect(x,y,Math.max(tw, 80),16,4,4,"F");
-  pdf.setDrawColor(187,247,208); pdf.roundedRect(x,y,Math.max(tw, 80),16,4,4,"S");
-  pdf.setFillColor(6,95,70); pdf.roundedRect(x+3,y+4,3,8,1,1,"F");
-  pdf.setFontSize(8); pdf.setFont("helvetica","bold"); pdf.setTextColor(6,95,70);
-  pdf.text(safe(title), x+10, y+11);
-}
-
-function pdfTable(pdf: jsPDF, x: number, y: number, headers: string[], rows: string[][], widths: number[], rowColors?: ([number,number,number]|null)[]): number {
-  const rh=14; const hh=16; const tw=widths.reduce((a,b)=>a+b,0);
-  const totalH = hh + rows.length * rh;
-  // Outer container with rounded corners
-  pdf.setFillColor(255,255,255); pdf.roundedRect(x-1,y-1,tw+2,totalH+2,R,R,"F");
-  pdf.setDrawColor(220,240,230); pdf.setLineWidth(0.5); pdf.roundedRect(x-1,y-1,tw+2,totalH+2,R,R,"S");
-  // Header with rounded top
-  pdf.setFillColor(6,95,70); pdf.roundedRect(x,y,tw,hh+4,R,R,"F");
-  pdf.setFillColor(6,95,70); pdf.rect(x,y+R,tw,hh-R+4,"F"); // flatten bottom
-  pdf.setFontSize(7.5); pdf.setFont("helvetica","bold"); pdf.setTextColor(255,255,255);
-  let cx=x; headers.forEach((h,i)=>{pdf.text(safe(h),cx+6,y+11);cx+=widths[i];});
-  let cy=y+hh;
-  rows.forEach((row,ri)=>{
-    const rc=rowColors?.[ri];
-    if(rc){pdf.setFillColor(rc[0],rc[1],rc[2]);pdf.rect(x,cy,tw,rh,"F");}
-    else if(ri%2===0){pdf.setFillColor(248,252,250);pdf.rect(x,cy,tw,rh,"F");}
-    else{pdf.setFillColor(255,255,255);pdf.rect(x,cy,tw,rh,"F");}
-    pdf.setDrawColor(235,245,240);pdf.setLineWidth(0.3);pdf.line(x+4,cy+rh,x+tw-4,cy+rh);
-    cx=x;
-    row.forEach((cell,ci)=>{
-      pdf.setFontSize(7.5);pdf.setFont("helvetica",ci===0?"bold":"normal");
-      pdf.setTextColor(ci===0?6:60,ci===0?95:70,ci===0?70:90);
-      const t=cell.length>24?cell.substring(0,22)+"...":cell;
-      pdf.text(safe(t),cx+6,cy+10);cx+=widths[ci];
-    });
-    cy+=rh;
-  });
-  return cy;
-}
-
-function pdfTotalRow(pdf: jsPDF, x: number, y: number, cells: string[], widths: number[]): number {
-  const h=16; const tw=widths.reduce((a,b)=>a+b,0);
-  // Rounded bottom
-  pdf.setFillColor(6,95,70); pdf.roundedRect(x,y-2,tw,h+2,R,R,"F");
-  pdf.setFillColor(6,95,70); pdf.rect(x,y-2,tw,R,"F"); // flatten top
-  pdf.setFontSize(7.5); pdf.setFont("helvetica","bold"); pdf.setTextColor(255,255,255);
-  let cx=x; cells.forEach((c,i)=>{pdf.text(safe(c),cx+6,y+10);cx+=widths[i];});
-  return y+h;
-}
-
-function pdfAiBox(pdf: jsPDF, x: number, y: number, w: number, text: string, maxY: number = PH - 40): number {
-  const clean = stripMd(text);
-  pdf.setFontSize(7.5); pdf.setFont("helvetica","normal");
-  const lines = pdf.splitTextToSize(safe(clean), w-20);
-  const available = maxY - y - 30;
-  const maxLines = Math.min(lines.length, Math.floor(available / 9.5));
-  if (maxLines < 2) return y;
-  const boxH = 30 + maxLines*9.5;
-  // Shadow
-  pdf.setFillColor(225,245,235); pdf.roundedRect(x+1,y+1,w,boxH,R,R,"F");
-  // Box
-  pdf.setFillColor(248,254,250); pdf.roundedRect(x,y,w,boxH,R,R,"F");
-  pdf.setDrawColor(187,247,208); pdf.setLineWidth(0.8); pdf.roundedRect(x,y,w,boxH,R,R,"S");
-  // Green accent bar on left
-  pdf.setFillColor(16,185,129); pdf.roundedRect(x+3,y+6,3,boxH-12,1,1,"F");
-  // Title bar
-  pdf.setFillColor(240,253,244); pdf.roundedRect(x+10,y+4,140,14,3,3,"F");
-  pdf.setFontSize(8.5); pdf.setFont("helvetica","bold"); pdf.setTextColor(6,95,70);
-  pdf.text("IA AGRA TEC-TI", x+16, y+13);
-  pdf.setFontSize(7); pdf.setFont("helvetica","normal"); pdf.setTextColor(107,140,120);
-  pdf.text("Analisis Semanal", x+80, y+13);
-  // Content
-  pdf.setFontSize(7.5); pdf.setFont("helvetica","normal"); pdf.setTextColor(31,41,55);
-  pdf.text(lines.slice(0,maxLines), x+12, y+26);
-  return y+boxH;
-}
+function svgCalendar(): string { return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>'; }
+function svgThermH(): string { return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>'; }
+function svgThermC(): string { return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>'; }
+function svgRain(): string { return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#0891b2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="19" x2="8" y2="21"/><line x1="8" y1="13" x2="8" y2="15"/><line x1="16" y1="19" x2="16" y2="21"/><line x1="16" y1="13" x2="16" y2="15"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="12" y1="15" x2="12" y2="17"/><path d="M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25"/></svg>'; }
+function svgBrain(): string { return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2z"/></svg>'; }
+function svgAlert(): string { return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'; }
+function svgCheck(): string { return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>'; }
 
 // ════════════════════════════════════════════════
 // Component
@@ -294,312 +341,492 @@ export default function Reports() {
   },[isGeneral,generalData]);
 
   // ══════════════════════════════════════════
-  // PDF Generation
+  // HTML Report Builder + Print-to-PDF
   // ══════════════════════════════════════════
-  async function generatePDF() {
-    if (!dataReady) return;
-    setGenerating(true);
-    toast.loading("Generando PDF...", { id: "pdf-gen" });
-    try {
-      const pdf = new jsPDF({orientation:"portrait",unit:"pt",format:"letter"});
-      const period = `${fmtDate(fromDate)} - ${fmtDate(toDate)}`;
+  function buildPageOpen(pageNum: number, numPages: number, logo: string|null, dateStr: string): string {
+    return `<div class="page">
+      <div class="glass-bg"><div class="blob blob-1"></div><div class="blob blob-2"></div><div class="blob blob-3"></div></div>
+      <div class="main-content">`;
+  }
+  function buildPageClose(pageNum: number, numPages: number, logo: string|null, dateStr: string): string {
+    return `</div><!-- /main-content -->
+      <div class="liquid-line"></div>
+      <div class="page-footer">
+        <div class="footer-brand">
+          ${logo ? `<img src="${logo}" alt="" />` : ''}
+          AGRA TEC-TI&nbsp;&nbsp;|&nbsp;&nbsp;${dateStr}&nbsp;&nbsp;|&nbsp;&nbsp;Confidencial
+        </div>
+        <div class="page-pill">${pageNum} / ${numPages}</div>
+      </div>
+    </div><!-- /page -->`;
+  }
+  function buildSubHeaderPage(pageNum: number, numPages: number, logo: string|null, dateStr: string, title: string, info: string): string {
+    return `<div class="page">
+      <div class="glass-bg"><div class="blob blob-1"></div><div class="blob blob-2"></div><div class="blob blob-3"></div></div>
+      <div class="sub-header">
+        <h2>${logo ? `<img src="${logo}" alt="" />` : ''}${safe(title)}</h2>
+        <span class="sh-info">${safe(info)}</span>
+      </div>
+      <div class="main-content">`;
+  }
+  function buildHeader(title: string, subtitle: string, logo: string|null): string {
+    return `<div class="header">
+      <div class="brand">
+        ${logo ? `<img src="${logo}" alt="Agra Tec-Ti" />` : ''}
+        <div class="brand-text">
+          <h1>AGRA TEC-TI</h1>
+          <span>${safe(subtitle)}</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="report-type">Reporte Semanal</div>
+        <div class="report-name">${safe(title)}</div>
+      </div>
+    </div>`;
+  }
+  function buildDateBanner(period: string): string {
+    return `<div class="date-banner">
+      <div class="period">${svgCalendar()} ${safe(period)}</div>
+      <div class="badge">REPORTE SEMANAL</div>
+    </div>`;
+  }
+  function buildMetricCard(label: string, value: string, sub: string, colorClass: string): string {
+    return `<div class="metric-card ${colorClass}">
+      <div class="metric-label">${safe(label)}</div>
+      <div class="metric-value">${safe(value)}</div>
+      ${sub ? `<div class="metric-sub">${safe(sub)}</div>` : ''}
+    </div>`;
+  }
+  function buildClimateStrip(ws: {avgMax:string,avgMin:string,totalRain:string,days:number}): string {
+    return `<div class="section-title">${svgThermH()} Clima</div>
+    <div class="climate-strip">
+      <div class="climate-item">${svgThermH()}<div><div class="cl-label">Temp. Max</div><div class="cl-value cl-temp-max">${ws.avgMax} &deg;C</div></div></div>
+      <div class="climate-item">${svgThermC()}<div><div class="cl-label">Temp. Min</div><div class="cl-value cl-temp-min">${ws.avgMin} &deg;C</div></div></div>
+      <div class="climate-item">${svgRain()}<div><div class="cl-label">Lluvia</div><div class="cl-value cl-rain">${ws.totalRain} mm</div></div></div>
+      <div class="climate-item">${svgCalendar()}<div><div class="cl-label">Dias</div><div class="cl-value cl-days">${ws.days}</div></div></div>
+    </div>`;
+  }
+  function buildAiCard(text: string): string {
+    const clean = stripMd(text);
+    return `<div class="ia-card">
+      <div class="ia-card-bar"></div>
+      <div class="ia-card-header">${svgBrain()}<span class="ia-title">IA AGRA TEC-TI</span><span class="ia-sub">Analisis Semanal</span></div>
+      <div class="ia-card-body">${safe(clean)}</div>
+    </div>`;
+  }
 
-      // ── PAGE 1 ──
-      pdfHeader(pdf, titleName, isGeneral?"Reporte General":"Reporte por Parcela", period, logoB64);
-      let y = 78;
-      const kw=(CW-24)/4;
-      [[`Cosecha Total`,`${weeklyHarvestTotal.toFixed(1)} kg`,5,150,105],[`1ra Calidad`,`${firstQPct}%`,4,120,87],[`Cajas`,`${weeklyBoxes}`,13,148,136],[isGeneral?`Parcelas`:`Dias Activos`,isGeneral?`${generalData?.totals?.parcelsCount||0}`:`${reportData?.dailyHarvest?.length||0}`,8,145,178]].forEach((k:any,i)=>pdfKpi(pdf,ML+i*(kw+8),y,kw,k[0],k[1],k[2],k[3],k[4]));
-      y+=58;
+  function buildReportHtml(): string {
+    const period = `${fmtDate(fromDate)} - ${fmtDate(toDate)}`;
+    const logo = logoB64;
+    const nPages = totalPages;
+    let html = '';
 
-      if(isGeneral){
-        const{active:withH,inactive:noH,risk:riskP}=generalParcels;
-        if(riskP){
-          // Risk alert with shadow
-          pdf.setFillColor(250,230,230);pdf.roundedRect(ML+1,y+1,CW,20,R,R,"F"); // shadow
-          pdf.setFillColor(254,242,242);pdf.roundedRect(ML,y,CW,20,R,R,"F");
-          pdf.setDrawColor(252,165,165);pdf.setLineWidth(0.8);pdf.roundedRect(ML,y,CW,20,R,R,"S");
-          // Red accent bar
-          pdf.setFillColor(239,68,68);pdf.roundedRect(ML+3,y+4,3,12,1,1,"F");
-          // Alert icon circle
-          pdf.setFillColor(239,68,68);pdf.circle(ML+18,y+10,5,"F");
-          pdf.setFontSize(8);pdf.setFont("helvetica","bold");pdf.setTextColor(255,255,255);
-          pdf.text("!",ML+16.5,y+13);
-          // Text
-          pdf.setFontSize(7.5);pdf.setFont("helvetica","bold");pdf.setTextColor(153,27,27);
-          pdf.text(safe(`MAYOR RIESGO: ${riskP.name}`),ML+28,y+10);
-          pdf.setFontSize(7);pdf.setFont("helvetica","normal");pdf.setTextColor(185,28,28);
-          pdf.text(safe(`NDVI ${(riskP.ndviLast||riskP.ndviAvg||0).toFixed(3)} | ${riskP.notesOpen} notas abiertas`),ML+28,y+17);
-          y+=30;
-        }
-        if(withH.length>0){
-          pdfSection(pdf,ML,y,`Parcelas con Cosecha (${withH.length})`);y+=22;
-          const gw=[CW*0.24,CW*0.11,CW*0.11,CW*0.10,CW*0.12,CW*0.14,CW*0.18];
-          const gRows=withH.map((p:any)=>[p.name||p.code,`${p.weekTotal}`,`${p.weekFirstQ}`,`${p.weekBoxes}`,(p.ndviLast||p.ndviAvg)?(p.ndviLast||p.ndviAvg).toFixed(3):"-",p.ndviAvg?p.ndviAvg.toFixed(3):"-",`${p.notesCount} (${p.notesOpen})`]);
-          const rc=withH.map((p:any)=>riskP&&p.id===riskP.id?[254,226,226] as [number,number,number]:[235,251,242] as [number,number,number]);
-          y=pdfTable(pdf,ML,y,["Parcela","kg","1ra Cal.","Cajas","NDVI Ult.","NDVI Prom","Notas"],gRows,gw,rc);
-          y=pdfTotalRow(pdf,ML,y,["SUBTOTAL",`${withH.reduce((s:number,p:any)=>s+p.weekTotal,0).toFixed(1)}`,`${withH.reduce((s:number,p:any)=>s+p.weekFirstQ,0).toFixed(1)}`,`${withH.reduce((s:number,p:any)=>s+p.weekBoxes,0)}`,"-","-",`${withH.reduce((s:number,p:any)=>s+p.notesCount,0)}`],gw);
-          y+=14;
-        }
-        if(noH.length>0){
-          pdfSection(pdf,ML,y,`Sin Cosecha esta semana (${noH.length})`);y+=22;
-          const gw2=[CW*0.35,CW*0.18,CW*0.18,CW*0.29];
-          const gRows2=noH.map((p:any)=>[p.name||p.code,(p.ndviLast||p.ndviAvg)?(p.ndviLast||p.ndviAvg).toFixed(3):"-",p.ndviAvg?p.ndviAvg.toFixed(3):"-",`${p.notesCount} (${p.notesOpen} abiertas)`]);
-          y=pdfTable(pdf,ML,y,["Parcela","NDVI Ult.","NDVI Prom","Notas"],gRows2,gw2,noH.map(()=>[245,245,245] as [number,number,number]));
-          y+=10;
-        }
-        // Total summary bar
-        pdf.setFillColor(4,80,58);pdf.roundedRect(ML+1,y+1,CW,22,R,R,"F"); // shadow
-        pdf.setFillColor(6,95,70);pdf.roundedRect(ML,y,CW,22,R,R,"F");
-        pdf.setFillColor(16,185,129);pdf.roundedRect(ML,y,CW,4,R,R,"F");
-        pdf.setFillColor(6,95,70);pdf.rect(ML,y+3,CW,3,"F"); // flatten
-        pdf.setFontSize(9);pdf.setFont("helvetica","bold");pdf.setTextColor(255,255,255);
-        pdf.text(safe(`TOTAL: ${generalData?.totals?.harvest} kg  |  ${generalData?.totals?.boxes} cajas  |  ${generalData?.totals?.notes} notas  |  ${generalData?.totals?.parcelsCount} parcelas`),ML+12,y+16);
-        y+=32;
-      } else {
-        const leftW=CW*0.54;const rightX=ML+leftW+12;const rightW=CW-leftW-12;
-        pdfSection(pdf,ML,y,"Cosecha Diaria");y+=22;
-        const hw=[leftW*0.22,leftW*0.14,leftW*0.18,leftW*0.16,leftW*0.15,leftW*0.15];
-        const hRows=(reportData?.dailyHarvest||[]).map((d:any)=>[fmtDateShort(d.date),`${d.totalBoxes}`,`${d.totalWeight}`,`${d.firstQualityWeight}`,`${d.secondQualityWeight}`,`${d.wasteWeight}`]);
-        const tEnd=pdfTable(pdf,ML,y,["Fecha","Cajas","Total kg","1ra","2da","Desp."],hRows,hw);
-        let ry=y-18;
-        pdfSection(pdf,rightX,ry,"Indices Satelitales");ry+=18;
-        const sw=[rightW*0.2,rightW*0.22,rightW*0.22,rightW*0.36];
-        const sRows=["NDVI","NDRE","NDMI"].map(idx=>{const pts=(reportData?.satelliteData?.[idx]?.data||[]).filter((d:any)=>d.mean!=null);const avg=pts.length?(pts.reduce((s:number,d:any)=>s+d.mean,0)/pts.length):null;const last=pts.length?pts[pts.length-1].mean:null;const t=getSatTrend(reportData?.satelliteData?.[idx]);return[idx,avg?.toFixed(4)||"-",last?.toFixed(4)||"-",`${t.t} ${t.l}`];});
-        ry=pdfTable(pdf,rightX,ry,["Indice","Media","Ultimo","Tendencia"],sRows,sw);ry+=10;
-        pdfSection(pdf,rightX,ry,"Notas de Campo");ry+=18;
-        const nbw=(rightW-8)/3;
-        [{l:"Total",v:`${slaSummary?.total||0}`,r:6,g:95,b:70},{l:"Resueltas",v:`${slaSummary?.resolved||0}`,r:16,g:185,b:129},{l:"Abiertas",v:`${slaSummary?.open||0}`,r:(slaSummary?.open||0)>0?239:6,g:(slaSummary?.open||0)>0?68:95,b:(slaSummary?.open||0)>0?68:70}].forEach((b,i)=>{
-          const bx=rightX+i*(nbw+4);
-          pdf.setFillColor(245,252,248);pdf.roundedRect(bx,ry,nbw,28,2,2,"F");
-          pdf.setDrawColor(209,250,229);pdf.roundedRect(bx,ry,nbw,28,2,2,"S");
-          pdf.setFontSize(13);pdf.setFont("helvetica","bold");pdf.setTextColor(b.r,b.g,b.b);
-          pdf.text(safe(b.v),bx+nbw/2,ry+13,{align:"center"});
-          pdf.setFontSize(6);pdf.setFont("helvetica","normal");pdf.setTextColor(107,114,128);
-          pdf.text(safe(b.l),bx+nbw/2,ry+22,{align:"center"});
-        });
-        ry+=32;
-        if(slaSummary?.avgSla){pdf.setFontSize(7);pdf.setFont("helvetica","normal");pdf.setTextColor(55,65,81);pdf.text(safe(`SLA promedio: ${slaSummary.avgSla}h`),rightX,ry+6);}
-        y=Math.max(tEnd,ry)+16;
+    // ── PAGE 1 ──
+    html += buildPageOpen(1, nPages, logo, now);
+    html += buildHeader(titleName, isGeneral ? 'Reporte General' : 'Reporte por Parcela', logo);
+    html += buildDateBanner(period);
+
+    // Metric cards
+    html += '<div class="metrics-grid">';
+    html += buildMetricCard('Cosecha Total', `${weeklyHarvestTotal.toLocaleString('es-MX', {maximumFractionDigits:1})} kg`, 'kilogramos', 'green');
+    html += buildMetricCard('1ra Calidad', `${firstQPct}%`, `${weeklyFirstQ.toFixed(1)} kg`, 'green');
+    html += buildMetricCard('Cajas', `${weeklyBoxes.toLocaleString('es-MX')}`, 'total periodo', 'amber');
+    if (isGeneral) {
+      html += buildMetricCard('Parcelas', `${generalData?.totals?.parcelsCount || 0}`, 'activas', 'blue');
+    } else {
+      html += buildMetricCard('Dias Activos', `${reportData?.dailyHarvest?.length || 0}`, 'con cosecha', 'blue');
+    }
+    html += '</div>';
+
+    if (isGeneral) {
+      // ── GENERAL PAGE 1 ──
+      const { active: withH, inactive: noH, risk: riskP } = generalParcels;
+
+      // Risk alert
+      if (riskP) {
+        html += `<div class="risk-alert">
+          <div class="risk-icon">${svgAlert()}</div>
+          <div class="risk-text">
+            <strong>MAYOR RIESGO: ${safe(riskP.name)}</strong>
+            <span>NDVI ${(riskP.ndviLast || riskP.ndviAvg || 0).toFixed(3)} | ${riskP.notesOpen} notas abiertas</span>
+          </div>
+        </div>`;
       }
 
-      if(weatherSummary){
-        pdfSection(pdf,ML,y,"Clima");y+=22;
-        pdf.setFontSize(7.5);pdf.setFont("helvetica","normal");pdf.setTextColor(55,65,81);
-        pdf.text(safe(`Temp. Max prom: ${weatherSummary.avgMax} C  |  Min prom: ${weatherSummary.avgMin} C  |  Lluvia acum: ${weatherSummary.totalRain} mm`),ML+8,y+6);
-        y+=18;
+      // Active parcels table
+      if (withH.length > 0) {
+        html += `<div class="section-title">${svgCheck()} Parcelas con Cosecha (${withH.length})</div>`;
+        html += '<div class="glass-table-container"><table><thead><tr>';
+        html += '<th>Parcela</th><th class="text-right">kg</th><th class="text-right">1ra Cal.</th><th class="text-right">Cajas</th><th class="text-right">NDVI Ult.</th><th class="text-right">NDVI Prom</th><th class="text-right">Notas</th>';
+        html += '</tr></thead><tbody>';
+        withH.forEach((p: any) => {
+          const isRisk = riskP && p.id === riskP.id;
+          const ndvi = p.ndviLast || p.ndviAvg;
+          html += `<tr class="${isRisk ? 'risk-row' : ''}">`;
+          html += `<td class="parcel-name">${isRisk ? '&#9888; ' : ''}${safe(p.name || p.code)}</td>`;
+          html += `<td class="text-right font-bold">${p.weekTotal}</td>`;
+          html += `<td class="text-right">${p.weekFirstQ}</td>`;
+          html += `<td class="text-right">${p.weekBoxes}</td>`;
+          html += `<td class="text-right">${ndvi ? `<span class="ndvi-badge ${ndviBadgeClass(ndvi)}">${ndvi.toFixed(3)}</span>` : '-'}</td>`;
+          html += `<td class="text-right">${p.ndviAvg ? p.ndviAvg.toFixed(3) : '-'}</td>`;
+          html += `<td class="text-right">${p.notesCount}${p.notesOpen > 0 ? ` <span style="color:#ef4444;font-size:8px">(${p.notesOpen})</span>` : ''}</td>`;
+          html += '</tr>';
+        });
+        html += '</tbody><tfoot><tr>';
+        html += `<td>SUBTOTAL</td><td class="text-right">${withH.reduce((s: number, p: any) => s + p.weekTotal, 0).toFixed(1)}</td>`;
+        html += `<td class="text-right">${withH.reduce((s: number, p: any) => s + p.weekFirstQ, 0).toFixed(1)}</td>`;
+        html += `<td class="text-right">${withH.reduce((s: number, p: any) => s + p.weekBoxes, 0)}</td>`;
+        html += '<td class="text-right">-</td><td class="text-right">-</td>';
+        html += `<td class="text-right">${withH.reduce((s: number, p: any) => s + p.notesCount, 0)}</td>`;
+        html += '</tr></tfoot></table></div>';
       }
 
-      if(aiText){y=pdfAiBox(pdf,ML,y,CW,aiText)+8;}
-      pdfFooter(pdf,1,totalPages,now,logoB64);
-
-      // Extended pages - PER PARCEL
-      if(reportMode==="extended"&&!isGeneral&&reportData){
-        pdf.addPage();pdfSubHeader(pdf,"Cosecha Detallada + Clima",`${titleName} | ${period}`,logoB64);y=48;
-        const h2w=[CW*0.17,CW*0.12,CW*0.18,CW*0.18,CW*0.17,CW*0.18];
-        const h2R=(reportData.dailyHarvest||[]).map((d:any)=>[fmtDateShort(d.date),`${d.totalBoxes}`,`${d.totalWeight}`,`${d.firstQualityWeight}`,`${d.secondQualityWeight}`,`${d.wasteWeight}`]);
-        y=pdfTable(pdf,ML,y,["Fecha","Cajas","Total (kg)","1ra Cal.","2da Cal.","Desperdicio"],h2R,h2w);
-        const sQ=(reportData.dailyHarvest||[]).reduce((s:number,d:any)=>s+(d.secondQualityWeight||0),0);
-        const wa=(reportData.dailyHarvest||[]).reduce((s:number,d:any)=>s+(d.wasteWeight||0),0);
-        y=pdfTotalRow(pdf,ML,y,["TOTAL",`${weeklyBoxes}`,weeklyHarvestTotal.toFixed(2),weeklyFirstQ.toFixed(2),sQ.toFixed(2),wa.toFixed(2)],h2w);y+=20;
-        if(weatherSummary&&reportData.weatherData){
-          pdfSection(pdf,ML,y,"Clima Diario");y+=22;
-          const wbw=(CW-24)/4;
-          [{l:"Temp. Max",v:`${weatherSummary.avgMax} C`,r:220,g:38,b:38},{l:"Temp. Min",v:`${weatherSummary.avgMin} C`,r:37,g:99,b:235},{l:"Lluvia",v:`${weatherSummary.totalRain} mm`,r:5,g:150,b:105},{l:"Dias",v:`${weatherSummary.days}`,r:139,g:92,b:246}].forEach((w,i)=>pdfKpi(pdf,ML+i*(wbw+8),y,wbw,w.l,w.v,w.r,w.g,w.b));
-          y+=54;
-          const wtw=[CW*0.3,CW*0.23,CW*0.23,CW*0.24];
-          const wtR=((reportData.weatherData as any[])||[]).map((w:any)=>[fmtDateShort(w.date),(w.temperatureMax||0).toFixed(1),(w.temperatureMin||0).toFixed(1),(w.precipitation||0).toFixed(1)]);
-          y=pdfTable(pdf,ML,y,["Fecha","Max C","Min C","Lluvia mm"],wtR,wtw);
-        }
-        pdfFooter(pdf,2,4,now,logoB64);
-
-        pdf.addPage();pdfSubHeader(pdf,"Telemetria Satelital",`${titleName} | ${period}`,logoB64);y=48;
-        const mapW=(CW-20)/3;
-        (["NDVI","NDRE","NDMI"] as const).forEach((idx,i)=>{
-          const mx=ML+i*(mapW+10);
-          pdf.setFontSize(10);pdf.setFont("helvetica","bold");pdf.setTextColor(6,95,70);pdf.text(idx,mx+mapW/2,y+10,{align:"center"});
-          const img=satMaps[idx];
-          if(img){try{pdf.addImage(img,"PNG",mx,y+14,mapW,mapW*0.75,undefined,"FAST");}catch{}}
-          else{pdf.setFillColor(249,250,251);pdf.roundedRect(mx,y+14,mapW,mapW*0.75,R,R,"F");pdf.setDrawColor(209,213,219);pdf.roundedRect(mx,y+14,mapW,mapW*0.75,R,R,"S");pdf.setFontSize(7);pdf.setFont("helvetica","normal");pdf.setTextColor(156,163,175);pdf.text("Sin imagen",mx+mapW/2,y+14+mapW*0.375,{align:"center"});}
-          const tr=getSatTrend(reportData.satelliteData?.[idx]);pdf.setFontSize(8);pdf.setFont("helvetica","bold");pdf.setTextColor(tr.c[0],tr.c[1],tr.c[2]);pdf.text(safe(`${tr.t} ${tr.l}`),mx+mapW/2,y+20+mapW*0.75,{align:"center"});
+      // Inactive parcels
+      if (noH.length > 0) {
+        html += `<div class="section-title">Sin Cosecha esta semana (${noH.length})</div>`;
+        html += '<div class="inactive-chips">';
+        noH.forEach((p: any) => {
+          const ndvi = p.ndviLast || p.ndviAvg;
+          html += `<span class="inactive-chip">${safe(p.name || p.code)}${ndvi ? ` &middot; NDVI ${ndvi.toFixed(3)}` : ''}</span>`;
         });
-        y+=30+mapW*0.75+10;
-        const stw=[CW*0.13,CW*0.17,CW*0.17,CW*0.17,CW*0.17,CW*0.19];
-        const stR=["NDVI","NDRE","NDMI"].map(idx=>{const pts=(reportData.satelliteData?.[idx]?.data||[]).filter((d:any)=>d.mean!=null);const means=pts.map((d:any)=>d.mean);const avg=means.length?means.reduce((a:number,b:number)=>a+b,0)/means.length:null;const tr=getSatTrend(reportData.satelliteData?.[idx]);return[idx,avg?.toFixed(4)||"-",means.length?Math.min(...means).toFixed(4):"-",means.length?Math.max(...means).toFixed(4):"-",means.length?means[means.length-1].toFixed(4):"-",`${tr.t} ${tr.l}`];});
-        y=pdfTable(pdf,ML,y,["Indice","Media","Min","Max","Ultimo","Tendencia"],stR,stw);y+=16;
-        if(reportData.aiAnalysis){y=pdfAiBox(pdf,ML,y,CW,reportData.aiAnalysis)+8;}
-        pdfFooter(pdf,3,5,now,logoB64);
+        html += '</div>';
+      }
 
-        // Page 4: Spatial Analysis (3x3 quadrant grid)
-        pdf.addPage();pdfSubHeader(pdf,"Analisis Espacial por Cuadrante",`${titleName} | ${period}`,logoB64);y=50;
+      // Summary bar
+      html += `<div class="summary-bar">${svgCheck()} TOTAL: ${generalData?.totals?.harvest} kg &nbsp;|&nbsp; ${generalData?.totals?.boxes} cajas &nbsp;|&nbsp; ${generalData?.totals?.notes} notas &nbsp;|&nbsp; ${generalData?.totals?.parcelsCount} parcelas</div>`;
 
-        // NDVI map image if available
+    } else {
+      // ── PER-PARCEL PAGE 1 ──
+      html += '<div class="two-col"><div>';
+
+      // Daily harvest table (left)
+      html += `<div class="section-title">${svgCalendar()} Cosecha Diaria</div>`;
+      html += '<div class="glass-table-container"><table><thead><tr>';
+      html += '<th>Fecha</th><th class="text-right">Cajas</th><th class="text-right">Total kg</th><th class="text-right">1ra</th><th class="text-right">2da</th><th class="text-right">Desp.</th>';
+      html += '</tr></thead><tbody>';
+      (reportData?.dailyHarvest || []).forEach((d: any) => {
+        html += `<tr><td class="parcel-name">${fmtDateShort(d.date)}</td><td class="text-right">${d.totalBoxes}</td><td class="text-right font-bold">${d.totalWeight}</td><td class="text-right">${d.firstQualityWeight}</td><td class="text-right">${d.secondQualityWeight}</td><td class="text-right">${d.wasteWeight}</td></tr>`;
+      });
+      html += '</tbody></table></div>';
+      html += '</div><div>';
+
+      // Satellite indices (right)
+      html += `<div class="section-title">Indices Satelitales</div>`;
+      html += '<div class="glass-table-container"><table><thead><tr><th>Indice</th><th class="text-right">Media</th><th class="text-right">Ultimo</th><th>Tendencia</th></tr></thead><tbody>';
+      ["NDVI", "NDRE", "NDMI"].forEach(idx => {
+        const pts = (reportData?.satelliteData?.[idx]?.data || []).filter((d: any) => d.mean != null);
+        const avg = pts.length ? (pts.reduce((s: number, d: any) => s + d.mean, 0) / pts.length) : null;
+        const last = pts.length ? pts[pts.length - 1].mean : null;
+        const t = getSatTrend(reportData?.satelliteData?.[idx]);
+        const trendClass = t.t === '+' ? 'trend-up' : t.t === '-' ? 'trend-down' : 'trend-stable';
+        html += `<tr><td class="parcel-name">${idx}</td><td class="text-right">${avg?.toFixed(4) || '-'}</td><td class="text-right">${last ? `<span class="ndvi-badge ${ndviBadgeClass(last)}">${last.toFixed(4)}</span>` : '-'}</td><td class="${trendClass}">${t.t} ${safe(t.l)}</td></tr>`;
+      });
+      html += '</tbody></table></div>';
+
+      // Notes summary (right)
+      html += `<div class="section-title">Notas de Campo</div>`;
+      html += '<div class="notes-kpis">';
+      html += `<div class="note-kpi"><div class="nk-val" style="color:#064e3b">${slaSummary?.total || 0}</div><div class="nk-label">Total</div></div>`;
+      html += `<div class="note-kpi"><div class="nk-val" style="color:#10b981">${slaSummary?.resolved || 0}</div><div class="nk-label">Resueltas</div></div>`;
+      html += `<div class="note-kpi"><div class="nk-val" style="color:${(slaSummary?.open || 0) > 0 ? '#ef4444' : '#064e3b'}">${slaSummary?.open || 0}</div><div class="nk-label">Abiertas</div></div>`;
+      html += '</div>';
+      if (slaSummary?.avgSla) {
+        html += `<div style="font-size:8px;color:#374151;margin-bottom:8px">SLA promedio: ${slaSummary.avgSla}h</div>`;
+      }
+
+      html += '</div></div>'; // close two-col
+    }
+
+    // Climate strip
+    if (weatherSummary) {
+      html += buildClimateStrip(weatherSummary);
+    }
+
+    // AI card
+    if (aiText) {
+      html += buildAiCard(aiText);
+    }
+
+    html += buildPageClose(1, nPages, logo, now);
+
+    // ═══ EXTENDED PAGES ═══
+    if (reportMode === 'extended') {
+      if (!isGeneral && reportData) {
+        // ── PER-PARCEL PAGE 2: Detailed Harvest + Weather ──
+        html += buildSubHeaderPage(2, nPages, logo, now, 'Cosecha Detallada + Clima', `${safe(titleName)} | ${safe(period)}`);
+        html += `<div class="section-title">Cosecha Detallada</div>`;
+        html += '<div class="glass-table-container"><table><thead><tr>';
+        html += '<th>Fecha</th><th class="text-right">Cajas</th><th class="text-right">Total (kg)</th><th class="text-right">1ra Cal.</th><th class="text-right">2da Cal.</th><th class="text-right">Desperdicio</th>';
+        html += '</tr></thead><tbody>';
+        (reportData.dailyHarvest || []).forEach((d: any) => {
+          html += `<tr><td class="parcel-name">${fmtDateShort(d.date)}</td><td class="text-right">${d.totalBoxes}</td><td class="text-right font-bold">${d.totalWeight}</td><td class="text-right">${d.firstQualityWeight}</td><td class="text-right">${d.secondQualityWeight}</td><td class="text-right">${d.wasteWeight}</td></tr>`;
+        });
+        const sQ = (reportData.dailyHarvest || []).reduce((s: number, d: any) => s + (d.secondQualityWeight || 0), 0);
+        const wa = (reportData.dailyHarvest || []).reduce((s: number, d: any) => s + (d.wasteWeight || 0), 0);
+        html += `</tbody><tfoot><tr><td>TOTAL</td><td class="text-right">${weeklyBoxes}</td><td class="text-right">${weeklyHarvestTotal.toFixed(2)}</td><td class="text-right">${weeklyFirstQ.toFixed(2)}</td><td class="text-right">${sQ.toFixed(2)}</td><td class="text-right">${wa.toFixed(2)}</td></tr></tfoot></table></div>`;
+
+        if (weatherSummary && reportData.weatherData) {
+          html += `<div class="section-title">Clima Diario</div>`;
+          html += '<div class="metrics-grid">';
+          html += buildMetricCard('Temp. Max', `${weatherSummary.avgMax} C`, 'promedio', 'red');
+          html += buildMetricCard('Temp. Min', `${weatherSummary.avgMin} C`, 'promedio', 'blue');
+          html += buildMetricCard('Lluvia', `${weatherSummary.totalRain} mm`, 'acumulada', 'cyan');
+          html += buildMetricCard('Dias', `${weatherSummary.days}`, 'con datos', 'green');
+          html += '</div>';
+          html += '<div class="glass-table-container"><table><thead><tr><th>Fecha</th><th class="text-right">Max C</th><th class="text-right">Min C</th><th class="text-right">Lluvia mm</th></tr></thead><tbody>';
+          ((reportData.weatherData as any[]) || []).forEach((w: any) => {
+            html += `<tr><td class="parcel-name">${fmtDateShort(w.date)}</td><td class="text-right">${(w.temperatureMax || 0).toFixed(1)}</td><td class="text-right">${(w.temperatureMin || 0).toFixed(1)}</td><td class="text-right">${(w.precipitation || 0).toFixed(1)}</td></tr>`;
+          });
+          html += '</tbody></table></div>';
+        }
+        html += buildPageClose(2, nPages, logo, now);
+
+        // ── PER-PARCEL PAGE 3: Satellite + AI ──
+        html += buildSubHeaderPage(3, nPages, logo, now, 'Telemetria Satelital', `${safe(titleName)} | ${safe(period)}`);
+
+        // Satellite maps
+        html += '<div class="maps-row">';
+        (["NDVI", "NDRE", "NDMI"] as const).forEach(idx => {
+          const img = satMaps[idx];
+          const tr = getSatTrend(reportData.satelliteData?.[idx]);
+          const trendClass = tr.t === '+' ? 'trend-up' : tr.t === '-' ? 'trend-down' : 'trend-stable';
+          html += '<div class="map-card">';
+          html += `<div class="map-title">${idx}</div>`;
+          if (img) {
+            html += `<img src="${img}" alt="${idx}" />`;
+          } else {
+            html += '<div class="map-no-img">Sin imagen</div>';
+          }
+          html += `<div class="map-trend ${trendClass}">${tr.t} ${safe(tr.l)}</div>`;
+          html += '</div>';
+        });
+        html += '</div>';
+
+        // Indices table
+        html += '<div class="glass-table-container"><table><thead><tr><th>Indice</th><th class="text-right">Media</th><th class="text-right">Min</th><th class="text-right">Max</th><th class="text-right">Ultimo</th><th>Tendencia</th></tr></thead><tbody>';
+        ["NDVI", "NDRE", "NDMI"].forEach(idx => {
+          const pts = (reportData.satelliteData?.[idx]?.data || []).filter((d: any) => d.mean != null);
+          const means = pts.map((d: any) => d.mean);
+          const avg = means.length ? means.reduce((a: number, b: number) => a + b, 0) / means.length : null;
+          const tr = getSatTrend(reportData.satelliteData?.[idx]);
+          const trendClass = tr.t === '+' ? 'trend-up' : tr.t === '-' ? 'trend-down' : 'trend-stable';
+          html += `<tr><td class="parcel-name">${idx}</td><td class="text-right">${avg?.toFixed(4) || '-'}</td><td class="text-right">${means.length ? Math.min(...means).toFixed(4) : '-'}</td><td class="text-right">${means.length ? Math.max(...means).toFixed(4) : '-'}</td><td class="text-right">${means.length ? `<span class="ndvi-badge ${ndviBadgeClass(means[means.length - 1])}">${means[means.length - 1].toFixed(4)}</span>` : '-'}</td><td class="${trendClass}">${tr.t} ${safe(tr.l)}</td></tr>`;
+        });
+        html += '</tbody></table></div>';
+
+        if (reportData.aiAnalysis) {
+          html += buildAiCard(reportData.aiAnalysis);
+        }
+        html += buildPageClose(3, nPages, logo, now);
+
+        // ── PER-PARCEL PAGE 4: Spatial Analysis ──
+        html += buildSubHeaderPage(4, nPages, logo, now, 'Analisis Espacial por Cuadrante', `${safe(titleName)} | ${safe(period)}`);
+
+        // NDVI map
         const ndviImg = satMaps.NDVI;
-        if(ndviImg){
-          pdfSection(pdf,ML,y,"Mapa NDVI");y+=22;
-          const imgW = CW*0.5; const imgH = imgW*0.7;
-          try{pdf.addImage(ndviImg,"PNG",ML+(CW-imgW)/2,y,imgW,imgH,undefined,"FAST");}catch{}
-          y+=imgH+16;
+        if (ndviImg) {
+          html += `<div class="section-title">Mapa NDVI</div>`;
+          html += `<div style="text-align:center;margin-bottom:14px"><img src="${ndviImg}" alt="NDVI" style="max-width:50%;border-radius:12px;border:1px solid var(--border-glass)" /></div>`;
         }
 
         // Quadrant grid
-        if(spatialData?.quadrants?.length){
-          pdfSection(pdf,ML,y,"Cuadrantes Espaciales (3x3)");y+=22;
-          const cellW=(CW-16)/3; const cellH=50;
+        if (spatialData?.quadrants?.length) {
+          html += `<div class="section-title">Cuadrantes Espaciales (3x3)</div>`;
+          html += '<div class="spatial-grid">';
           const quads = spatialData.quadrants as any[];
-          for(let row=0;row<3;row++){
-            for(let col=0;col<3;col++){
-              const qi=row*3+col;
-              const q=quads[qi];if(!q)continue;
-              const cx=ML+8+col*(cellW+4);const cy=y+row*(cellH+4);
-              const ndviVal = q.ndvi?.mean;
-              // Color by NDVI health: green=good, yellow=ok, red=bad
-              const isLow = spatialData.summary?.problemZones?.some((pz:any)=>pz.label===q.label);
-              if(isLow){pdf.setFillColor(254,242,242);}
-              else if(ndviVal!=null&&ndviVal>=0.4){pdf.setFillColor(240,253,244);}
-              else if(ndviVal!=null){pdf.setFillColor(255,251,235);}
-              else{pdf.setFillColor(249,250,251);}
-              pdf.roundedRect(cx,cy,cellW,cellH,4,4,"F");
-              pdf.setDrawColor(isLow?252:220,isLow?165:240,isLow?165:230);
-              pdf.setLineWidth(isLow?0.8:0.3);
-              pdf.roundedRect(cx,cy,cellW,cellH,4,4,"S");
-              // Label
-              pdf.setFontSize(8);pdf.setFont("helvetica","bold");
-              pdf.setTextColor(isLow?153:6,isLow?27:95,isLow?27:70);
-              pdf.text(safe(q.label),cx+4,cy+12);
-              // NDVI value
-              pdf.setFontSize(14);pdf.setFont("helvetica","bold");
-              pdf.setTextColor(isLow?220:16,isLow?38:185,isLow?38:129);
-              pdf.text(ndviVal!=null?ndviVal.toFixed(3):"-",cx+cellW/2,cy+30,{align:"center"});
-              // NDRE/NDMI small
-              pdf.setFontSize(6);pdf.setFont("helvetica","normal");pdf.setTextColor(107,114,128);
-              const ndre = q.ndre?.mean; const ndmi = q.ndmi?.mean;
-              pdf.text(`RE:${ndre!=null?ndre.toFixed(3):"-"} MI:${ndmi!=null?ndmi.toFixed(3):"-"}`,cx+4,cy+44);
-            }
-          }
-          y+=3*(cellH+4)+12;
+          quads.forEach((q: any) => {
+            if (!q) return;
+            const ndviVal = q.ndvi?.mean;
+            const isLow = spatialData.summary?.problemZones?.some((pz: any) => pz.label === q.label);
+            const ndre = q.ndre?.mean;
+            const ndmi = q.ndmi?.mean;
+            html += `<div class="spatial-cell ${isLow ? 'problem' : ''}">`;
+            html += `<div class="sc-label">${safe(q.label)}</div>`;
+            html += `<div class="sc-ndvi">${ndviVal != null ? ndviVal.toFixed(3) : '-'}</div>`;
+            html += `<div class="sc-sub">RE:${ndre != null ? ndre.toFixed(3) : '-'} MI:${ndmi != null ? ndmi.toFixed(3) : '-'}</div>`;
+            html += '</div>';
+          });
+          html += '</div>';
 
           // Problem zones alert
-          if(spatialData.summary?.problemZones?.length>0){
-            const pz = spatialData.summary.problemZones;
-            pdf.setFillColor(250,230,230);pdf.roundedRect(ML+1,y+1,CW,20,R,R,"F");
-            pdf.setFillColor(254,242,242);pdf.roundedRect(ML,y,CW,20,R,R,"F");
-            pdf.setDrawColor(252,165,165);pdf.setLineWidth(0.8);pdf.roundedRect(ML,y,CW,20,R,R,"S");
-            pdf.setFillColor(239,68,68);pdf.circle(ML+14,y+10,5,"F");
-            pdf.setFontSize(8);pdf.setFont("helvetica","bold");pdf.setTextColor(255,255,255);
-            pdf.text("!",ML+12.5,y+13);
-            pdf.setFontSize(7.5);pdf.setFont("helvetica","bold");pdf.setTextColor(153,27,27);
-            const zoneNames = pz.map((z:any)=>z.label).join(", ");
-            pdf.text(safe(`ZONAS CON BAJO NDVI: ${zoneNames}`),ML+24,y+10);
-            pdf.setFontSize(6.5);pdf.setFont("helvetica","normal");pdf.setTextColor(185,28,28);
-            pdf.text(safe(`Promedio parcela: ${spatialData.summary.avgNdvi?.toFixed(4)||"-"} | Umbral: <85% del promedio`),ML+24,y+17);
-            y+=28;
+          const pzArr = spatialData.summary?.problemZones;
+          if (pzArr && pzArr.length > 0) {
+            const zoneNames = pzArr.map((z: any) => z.label).join(', ');
+            html += `<div class="risk-alert">
+              <div class="risk-icon">${svgAlert()}</div>
+              <div class="risk-text">
+                <strong>ZONAS CON BAJO NDVI: ${safe(zoneNames)}</strong>
+                <span>Promedio parcela: ${spatialData.summary?.avgNdvi?.toFixed(4) || '-'} | Umbral: &lt;85% del promedio</span>
+              </div>
+            </div>`;
           }
         } else {
-          pdf.setFontSize(8);pdf.setFont("helvetica","normal");pdf.setTextColor(156,163,175);
-          pdf.text("Analisis espacial no disponible - requiere poligono de parcela",PW/2,y+20,{align:"center"});
-          y+=40;
+          html += '<div style="text-align:center;padding:30px;color:#9ca3af;font-size:10px">Analisis espacial no disponible - requiere poligono de parcela</div>';
         }
-        pdfFooter(pdf,4,5,now,logoB64);
+        html += buildPageClose(4, nPages, logo, now);
 
-        // Page 5: Notes
-        pdf.addPage();pdfSubHeader(pdf,"Notas de Campo & SLA",`${titleName} | ${period}`,logoB64);y=48;
-        const skw=(CW-24)/4;
-        [{l:"Total",v:`${slaSummary?.total||0}`,r:245,g:158,b:11},{l:"Resueltas",v:`${slaSummary?.resolved||0}`,r:16,g:185,b:129},{l:"Abiertas",v:`${slaSummary?.open||0}`,r:239,g:68,b:68},{l:"SLA Prom",v:slaSummary?.avgSla?`${slaSummary.avgSla}h`:"N/A",r:139,g:92,b:246}].forEach((k,i)=>pdfKpi(pdf,ML+i*(skw+8),y,skw,k.l,k.v,k.r,k.g,k.b));
-        y+=54;
-        if(slaSummary&&slaSummary.overSla>0){pdf.setFillColor(254,242,242);pdf.roundedRect(ML,y,CW,16,R,R,"F");pdf.setFontSize(7);pdf.setFont("helvetica","bold");pdf.setTextColor(153,27,27);pdf.text(safe(`ALERTA: ${slaSummary.overSla} notas exceden SLA de 48 horas`),ML+8,y+11);y+=22;}
-        const notes=(reportData.fieldNotes as any[])||[];
-        if(notes.length>0){
-          const nw=[CW*0.10,CW*0.16,CW*0.10,CW*0.12,CW*0.10,CW*0.08,CW*0.34];
-          const nR=notes.slice(0,25).map((n:any)=>{const sla=calcSlaHours(n.createdAt,n.resolvedAt);const ov=!n.resolvedAt&&(Date.now()-new Date(n.createdAt).getTime())/3600000>48;return[n.folio,catLabels[n.category]||n.category,sevLabels[n.severity]||n.severity,statusLabels[n.status]||n.status,fmtDateShort(n.createdAt),sla!=null?`${sla}h`:ov?"!":"-",n.description?.substring(0,38)||""];});
-          y=pdfTable(pdf,ML,y,["Folio","Categoria","Prior.","Estado","Fecha","SLA","Descripcion"],nR,nw);
-        }else{pdf.setFontSize(8);pdf.setFont("helvetica","normal");pdf.setTextColor(156,163,175);pdf.text("Sin notas en este periodo",PW/2,y+16,{align:"center"});y+=24;}
-        if(slaSummary&&Object.keys(slaSummary.catCounts).length>0){y+=8;pdfSection(pdf,ML,y,"Distribucion por Categoria");y+=22;let cx=ML;Object.entries(slaSummary.catCounts).sort((a,b)=>b[1]-a[1]).forEach(([cat,count])=>{const label=catLabels[cat]||cat;const bw=Math.max(55,label.length*5+30);if(cx+bw>PW-MR){cx=ML;y+=22;}pdf.setFillColor(245,252,248);pdf.roundedRect(cx,y,bw,16,4,4,"F");pdf.setDrawColor(209,250,229);pdf.roundedRect(cx,y,bw,16,4,4,"S");pdf.setFontSize(10);pdf.setFont("helvetica","bold");pdf.setTextColor(6,95,70);pdf.text(`${count}`,cx+6,y+12);pdf.setFontSize(6);pdf.setFont("helvetica","normal");pdf.setTextColor(55,65,81);pdf.text(safe(label),cx+18,y+11);cx+=bw+6;});}
-        pdfFooter(pdf,5,5,now,logoB64);
-      }
+        // ── PER-PARCEL PAGE 5: Notes + SLA ──
+        html += buildSubHeaderPage(5, nPages, logo, now, 'Notas de Campo & SLA', `${safe(titleName)} | ${safe(period)}`);
+        html += '<div class="metrics-grid">';
+        html += buildMetricCard('Total', `${slaSummary?.total || 0}`, 'notas', 'amber');
+        html += buildMetricCard('Resueltas', `${slaSummary?.resolved || 0}`, '', 'green');
+        html += buildMetricCard('Abiertas', `${slaSummary?.open || 0}`, '', 'red');
+        html += buildMetricCard('SLA Prom', slaSummary?.avgSla ? `${slaSummary.avgSla}h` : 'N/A', '', 'purple');
+        html += '</div>';
 
-      // Extended pages - GENERAL
-      if(reportMode==="extended"&&isGeneral&&generalData){
-        const gParcels = (generalData.parcels||[]) as any[];
+        if (slaSummary && slaSummary.overSla > 0) {
+          html += `<div class="sla-alert">ALERTA: ${slaSummary.overSla} notas exceden SLA de 48 horas</div>`;
+        }
+
+        const notes = (reportData.fieldNotes as any[]) || [];
+        if (notes.length > 0) {
+          html += '<div class="glass-table-container"><table><thead><tr><th>Folio</th><th>Categoria</th><th>Prior.</th><th>Estado</th><th>Fecha</th><th class="text-right">SLA</th><th>Descripcion</th></tr></thead><tbody>';
+          notes.slice(0, 25).forEach((n: any) => {
+            const sla = calcSlaHours(n.createdAt, n.resolvedAt);
+            const ov = !n.resolvedAt && (Date.now() - new Date(n.createdAt).getTime()) / 3600000 > 48;
+            html += `<tr><td class="parcel-name">${n.folio}</td><td>${safe(catLabels[n.category] || n.category)}</td><td>${safe(sevLabels[n.severity] || n.severity)}</td><td>${safe(statusLabels[n.status] || n.status)}</td><td>${fmtDateShort(n.createdAt)}</td><td class="text-right">${sla != null ? `${sla}h` : ov ? '!' : '-'}</td><td>${safe(n.description?.substring(0, 38) || '')}</td></tr>`;
+          });
+          html += '</tbody></table></div>';
+        } else {
+          html += '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:10px">Sin notas en este periodo</div>';
+        }
+
+        if (slaSummary && Object.keys(slaSummary.catCounts).length > 0) {
+          html += `<div class="section-title">Distribucion por Categoria</div>`;
+          html += '<div class="cat-pills">';
+          Object.entries(slaSummary.catCounts).sort((a, b) => b[1] - a[1]).forEach(([cat, count]) => {
+            html += `<div class="cat-pill"><span class="cp-count">${count}</span><span class="cp-label">${safe(catLabels[cat] || cat)}</span></div>`;
+          });
+          html += '</div>';
+        }
+        html += buildPageClose(5, nPages, logo, now);
+
+      } else if (isGeneral && generalData) {
+        // ── GENERAL PAGE 2: Detailed Table + Weather ──
+        const gParcels = (generalData.parcels || []) as any[];
         const period2 = `Todas las Parcelas | ${period}`;
 
-        // Page 2: Detailed parcel table with all data
-        pdf.addPage();pdfSubHeader(pdf,"Detalle por Parcela",period2,logoB64);y=48;
-        pdfSection(pdf,ML,y,"Rendimiento Detallado");y+=22;
-        const dw=[CW*0.20,CW*0.09,CW*0.09,CW*0.08,CW*0.10,CW*0.10,CW*0.10,CW*0.08,CW*0.08,CW*0.08];
-        const dRows=gParcels.map((p:any)=>[
-          p.name||p.code,`${p.weekTotal}`,`${p.weekFirstQ}`,`${p.weekBoxes}`,
-          (p.ndviLast||(p.ndviAvg))?(p.ndviLast||p.ndviAvg).toFixed(3):"-",
-          p.ndviAvg?p.ndviAvg.toFixed(3):"-",
-          p.hectares?`${p.hectares}`:"-",
-          `${p.activeDays||0}`,
-          `${p.notesCount}`,`${p.notesOpen}`
-        ]);
-        const dColors=gParcels.map((p:any)=>{
-          if(p.weekTotal>0&&generalParcels.risk&&p.id===generalParcels.risk.id)return[254,226,226] as [number,number,number];
-          if(p.weekTotal>0)return[235,251,242] as [number,number,number];
-          return[245,245,245] as [number,number,number];
+        html += buildSubHeaderPage(2, nPages, logo, now, 'Detalle por Parcela', safe(period2));
+        html += `<div class="section-title">Rendimiento Detallado</div>`;
+        html += '<div class="glass-table-container"><table><thead><tr>';
+        html += '<th>Parcela</th><th class="text-right">kg</th><th class="text-right">1ra</th><th class="text-right">Cajas</th><th class="text-right">NDVI U.</th><th class="text-right">NDVI P.</th><th class="text-right">Ha</th><th class="text-right">Dias</th><th class="text-right">Notas</th><th class="text-right">Abtas</th>';
+        html += '</tr></thead><tbody>';
+        gParcels.forEach((p: any) => {
+          const isRisk = p.weekTotal > 0 && generalParcels.risk && p.id === generalParcels.risk.id;
+          const ndvi = p.ndviLast || p.ndviAvg;
+          html += `<tr class="${isRisk ? 'risk-row' : p.weekTotal <= 0 ? 'style="opacity:0.6"' : ''}">`;
+          html += `<td class="parcel-name">${safe(p.name || p.code)}</td>`;
+          html += `<td class="text-right font-bold">${p.weekTotal}</td>`;
+          html += `<td class="text-right">${p.weekFirstQ}</td>`;
+          html += `<td class="text-right">${p.weekBoxes}</td>`;
+          html += `<td class="text-right">${ndvi ? `<span class="ndvi-badge ${ndviBadgeClass(ndvi)}">${ndvi.toFixed(3)}</span>` : '-'}</td>`;
+          html += `<td class="text-right">${p.ndviAvg ? p.ndviAvg.toFixed(3) : '-'}</td>`;
+          html += `<td class="text-right">${p.hectares || '-'}</td>`;
+          html += `<td class="text-right">${p.activeDays || 0}</td>`;
+          html += `<td class="text-right">${p.notesCount}</td>`;
+          html += `<td class="text-right">${p.notesOpen}</td>`;
+          html += '</tr>';
         });
-        y=pdfTable(pdf,ML,y,["Parcela","kg","1ra","Cajas","NDVI U.","NDVI P.","Ha","Dias","Notas","Abtas"],dRows,dw,dColors);
-        y=pdfTotalRow(pdf,ML,y,[
-          "TOTAL",
-          `${gParcels.reduce((s:number,p:any)=>s+p.weekTotal,0).toFixed(1)}`,
-          `${gParcels.reduce((s:number,p:any)=>s+p.weekFirstQ,0).toFixed(1)}`,
-          `${gParcels.reduce((s:number,p:any)=>s+p.weekBoxes,0)}`,
-          "-","-",
-          `${gParcels.reduce((s:number,p:any)=>s+(p.hectares||0),0).toFixed(1)}`,
-          "-",
-          `${gParcels.reduce((s:number,p:any)=>s+p.notesCount,0)}`,
-          `${gParcels.reduce((s:number,p:any)=>s+p.notesOpen,0)}`
-        ],dw);
-        y+=20;
+        html += '</tbody><tfoot><tr>';
+        html += `<td>TOTAL</td>`;
+        html += `<td class="text-right">${gParcels.reduce((s: number, p: any) => s + p.weekTotal, 0).toFixed(1)}</td>`;
+        html += `<td class="text-right">${gParcels.reduce((s: number, p: any) => s + p.weekFirstQ, 0).toFixed(1)}</td>`;
+        html += `<td class="text-right">${gParcels.reduce((s: number, p: any) => s + p.weekBoxes, 0)}</td>`;
+        html += '<td class="text-right">-</td><td class="text-right">-</td>';
+        html += `<td class="text-right">${gParcels.reduce((s: number, p: any) => s + (p.hectares || 0), 0).toFixed(1)}</td>`;
+        html += '<td class="text-right">-</td>';
+        html += `<td class="text-right">${gParcels.reduce((s: number, p: any) => s + p.notesCount, 0)}</td>`;
+        html += `<td class="text-right">${gParcels.reduce((s: number, p: any) => s + p.notesOpen, 0)}</td>`;
+        html += '</tr></tfoot></table></div>';
 
         // Weather detail
-        if(weatherSummary&&generalData.weatherData){
-          pdfSection(pdf,ML,y,"Clima Detallado");y+=22;
-          const wbw=(CW-24)/4;
-          [{l:"Temp. Max",v:`${weatherSummary.avgMax} C`,r:220,g:38,b:38},{l:"Temp. Min",v:`${weatherSummary.avgMin} C`,r:37,g:99,b:235},{l:"Lluvia",v:`${weatherSummary.totalRain} mm`,r:5,g:150,b:105},{l:"Dias",v:`${weatherSummary.days}`,r:139,g:92,b:246}].forEach((w,i)=>pdfKpi(pdf,ML+i*(wbw+8),y,wbw,w.l,w.v,w.r,w.g,w.b));
-          y+=54;
-          const wtw=[CW*0.3,CW*0.23,CW*0.23,CW*0.24];
-          const wtR=((generalData.weatherData as any[])||[]).map((w:any)=>[fmtDateShort(w.date),(w.temperatureMax||0).toFixed(1),(w.temperatureMin||0).toFixed(1),(w.precipitation||0).toFixed(1)]);
-          y=pdfTable(pdf,ML,y,["Fecha","Max C","Min C","Lluvia mm"],wtR,wtw);
+        if (weatherSummary && generalData.weatherData) {
+          html += `<div class="section-title">Clima Detallado</div>`;
+          html += '<div class="metrics-grid">';
+          html += buildMetricCard('Temp. Max', `${weatherSummary.avgMax} C`, 'promedio', 'red');
+          html += buildMetricCard('Temp. Min', `${weatherSummary.avgMin} C`, 'promedio', 'blue');
+          html += buildMetricCard('Lluvia', `${weatherSummary.totalRain} mm`, 'acumulada', 'cyan');
+          html += buildMetricCard('Dias', `${weatherSummary.days}`, 'con datos', 'green');
+          html += '</div>';
+          html += '<div class="glass-table-container"><table><thead><tr><th>Fecha</th><th class="text-right">Max C</th><th class="text-right">Min C</th><th class="text-right">Lluvia mm</th></tr></thead><tbody>';
+          ((generalData.weatherData as any[]) || []).forEach((w: any) => {
+            html += `<tr><td class="parcel-name">${fmtDateShort(w.date)}</td><td class="text-right">${(w.temperatureMax || 0).toFixed(1)}</td><td class="text-right">${(w.temperatureMin || 0).toFixed(1)}</td><td class="text-right">${(w.precipitation || 0).toFixed(1)}</td></tr>`;
+          });
+          html += '</tbody></table></div>';
         }
-        pdfFooter(pdf,2,3,now,logoB64);
+        html += buildPageClose(2, nPages, logo, now);
 
-        // Page 3: Notes + Full AI Analysis
-        pdf.addPage();pdfSubHeader(pdf,"Notas de Campo & Analisis IA",period2,logoB64);y=48;
-        // Notes summary
-        const totalN = generalData.totals?.notes||0;
-        const resolvedN = generalData.totals?.notesResolved||0;
-        const openN = generalData.totals?.notesOpen||0;
-        const skw2=(CW-24)/4;
-        [{l:"Total Notas",v:`${totalN}`,r:245,g:158,b:11},{l:"Resueltas",v:`${resolvedN}`,r:16,g:185,b:129},{l:"Abiertas",v:`${openN}`,r:openN>0?239:6,g:openN>0?68:95,b:openN>0?68:70},{l:"Parcelas",v:`${generalData.totals?.parcelsCount||0}`,r:139,g:92,b:246}].forEach((k,i)=>pdfKpi(pdf,ML+i*(skw2+8),y,skw2,k.l,k.v,k.r,k.g,k.b));
-        y+=54;
+        // ── GENERAL PAGE 3: Notes + AI ──
+        html += buildSubHeaderPage(3, nPages, logo, now, 'Notas de Campo & Analisis IA', safe(period2));
 
-        // Per-parcel notes breakdown
-        const parcelsWithNotes = gParcels.filter((p:any)=>p.notesCount>0);
-        if(parcelsWithNotes.length>0){
-          pdfSection(pdf,ML,y,"Notas por Parcela");y+=22;
-          const nnw=[CW*0.35,CW*0.15,CW*0.15,CW*0.35];
-          const nnR=parcelsWithNotes.map((p:any)=>[
-            p.name||p.code,`${p.notesCount}`,`${p.notesOpen}`,
-            p.notesOpen>0?"Requiere atencion":"Todo resuelto"
-          ]);
-          const nnC=parcelsWithNotes.map((p:any)=>p.notesOpen>0?[254,242,242] as [number,number,number]:[235,251,242] as [number,number,number]);
-          y=pdfTable(pdf,ML,y,["Parcela","Total","Abiertas","Estado"],nnR,nnw,nnC);
-          y+=16;
+        const totalN = generalData.totals?.notes || 0;
+        const resolvedN = generalData.totals?.notesResolved || 0;
+        const openN = generalData.totals?.notesOpen || 0;
+        html += '<div class="metrics-grid">';
+        html += buildMetricCard('Total Notas', `${totalN}`, '', 'amber');
+        html += buildMetricCard('Resueltas', `${resolvedN}`, '', 'green');
+        html += buildMetricCard('Abiertas', `${openN}`, '', openN > 0 ? 'red' : 'green');
+        html += buildMetricCard('Parcelas', `${generalData.totals?.parcelsCount || 0}`, '', 'purple');
+        html += '</div>';
+
+        const parcelsWithNotes = gParcels.filter((p: any) => p.notesCount > 0);
+        if (parcelsWithNotes.length > 0) {
+          html += `<div class="section-title">Notas por Parcela</div>`;
+          html += '<div class="glass-table-container"><table><thead><tr><th>Parcela</th><th class="text-right">Total</th><th class="text-right">Abiertas</th><th>Estado</th></tr></thead><tbody>';
+          parcelsWithNotes.forEach((p: any) => {
+            html += `<tr class="${p.notesOpen > 0 ? 'risk-row' : ''}"><td class="parcel-name">${safe(p.name || p.code)}</td><td class="text-right">${p.notesCount}</td><td class="text-right">${p.notesOpen}</td><td>${p.notesOpen > 0 ? 'Requiere atencion' : 'Todo resuelto'}</td></tr>`;
+          });
+          html += '</tbody></table></div>';
         }
 
-        // Full AI analysis
-        if(aiText){
-          y=pdfAiBox(pdf,ML,y,CW,aiText,PH-30)+4;
+        if (aiText) {
+          html += buildAiCard(aiText);
         }
-        pdfFooter(pdf,3,3,now,logoB64);
+        html += buildPageClose(3, nPages, logo, now);
       }
+    }
 
-      const name=isGeneral?"General":(reportData?.parcel?.name||"parcela").replace(/\s+/g,"_");
-      pdf.save(`Reporte_${safe(name)}_${fromDate}_${toDate}.pdf`);
-      toast.success("PDF descargado",{id:"pdf-gen"});
-    }catch(err){console.error("PDF error:",err);toast.error("Error generando PDF",{id:"pdf-gen"});}finally{setGenerating(false);}
+    // Wrap in full HTML document
+    return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reporte AGRA TEC-TI - ${safe(titleName)}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>${getReportCss()}</style>
+</head>
+<body>
+${html}
+</body>
+</html>`;
+  }
+
+  async function generatePDF() {
+    if (!dataReady) return;
+    setGenerating(true);
+    toast.loading("Generando reporte...", { id: "pdf-gen" });
+    try {
+      const htmlContent = buildReportHtml();
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) {
+        toast.error("No se pudo abrir la ventana de impresion. Permite ventanas emergentes.", { id: "pdf-gen" });
+        return;
+      }
+      printWindow.document.open();
+      printWindow.document.write(htmlContent);
+      printWindow.document.close();
+      // Delay to allow fonts/images to load, then trigger print
+      setTimeout(() => {
+        printWindow.print();
+      }, 500);
+      toast.success("Reporte abierto - usa Ctrl+P o el dialogo de impresion para guardar como PDF", { id: "pdf-gen" });
+    } catch (err) {
+      console.error("Report error:", err);
+      toast.error("Error generando reporte", { id: "pdf-gen" });
+    } finally {
+      setGenerating(false);
+    }
   }
 
   // ═══════════════════════════════════════════
