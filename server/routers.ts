@@ -3875,7 +3875,7 @@ IMPORTANTE:
           } catch (e) { /* ignore */ }
 
           parcelSummaries.push({
-            id: p.id, code: p.code, name: p.name,
+            id: p.id, code: p.code, name: p.name || p.code || `Parcela ${p.id}`,
             crop: (p as any).crop || null,
             hectares: (p as any).hectares || (p as any).productiveHa || null,
             weekTotal: Math.round(weekTotal * 100) / 100,
