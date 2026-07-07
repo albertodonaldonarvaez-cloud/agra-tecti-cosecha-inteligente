@@ -3723,28 +3723,21 @@ IMPORTANTE:
           return d.date >= input.fromDate && d.date <= input.toDate;
         });
 
-        // 4. Datos satelitales del cache
+        // 4. Datos satelitales del cache (solo stats, NO mapas - son muy pesados)
         const satelliteData: Record<string, any> = {};
-        const satelliteMaps: Record<string, string | null> = {};
         const indices = ["NDVI", "NDRE", "NDMI"];
         for (const idx of indices) {
           try {
-            const [statsRow] = await drizzle.execute(
-              sql`SELECT data, fromDate, toDate, fetchedAt FROM parcelSatelliteCache WHERE parcelId = ${input.parcelId} AND dataType = 'stats' AND indexType = ${idx} AND mapDate IS NULL ORDER BY fetchedAt DESC LIMIT 1`
+            const rows = await drizzle.execute(
+              sql`SELECT data, fetchedAt FROM parcelSatelliteCache WHERE parcelId = ${input.parcelId} AND dataType = 'stats' AND indexType = ${idx} AND mapDate IS NULL ORDER BY fetchedAt DESC LIMIT 1`
             );
+            const statsRow = Array.isArray(rows) && Array.isArray(rows[0]) ? rows[0][0] : (rows as any)[0];
             if (statsRow) {
               const row = statsRow as any;
               const parsed = typeof row.data === "string" ? JSON.parse(row.data) : row.data;
               satelliteData[idx] = { data: parsed, fetchedAt: row.fetchedAt };
             }
           } catch (e) { console.error(`[Reports] Error loading ${idx} stats:`, e); }
-
-          try {
-            const [mapRow] = await drizzle.execute(
-              sql`SELECT data FROM parcelSatelliteCache WHERE parcelId = ${input.parcelId} AND dataType = 'map' AND indexType = ${idx} ORDER BY fetchedAt DESC LIMIT 1`
-            );
-            satelliteMaps[idx] = mapRow ? (mapRow as any).data : null;
-          } catch (e) { satelliteMaps[idx] = null; }
         }
 
         // 5. Notas de campo del período
@@ -3811,12 +3804,131 @@ IMPORTANTE:
           harvestStats,
           dailyHarvest,
           satelliteData,
-          satelliteMaps,
           fieldNotes: notes,
           weatherData,
           aiAnalysis,
           period: { from: input.fromDate, to: input.toDate },
         };
+      }),
+
+    // Reporte general: todas las parcelas con polígono
+    getGeneralData: protectedProcedure
+      .input(z.object({
+        fromDate: z.string(),
+        toDate: z.string(),
+      }))
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB no disponible" });
+
+        // Solo parcelas activas con polígono
+        const allParcels = await drizzle.select().from(parcels)
+          .where(and(eq(parcels.isActive, true)));
+        const parcelsWithPolygon = allParcels.filter(p => p.polygon && p.polygon.length > 10);
+
+        const parcelSummaries: any[] = [];
+        let totalHarvest = 0, totalFirstQ = 0, totalSecondQ = 0, totalWaste = 0, totalBoxes = 0;
+        let totalNotes = 0, totalNotesResolved = 0, totalNotesOpen = 0;
+
+        for (const p of parcelsWithPolygon) {
+          const stats = await webodm.getParcelHarvestStats(p.code);
+          const allDaily = await webodm.getParcelDailyHarvest(p.code);
+          const daily = (allDaily || []).filter((d: any) => d.date >= input.fromDate && d.date <= input.toDate);
+          const weekTotal = daily.reduce((s: number, d: any) => s + (d.totalWeight || 0), 0);
+          const weekFirstQ = daily.reduce((s: number, d: any) => s + (d.firstQualityWeight || 0), 0);
+          const weekSecondQ = daily.reduce((s: number, d: any) => s + (d.secondQualityWeight || 0), 0);
+          const weekWaste = daily.reduce((s: number, d: any) => s + (d.wasteWeight || 0), 0);
+          const weekBoxes = daily.reduce((s: number, d: any) => s + (d.totalBoxes || 0), 0);
+
+          totalHarvest += weekTotal; totalFirstQ += weekFirstQ; totalSecondQ += weekSecondQ;
+          totalWaste += weekWaste; totalBoxes += weekBoxes;
+
+          // Notas
+          const notes = await drizzle.select({
+            id: fieldNotes.id, status: fieldNotes.status, category: fieldNotes.category,
+            severity: fieldNotes.severity, createdAt: fieldNotes.createdAt, resolvedAt: fieldNotes.resolvedAt,
+          })
+            .from(fieldNotes)
+            .where(and(
+              eq(fieldNotes.parcelId, p.id),
+              gte(fieldNotes.createdAt, new Date(input.fromDate + "T00:00:00")),
+              lte(fieldNotes.createdAt, new Date(input.toDate + "T23:59:59")),
+            ));
+          const resolved = notes.filter(n => n.resolvedAt);
+          const open = notes.filter(n => !n.resolvedAt);
+          totalNotes += notes.length; totalNotesResolved += resolved.length; totalNotesOpen += open.length;
+
+          // NDVI promedio
+          let ndviAvg: number | null = null;
+          try {
+            const rows = await drizzle.execute(
+              sql`SELECT data FROM parcelSatelliteCache WHERE parcelId = ${p.id} AND dataType = 'stats' AND indexType = 'NDVI' AND mapDate IS NULL ORDER BY fetchedAt DESC LIMIT 1`
+            );
+            const statsRow = Array.isArray(rows) && Array.isArray(rows[0]) ? rows[0][0] : (rows as any)[0];
+            if (statsRow) {
+              const parsed = typeof (statsRow as any).data === "string" ? JSON.parse((statsRow as any).data) : (statsRow as any).data;
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                const means = parsed.filter((d: any) => d.mean != null).map((d: any) => d.mean);
+                ndviAvg = means.length > 0 ? means.reduce((a: number, b: number) => a + b, 0) / means.length : null;
+              }
+            }
+          } catch (e) { /* ignore */ }
+
+          parcelSummaries.push({
+            id: p.id, code: p.code, name: p.name,
+            crop: (p as any).crop || null,
+            hectares: (p as any).hectares || (p as any).productiveHa || null,
+            weekTotal: Math.round(weekTotal * 100) / 100,
+            weekFirstQ: Math.round(weekFirstQ * 100) / 100,
+            weekBoxes,
+            activeDays: daily.length,
+            ndviAvg: ndviAvg ? Math.round(ndviAvg * 10000) / 10000 : null,
+            notesCount: notes.length,
+            notesOpen: open.length,
+          });
+        }
+
+        // Clima
+        let weatherData: any[] = [];
+        try {
+          const { getWeatherData } = await import("./weatherService");
+          const locationConfig = await dbExt.getLocationConfig();
+          if (locationConfig) {
+            weatherData = await getWeatherData(locationConfig.latitude, locationConfig.longitude, input.fromDate, input.toDate, locationConfig.timezone);
+          }
+        } catch (e) { /* ignore */ }
+
+        return {
+          parcels: parcelSummaries,
+          totals: {
+            harvest: Math.round(totalHarvest * 100) / 100,
+            firstQ: Math.round(totalFirstQ * 100) / 100,
+            secondQ: Math.round(totalSecondQ * 100) / 100,
+            waste: Math.round(totalWaste * 100) / 100,
+            boxes: totalBoxes,
+            notes: totalNotes,
+            notesResolved: totalNotesResolved,
+            notesOpen: totalNotesOpen,
+            parcelsCount: parcelsWithPolygon.length,
+          },
+          weatherData,
+          period: { from: input.fromDate, to: input.toDate },
+        };
+      }),
+
+    // Mapa satelital individual (separado para no sobrecargar)
+    getSatelliteMap: protectedProcedure
+      .input(z.object({ parcelId: z.number(), indexType: z.string() }))
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) return { image: null };
+        try {
+          const rows = await drizzle.execute(
+            sql`SELECT data FROM parcelSatelliteCache WHERE parcelId = ${input.parcelId} AND dataType = 'map' AND indexType = ${input.indexType} ORDER BY fetchedAt DESC LIMIT 1`
+          );
+          const mapRow = Array.isArray(rows) && Array.isArray(rows[0]) ? rows[0][0] : (rows as any)[0];
+          return { image: mapRow ? (mapRow as any).data : null };
+        } catch (e) { return { image: null }; }
       }),
   }),
 });
