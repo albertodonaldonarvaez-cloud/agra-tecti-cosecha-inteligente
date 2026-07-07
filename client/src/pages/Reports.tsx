@@ -276,7 +276,7 @@ export default function Reports() {
   const aiText = isGeneral ? (generalData as any)?.aiAnalysis : reportData?.aiAnalysis;
   const now = new Date().toLocaleDateString("es-MX",{day:"2-digit",month:"long",year:"numeric",timeZone:"America/Mexico_City"});
   const titleName = isGeneral ? "Todas las Parcelas" : (reportData?.parcel?.name || "...");
-  const totalPages = reportMode==="compact"?1:4;
+  const totalPages = reportMode==="compact"?1:(isGeneral?3:4);
 
   // Computed for general
   const generalParcels = useMemo(()=>{
@@ -388,9 +388,9 @@ export default function Reports() {
       if(aiText){y=pdfAiBox(pdf,ML,y,CW,aiText)+4;}
       pdfFooter(pdf,1,totalPages,now,logoB64);
 
-      // Extended pages (same as before)
+      // Extended pages - PER PARCEL
       if(reportMode==="extended"&&!isGeneral&&reportData){
-        pdf.addPage();pdfSubHeader(pdf,"Cosecha Detallada + Clima",`${titleName} | ${period}`,logoB64);y=44;
+        pdf.addPage();pdfSubHeader(pdf,"Cosecha Detallada + Clima",`${titleName} | ${period}`,logoB64);y=48;
         const h2w=[CW*0.17,CW*0.12,CW*0.18,CW*0.18,CW*0.17,CW*0.18];
         const h2R=(reportData.dailyHarvest||[]).map((d:any)=>[fmtDateShort(d.date),`${d.totalBoxes}`,`${d.totalWeight}`,`${d.firstQualityWeight}`,`${d.secondQualityWeight}`,`${d.wasteWeight}`]);
         y=pdfTable(pdf,ML,y,["Fecha","Cajas","Total (kg)","1ra Cal.","2da Cal.","Desperdicio"],h2R,h2w);
@@ -398,24 +398,24 @@ export default function Reports() {
         const wa=(reportData.dailyHarvest||[]).reduce((s:number,d:any)=>s+(d.wasteWeight||0),0);
         y=pdfTotalRow(pdf,ML,y,["TOTAL",`${weeklyBoxes}`,weeklyHarvestTotal.toFixed(2),weeklyFirstQ.toFixed(2),sQ.toFixed(2),wa.toFixed(2)],h2w);y+=16;
         if(weatherSummary&&reportData.weatherData){
-          pdfSection(pdf,ML,y,"Clima Diario");y+=14;
-          const wbw=(CW-18)/4;
-          [{l:"Temp. Max",v:`${weatherSummary.avgMax} C`,r:220,g:38,b:38},{l:"Temp. Min",v:`${weatherSummary.avgMin} C`,r:37,g:99,b:235},{l:"Lluvia",v:`${weatherSummary.totalRain} mm`,r:5,g:150,b:105},{l:"Dias",v:`${weatherSummary.days}`,r:139,g:92,b:246}].forEach((w,i)=>pdfKpi(pdf,ML+i*(wbw+6),y,wbw,w.l,w.v,w.r,w.g,w.b));
-          y+=48;
+          pdfSection(pdf,ML,y,"Clima Diario");y+=22;
+          const wbw=(CW-24)/4;
+          [{l:"Temp. Max",v:`${weatherSummary.avgMax} C`,r:220,g:38,b:38},{l:"Temp. Min",v:`${weatherSummary.avgMin} C`,r:37,g:99,b:235},{l:"Lluvia",v:`${weatherSummary.totalRain} mm`,r:5,g:150,b:105},{l:"Dias",v:`${weatherSummary.days}`,r:139,g:92,b:246}].forEach((w,i)=>pdfKpi(pdf,ML+i*(wbw+8),y,wbw,w.l,w.v,w.r,w.g,w.b));
+          y+=54;
           const wtw=[CW*0.3,CW*0.23,CW*0.23,CW*0.24];
           const wtR=((reportData.weatherData as any[])||[]).map((w:any)=>[fmtDateShort(w.date),(w.temperatureMax||0).toFixed(1),(w.temperatureMin||0).toFixed(1),(w.precipitation||0).toFixed(1)]);
           y=pdfTable(pdf,ML,y,["Fecha","Max C","Min C","Lluvia mm"],wtR,wtw);
         }
         pdfFooter(pdf,2,4,now,logoB64);
 
-        pdf.addPage();pdfSubHeader(pdf,"Telemetria Satelital",`${titleName} | ${period}`,logoB64);y=44;
+        pdf.addPage();pdfSubHeader(pdf,"Telemetria Satelital",`${titleName} | ${period}`,logoB64);y=48;
         const mapW=(CW-20)/3;
         (["NDVI","NDRE","NDMI"] as const).forEach((idx,i)=>{
           const mx=ML+i*(mapW+10);
           pdf.setFontSize(10);pdf.setFont("helvetica","bold");pdf.setTextColor(6,95,70);pdf.text(idx,mx+mapW/2,y+10,{align:"center"});
           const img=satMaps[idx];
           if(img){try{pdf.addImage(img,"PNG",mx,y+14,mapW,mapW*0.75,undefined,"FAST");}catch{}}
-          else{pdf.setFillColor(249,250,251);pdf.roundedRect(mx,y+14,mapW,mapW*0.75,3,3,"F");pdf.setDrawColor(209,213,219);pdf.roundedRect(mx,y+14,mapW,mapW*0.75,3,3,"S");pdf.setFontSize(7);pdf.setFont("helvetica","normal");pdf.setTextColor(156,163,175);pdf.text("Sin imagen",mx+mapW/2,y+14+mapW*0.375,{align:"center"});}
+          else{pdf.setFillColor(249,250,251);pdf.roundedRect(mx,y+14,mapW,mapW*0.75,R,R,"F");pdf.setDrawColor(209,213,219);pdf.roundedRect(mx,y+14,mapW,mapW*0.75,R,R,"S");pdf.setFontSize(7);pdf.setFont("helvetica","normal");pdf.setTextColor(156,163,175);pdf.text("Sin imagen",mx+mapW/2,y+14+mapW*0.375,{align:"center"});}
           const tr=getSatTrend(reportData.satelliteData?.[idx]);pdf.setFontSize(8);pdf.setFont("helvetica","bold");pdf.setTextColor(tr.c[0],tr.c[1],tr.c[2]);pdf.text(safe(`${tr.t} ${tr.l}`),mx+mapW/2,y+20+mapW*0.75,{align:"center"});
         });
         y+=30+mapW*0.75+10;
@@ -425,19 +425,98 @@ export default function Reports() {
         if(reportData.aiAnalysis){y=pdfAiBox(pdf,ML,y,CW,reportData.aiAnalysis)+4;}
         pdfFooter(pdf,3,4,now,logoB64);
 
-        pdf.addPage();pdfSubHeader(pdf,"Notas de Campo & SLA",`${titleName} | ${period}`,logoB64);y=44;
-        const skw=(CW-18)/4;
-        [{l:"Total",v:`${slaSummary?.total||0}`,r:245,g:158,b:11},{l:"Resueltas",v:`${slaSummary?.resolved||0}`,r:16,g:185,b:129},{l:"Abiertas",v:`${slaSummary?.open||0}`,r:239,g:68,b:68},{l:"SLA Prom",v:slaSummary?.avgSla?`${slaSummary.avgSla}h`:"N/A",r:139,g:92,b:246}].forEach((k,i)=>pdfKpi(pdf,ML+i*(skw+6),y,skw,k.l,k.v,k.r,k.g,k.b));
-        y+=50;
-        if(slaSummary&&slaSummary.overSla>0){pdf.setFillColor(254,242,242);pdf.roundedRect(ML,y,CW,14,2,2,"F");pdf.setFontSize(7);pdf.setFont("helvetica","bold");pdf.setTextColor(153,27,27);pdf.text(safe(`ALERTA: ${slaSummary.overSla} notas exceden SLA de 48 horas`),ML+8,y+10);y+=18;}
+        pdf.addPage();pdfSubHeader(pdf,"Notas de Campo & SLA",`${titleName} | ${period}`,logoB64);y=48;
+        const skw=(CW-24)/4;
+        [{l:"Total",v:`${slaSummary?.total||0}`,r:245,g:158,b:11},{l:"Resueltas",v:`${slaSummary?.resolved||0}`,r:16,g:185,b:129},{l:"Abiertas",v:`${slaSummary?.open||0}`,r:239,g:68,b:68},{l:"SLA Prom",v:slaSummary?.avgSla?`${slaSummary.avgSla}h`:"N/A",r:139,g:92,b:246}].forEach((k,i)=>pdfKpi(pdf,ML+i*(skw+8),y,skw,k.l,k.v,k.r,k.g,k.b));
+        y+=54;
+        if(slaSummary&&slaSummary.overSla>0){pdf.setFillColor(254,242,242);pdf.roundedRect(ML,y,CW,16,R,R,"F");pdf.setFontSize(7);pdf.setFont("helvetica","bold");pdf.setTextColor(153,27,27);pdf.text(safe(`ALERTA: ${slaSummary.overSla} notas exceden SLA de 48 horas`),ML+8,y+11);y+=22;}
         const notes=(reportData.fieldNotes as any[])||[];
         if(notes.length>0){
           const nw=[CW*0.10,CW*0.16,CW*0.10,CW*0.12,CW*0.10,CW*0.08,CW*0.34];
           const nR=notes.slice(0,25).map((n:any)=>{const sla=calcSlaHours(n.createdAt,n.resolvedAt);const ov=!n.resolvedAt&&(Date.now()-new Date(n.createdAt).getTime())/3600000>48;return[n.folio,catLabels[n.category]||n.category,sevLabels[n.severity]||n.severity,statusLabels[n.status]||n.status,fmtDateShort(n.createdAt),sla!=null?`${sla}h`:ov?"!":"-",n.description?.substring(0,38)||""];});
           y=pdfTable(pdf,ML,y,["Folio","Categoria","Prior.","Estado","Fecha","SLA","Descripcion"],nR,nw);
         }else{pdf.setFontSize(8);pdf.setFont("helvetica","normal");pdf.setTextColor(156,163,175);pdf.text("Sin notas en este periodo",PW/2,y+16,{align:"center"});y+=24;}
-        if(slaSummary&&Object.keys(slaSummary.catCounts).length>0){y+=8;pdfSection(pdf,ML,y,"Distribucion por Categoria");y+=16;let cx=ML;Object.entries(slaSummary.catCounts).sort((a,b)=>b[1]-a[1]).forEach(([cat,count])=>{const label=catLabels[cat]||cat;const bw=Math.max(55,label.length*5+30);if(cx+bw>PW-MR){cx=ML;y+=22;}pdf.setFillColor(245,252,248);pdf.roundedRect(cx,y,bw,16,2,2,"F");pdf.setDrawColor(209,250,229);pdf.roundedRect(cx,y,bw,16,2,2,"S");pdf.setFontSize(10);pdf.setFont("helvetica","bold");pdf.setTextColor(6,95,70);pdf.text(`${count}`,cx+6,y+12);pdf.setFontSize(6);pdf.setFont("helvetica","normal");pdf.setTextColor(55,65,81);pdf.text(safe(label),cx+18,y+11);cx+=bw+6;});}
+        if(slaSummary&&Object.keys(slaSummary.catCounts).length>0){y+=8;pdfSection(pdf,ML,y,"Distribucion por Categoria");y+=22;let cx=ML;Object.entries(slaSummary.catCounts).sort((a,b)=>b[1]-a[1]).forEach(([cat,count])=>{const label=catLabels[cat]||cat;const bw=Math.max(55,label.length*5+30);if(cx+bw>PW-MR){cx=ML;y+=22;}pdf.setFillColor(245,252,248);pdf.roundedRect(cx,y,bw,16,4,4,"F");pdf.setDrawColor(209,250,229);pdf.roundedRect(cx,y,bw,16,4,4,"S");pdf.setFontSize(10);pdf.setFont("helvetica","bold");pdf.setTextColor(6,95,70);pdf.text(`${count}`,cx+6,y+12);pdf.setFontSize(6);pdf.setFont("helvetica","normal");pdf.setTextColor(55,65,81);pdf.text(safe(label),cx+18,y+11);cx+=bw+6;});}
         pdfFooter(pdf,4,4,now,logoB64);
+      }
+
+      // Extended pages - GENERAL
+      if(reportMode==="extended"&&isGeneral&&generalData){
+        const gParcels = (generalData.parcels||[]) as any[];
+        const period2 = `Todas las Parcelas | ${period}`;
+
+        // Page 2: Detailed parcel table with all data
+        pdf.addPage();pdfSubHeader(pdf,"Detalle por Parcela",period2,logoB64);y=48;
+        pdfSection(pdf,ML,y,"Rendimiento Detallado");y+=22;
+        const dw=[CW*0.20,CW*0.09,CW*0.09,CW*0.08,CW*0.10,CW*0.10,CW*0.10,CW*0.08,CW*0.08,CW*0.08];
+        const dRows=gParcels.map((p:any)=>[
+          p.name||p.code,`${p.weekTotal}`,`${p.weekFirstQ}`,`${p.weekBoxes}`,
+          (p.ndviLast||(p.ndviAvg))?(p.ndviLast||p.ndviAvg).toFixed(3):"-",
+          p.ndviAvg?p.ndviAvg.toFixed(3):"-",
+          p.hectares?`${p.hectares}`:"-",
+          `${p.activeDays||0}`,
+          `${p.notesCount}`,`${p.notesOpen}`
+        ]);
+        const dColors=gParcels.map((p:any)=>{
+          if(p.weekTotal>0&&generalParcels.risk&&p.id===generalParcels.risk.id)return[254,226,226] as [number,number,number];
+          if(p.weekTotal>0)return[235,251,242] as [number,number,number];
+          return[245,245,245] as [number,number,number];
+        });
+        y=pdfTable(pdf,ML,y,["Parcela","kg","1ra","Cajas","NDVI U.","NDVI P.","Ha","Dias","Notas","Abtas"],dRows,dw,dColors);
+        y=pdfTotalRow(pdf,ML,y,[
+          "TOTAL",
+          `${gParcels.reduce((s:number,p:any)=>s+p.weekTotal,0).toFixed(1)}`,
+          `${gParcels.reduce((s:number,p:any)=>s+p.weekFirstQ,0).toFixed(1)}`,
+          `${gParcels.reduce((s:number,p:any)=>s+p.weekBoxes,0)}`,
+          "-","-",
+          `${gParcels.reduce((s:number,p:any)=>s+(p.hectares||0),0).toFixed(1)}`,
+          "-",
+          `${gParcels.reduce((s:number,p:any)=>s+p.notesCount,0)}`,
+          `${gParcels.reduce((s:number,p:any)=>s+p.notesOpen,0)}`
+        ],dw);
+        y+=16;
+
+        // Weather detail
+        if(weatherSummary&&generalData.weatherData){
+          pdfSection(pdf,ML,y,"Clima Detallado");y+=22;
+          const wbw=(CW-24)/4;
+          [{l:"Temp. Max",v:`${weatherSummary.avgMax} C`,r:220,g:38,b:38},{l:"Temp. Min",v:`${weatherSummary.avgMin} C`,r:37,g:99,b:235},{l:"Lluvia",v:`${weatherSummary.totalRain} mm`,r:5,g:150,b:105},{l:"Dias",v:`${weatherSummary.days}`,r:139,g:92,b:246}].forEach((w,i)=>pdfKpi(pdf,ML+i*(wbw+8),y,wbw,w.l,w.v,w.r,w.g,w.b));
+          y+=54;
+          const wtw=[CW*0.3,CW*0.23,CW*0.23,CW*0.24];
+          const wtR=((generalData.weatherData as any[])||[]).map((w:any)=>[fmtDateShort(w.date),(w.temperatureMax||0).toFixed(1),(w.temperatureMin||0).toFixed(1),(w.precipitation||0).toFixed(1)]);
+          y=pdfTable(pdf,ML,y,["Fecha","Max C","Min C","Lluvia mm"],wtR,wtw);
+        }
+        pdfFooter(pdf,2,3,now,logoB64);
+
+        // Page 3: Notes + Full AI Analysis
+        pdf.addPage();pdfSubHeader(pdf,"Notas de Campo & Analisis IA",period2,logoB64);y=48;
+        // Notes summary
+        const totalN = generalData.totals?.notes||0;
+        const resolvedN = generalData.totals?.notesResolved||0;
+        const openN = generalData.totals?.notesOpen||0;
+        const skw2=(CW-24)/4;
+        [{l:"Total Notas",v:`${totalN}`,r:245,g:158,b:11},{l:"Resueltas",v:`${resolvedN}`,r:16,g:185,b:129},{l:"Abiertas",v:`${openN}`,r:openN>0?239:6,g:openN>0?68:95,b:openN>0?68:70},{l:"Parcelas",v:`${generalData.totals?.parcelsCount||0}`,r:139,g:92,b:246}].forEach((k,i)=>pdfKpi(pdf,ML+i*(skw2+8),y,skw2,k.l,k.v,k.r,k.g,k.b));
+        y+=54;
+
+        // Per-parcel notes breakdown
+        const parcelsWithNotes = gParcels.filter((p:any)=>p.notesCount>0);
+        if(parcelsWithNotes.length>0){
+          pdfSection(pdf,ML,y,"Notas por Parcela");y+=22;
+          const nnw=[CW*0.35,CW*0.15,CW*0.15,CW*0.35];
+          const nnR=parcelsWithNotes.map((p:any)=>[
+            p.name||p.code,`${p.notesCount}`,`${p.notesOpen}`,
+            p.notesOpen>0?"Requiere atencion":"Todo resuelto"
+          ]);
+          const nnC=parcelsWithNotes.map((p:any)=>p.notesOpen>0?[254,242,242] as [number,number,number]:[235,251,242] as [number,number,number]);
+          y=pdfTable(pdf,ML,y,["Parcela","Total","Abiertas","Estado"],nnR,nnw,nnC);
+          y+=12;
+        }
+
+        // Full AI analysis
+        if(aiText){
+          y=pdfAiBox(pdf,ML,y,CW,aiText,PH-30)+4;
+        }
+        pdfFooter(pdf,3,3,now,logoB64);
       }
 
       const name=isGeneral?"General":(reportData?.parcel?.name||"parcela").replace(/\s+/g,"_");
@@ -534,7 +613,7 @@ export default function Reports() {
           <div className="mt-5 flex justify-center">
             <button onClick={generatePDF} disabled={!dataReady||generating||loading}
               className={`flex items-center gap-2.5 rounded-2xl px-8 py-3.5 text-sm font-semibold transition-all duration-300 ${dataReady&&!generating?"bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-xl shadow-green-500/30 hover:shadow-2xl hover:shadow-green-500/40 hover:scale-105 active:scale-95":"bg-gray-200 text-gray-400 cursor-not-allowed"}`}>
-              {generating?<><Loader2 className="h-4 w-4 animate-spin"/>Generando...</>:loading?<><Loader2 className="h-4 w-4 animate-spin"/>Cargando datos...</>:<><Download className="h-4 w-4"/>Generar Reporte PDF</>}
+              {generating?<><Loader2 className="h-4 w-4 animate-spin"/>Generando...</>:loading?<><Loader2 className="h-4 w-4 animate-spin"/>Cargando datos...</>:<><Download className="h-4 w-4"/>Generar Reporte PDF ({totalPages} {totalPages===1?"pág":"págs"})</>}
             </button>
           </div>
         </GlassCard>
