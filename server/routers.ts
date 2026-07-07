@@ -3905,12 +3905,10 @@ IMPORTANTE:
           let apiKey = await getGlobalSetting("deepseekApiKey");
           if (apiKey) {
             // Decrypt if needed
-            if (apiKey.includes(":")) {
-              try {
-                const { decrypt } = await import("./_core/encryption");
-                apiKey = decrypt(apiKey);
-              } catch (e) { /* use as-is */ }
-            }
+            try {
+              const { decryptSecret, isEncrypted } = await import("./encryption");
+              if (isEncrypted(apiKey)) apiKey = decryptSecret(apiKey);
+            } catch (e) { /* use as-is */ }
             const summaryLines = parcelSummaries.map((p: any) =>
               `${p.name}: ${p.weekTotal}kg cosechados, ${p.weekBoxes} cajas, NDVI prom ${p.ndviAvg || 'N/D'}, ${p.notesCount} notas (${p.notesOpen} abiertas)`
             ).join('\n');

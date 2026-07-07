@@ -40,6 +40,23 @@ const statusLabels: Record<string, string> = {
   resuelta: "Resuelta", descartada: "Descartada",
 };
 
+// Logo base64 loader
+function useLogoBase64() {
+  const [logo, setLogo] = useState<string | null>(null);
+  useEffect(() => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = img.width; c.height = img.height;
+      c.getContext("2d")?.drawImage(img, 0, 0);
+      setLogo(c.toDataURL("image/png"));
+    };
+    img.src = "/agra-tecti.png";
+  }, []);
+  return logo;
+}
+
 export default function Reports() {
   const [selectedParcelId, setSelectedParcelId] = useState<number | null>(null);
   const [selectedParcelCode, setSelectedParcelCode] = useState("");
@@ -48,6 +65,7 @@ export default function Reports() {
   const [reportMode, setReportMode] = useState<"compact" | "extended">("compact");
   const [generating, setGenerating] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
+  const logoB64 = useLogoBase64();
 
   const toDate = useMemo(() => new Date().toISOString().split("T")[0], []);
   const fromDate = useMemo(() => {
@@ -55,24 +73,18 @@ export default function Reports() {
     return d.toISOString().split("T")[0];
   }, [periodDays]);
 
-  // Queries
   const { data: parcels } = trpc.parcels.list.useQuery();
   const parcelsWithPolygon = useMemo(() =>
     (parcels || []).filter((p: any) => p.polygon && p.polygon.length > 10), [parcels]);
 
-  // Single parcel data
   const { data: reportData, isLoading } = trpc.reports.getWeeklyData.useQuery(
     { parcelId: selectedParcelId!, parcelCode: selectedParcelCode, fromDate, toDate },
     { enabled: !isGeneral && !!selectedParcelId && !!selectedParcelCode }
   );
-
-  // General data (all parcels)
   const { data: generalData, isLoading: generalLoading } = trpc.reports.getGeneralData.useQuery(
     { fromDate, toDate },
     { enabled: isGeneral }
   );
-
-  // Satellite maps (load separately to avoid huge payloads)
   const { data: ndviMap } = trpc.reports.getSatelliteMap.useQuery(
     { parcelId: selectedParcelId!, indexType: "NDVI" },
     { enabled: !isGeneral && !!selectedParcelId && reportMode === "extended" }
@@ -90,7 +102,7 @@ export default function Reports() {
   const dataReady = isGeneral ? !!generalData : !!reportData;
   const loading = isGeneral ? generalLoading : isLoading;
 
-  // ── Computed data ──
+  // ── Computed ──
   const weeklyHarvestTotal = useMemo(() => {
     if (isGeneral) return generalData?.totals?.harvest || 0;
     return (reportData?.dailyHarvest || []).reduce((s: number, d: any) => s + (d.totalWeight || 0), 0);
@@ -130,7 +142,7 @@ export default function Reports() {
   const slaSummary = useMemo(() => {
     if (isGeneral) {
       const t = generalData?.totals;
-      return t ? { total: t.notes, resolved: t.notesResolved, open: t.notesOpen, overSla: 0, avgSla: null, catCounts: {} } : null;
+      return t ? { total: t.notes, resolved: t.notesResolved, open: t.notesOpen, overSla: 0, avgSla: null, catCounts: {} as Record<string, number> } : null;
     }
     if (!reportData?.fieldNotes) return null;
     const notes = reportData.fieldNotes as any[];
@@ -143,7 +155,9 @@ export default function Reports() {
     return { total: notes.length, resolved: resolved.length, open: open.length, overSla: overSla.length, avgSla, catCounts };
   }, [reportData, generalData, isGeneral]);
 
+  const aiText = isGeneral ? (generalData as any)?.aiAnalysis : reportData?.aiAnalysis;
   const now = new Date().toLocaleDateString("es-MX", { day: "2-digit", month: "long", year: "numeric", timeZone: "America/Mexico_City" });
+  const titleName = isGeneral ? "Todas las Parcelas" : (reportData?.parcel?.name || "...");
 
   // ── PDF Generation ──
   async function generatePDF() {
@@ -157,9 +171,9 @@ export default function Reports() {
       const pdfH = pdf.internal.pageSize.getHeight();
       for (let i = 0; i < pages.length; i++) {
         pages[i].style.display = "block";
-        const canvas = await html2canvas(pages[i], { scale: 2, useCORS: true, backgroundColor: "#ffffff", width: 816, height: 1056 });
+        const canvas = await html2canvas(pages[i], { scale: 3, useCORS: true, backgroundColor: "#ffffff", width: 816, height: 1056, logging: false });
         if (i > 0) pdf.addPage();
-        pdf.addImage(canvas.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, pdfW, pdfH);
+        pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, pdfW, pdfH, undefined, "FAST");
         pages[i].style.display = "none";
       }
       const name = isGeneral ? "General" : (reportData?.parcel?.name || "parcela").replace(/\s+/g, "_");
@@ -171,7 +185,49 @@ export default function Reports() {
     } finally { setGenerating(false); }
   }
 
-  const titleName = isGeneral ? "Todas las Parcelas" : (reportData?.parcel?.name || "...");
+  // ── PDF Sub-components (inline styles for html2canvas) ──
+  const PDFHeader = ({ subtitle }: { subtitle?: string }) => (
+    <div style={{ background: "linear-gradient(135deg, #065f46 0%, #059669 50%, #34d399 100%)", padding: "24px 40px 18px", color: "#fff", position: "relative", overflow: "hidden" }}>
+      <div style={{ position: "absolute", top: -30, right: -30, width: 120, height: 120, borderRadius: "50%", background: "rgba(255,255,255,0.06)" }} />
+      <div style={{ position: "absolute", bottom: -20, right: 80, width: 80, height: 80, borderRadius: "50%", background: "rgba(255,255,255,0.04)" }} />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          {logoB64 && <img src={logoB64} alt="AgraTec-ti" style={{ height: 48, width: 48, borderRadius: 12, background: "rgba(255,255,255,0.15)", padding: 4 }} crossOrigin="anonymous" />}
+          <div>
+            <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5 }}>AGRA TEC-TI</div>
+            <div style={{ fontSize: 10, opacity: 0.85, letterSpacing: 1, textTransform: "uppercase" }}>{subtitle || "Cosecha Inteligente"}</div>
+          </div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 9, opacity: 0.7, textTransform: "uppercase", letterSpacing: 1 }}>Reporte {reportMode === "compact" ? "Ejecutivo" : "Semanal"}</div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>{titleName}</div>
+          <div style={{ fontSize: 10, opacity: 0.85 }}>{fmtDate(fromDate)} — {fmtDate(toDate)}</div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const PDFPageHeader = ({ title }: { title: string }) => (
+    <div style={{ background: "linear-gradient(135deg, #065f46, #059669)", padding: "14px 40px", color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {logoB64 && <img src={logoB64} alt="" style={{ height: 28, width: 28, borderRadius: 6, background: "rgba(255,255,255,0.15)", padding: 2 }} crossOrigin="anonymous" />}
+        <span style={{ fontSize: 15, fontWeight: 700 }}>{title}</span>
+      </div>
+      <span style={{ fontSize: 9, opacity: 0.8 }}>{titleName} · {fmtDate(fromDate)} — {fmtDate(toDate)}</span>
+    </div>
+  );
+
+  const PDFFooter = ({ page, total }: { page: number; total: number }) => (
+    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "8px 40px", background: "linear-gradient(90deg, #f0fdf4, #ffffff)", borderTop: "1px solid #d1fae5", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {logoB64 && <img src={logoB64} alt="" style={{ height: 14, width: 14, opacity: 0.4 }} crossOrigin="anonymous" />}
+        <span style={{ fontSize: 7, color: "#9ca3af" }}>AGRA TEC-TI · {now} · Confidencial</span>
+      </div>
+      <span style={{ fontSize: 7, color: "#9ca3af" }}>Página {page} de {total}</span>
+    </div>
+  );
+
+  const totalPages = reportMode === "compact" ? 1 : 4;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-emerald-50/50 to-teal-50/30 pb-32">
@@ -183,13 +239,12 @@ export default function Reports() {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-green-900">Reportes</h1>
-            <p className="text-sm text-green-600">Genera reportes PDF semanales</p>
+            <p className="text-sm text-green-600">Genera reportes PDF semanales con análisis IA</p>
           </div>
         </div>
 
         {/* Controls */}
         <GlassCard className="p-4 md:p-5" hover={false}>
-          {/* Row 1: Mode toggle + Parcel selector */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
             <div>
               <label className="text-xs font-semibold text-green-700 uppercase tracking-wider mb-1.5 block">Alcance</label>
@@ -216,8 +271,6 @@ export default function Reports() {
               </div>
             )}
           </div>
-
-          {/* Row 2: Period + Mode + Range */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
               <label className="text-xs font-semibold text-green-700 uppercase tracking-wider mb-1.5 block">Período</label>
@@ -242,12 +295,10 @@ export default function Reports() {
               </div>
             </div>
           </div>
-
-          {/* Generate button */}
           <div className="mt-4 flex justify-center">
             <button onClick={generatePDF} disabled={!dataReady || generating || loading}
               className={`flex items-center gap-2 rounded-2xl px-6 py-3 text-sm font-semibold transition-all duration-300 ${dataReady && !generating ? "bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-xl hover:shadow-2xl hover:scale-105 active:scale-95" : "bg-gray-200 text-gray-400 cursor-not-allowed"}`}>
-              {generating ? <><Loader2 className="h-4 w-4 animate-spin" />Generando...</> : loading ? <><Loader2 className="h-4 w-4 animate-spin" />Cargando...</> : <><Download className="h-4 w-4" />Generar Reporte PDF ({reportMode === "compact" ? "1 pág" : "4 págs"})</>}
+              {generating ? <><Loader2 className="h-4 w-4 animate-spin" />Generando...</> : loading ? <><Loader2 className="h-4 w-4 animate-spin" />Cargando datos...</> : <><Download className="h-4 w-4" />Generar Reporte PDF ({reportMode === "compact" ? "1 pág" : "4 págs"})</>}
             </button>
           </div>
         </GlassCard>
@@ -255,13 +306,22 @@ export default function Reports() {
         {/* Preview KPIs */}
         {dataReady && (
           <GlassCard className="p-4" hover={false}>
-            <h3 className="text-xs font-semibold text-green-700 mb-2 flex items-center gap-1.5"><FileText className="h-3.5 w-3.5" /> Vista previa</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <h3 className="text-xs font-semibold text-green-700 mb-2 flex items-center gap-1.5"><BarChart3 className="h-3.5 w-3.5" /> Vista previa · {titleName}</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
               <MiniKPI icon={Package} label="Cosecha" value={`${weeklyHarvestTotal.toFixed(1)} kg`} color="from-green-400 to-emerald-500" />
               <MiniKPI icon={TrendingUp} label="1ra Calidad" value={`${firstQPct}%`} color="from-emerald-400 to-green-500" />
               <MiniKPI icon={ClipboardList} label="Notas" value={`${slaSummary?.total || 0}`} color="from-yellow-400 to-orange-500" />
               <MiniKPI icon={CloudSun} label="Lluvia" value={weatherSummary ? `${weatherSummary.totalRain} mm` : "N/D"} color="from-blue-400 to-cyan-500" />
             </div>
+            {aiText && (
+              <div className="bg-green-50/80 rounded-xl border border-green-200/40 p-3">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Brain className="h-3.5 w-3.5 text-green-600" />
+                  <span className="text-[10px] font-semibold text-green-700">Análisis IA (DeepSeek v4-flash)</span>
+                </div>
+                <p className="text-xs text-green-800 leading-relaxed line-clamp-3">{aiText.substring(0, 300)}...</p>
+              </div>
+            )}
           </GlassCard>
         )}
 
@@ -269,7 +329,7 @@ export default function Reports() {
           <GlassCard className="p-8 text-center" hover={false}>
             <FileText className="h-14 w-14 mx-auto text-green-200 mb-3" />
             <h3 className="text-base font-semibold text-green-800 mb-1">{isGeneral ? "Listo para generar" : "Selecciona una parcela"}</h3>
-            <p className="text-green-600 text-xs">{isGeneral ? "Haz click en Generar para el reporte general" : "Solo se muestran parcelas con polígono"}</p>
+            <p className="text-green-600 text-xs">{isGeneral ? "Haz click en Generar para el reporte general" : "Solo se muestran parcelas con polígono definido"}</p>
           </GlassCard>
         )}
       </div>
@@ -280,53 +340,46 @@ export default function Reports() {
       {dataReady && (
         <div ref={reportRef} style={{ position: "absolute", left: "-9999px", top: 0 }}>
 
-          {/* ── COMPACT / PAGE 1: Everything in one page ── */}
-          <div className="report-page" style={{ width: 816, height: 1056, background: "#fff", fontFamily: "Helvetica, Arial, sans-serif", display: "none", overflow: "hidden", position: "relative" }}>
-            {/* Header */}
-            <div style={{ background: "linear-gradient(135deg, #10b981, #059669)", padding: "28px 40px 20px", color: "#fff" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div>
-                  <div style={{ fontSize: 24, fontWeight: 800 }}>🌱 AgraTec</div>
-                  <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>Reporte {reportMode === "compact" ? "Resumido" : "Semanal"} · {titleName}</div>
+          {/* ── PAGE 1: Compact / Main ── */}
+          <div className="report-page" style={{ width: 816, height: 1056, background: "#fff", fontFamily: "'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif", display: "none", overflow: "hidden", position: "relative" }}>
+            <PDFHeader subtitle={isGeneral ? "Reporte General" : "Reporte por Parcela"} />
+
+            {/* KPI row */}
+            <div style={{ padding: "12px 40px 8px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
+              {[
+                { label: "Cosecha Total", value: `${weeklyHarvestTotal.toFixed(1)} kg`, color: "#059669", bg: "linear-gradient(135deg, #ecfdf5, #d1fae5)" },
+                { label: "1ra Calidad", value: `${firstQPct}%`, color: "#047857", bg: "linear-gradient(135deg, #ecfdf5, #a7f3d0)" },
+                { label: "Cajas", value: `${weeklyBoxes}`, color: "#0d9488", bg: "linear-gradient(135deg, #f0fdfa, #ccfbf1)" },
+                { label: isGeneral ? "Parcelas" : "Días Activos", value: isGeneral ? `${generalData?.totals?.parcelsCount || 0}` : `${reportData?.dailyHarvest?.length || 0}`, color: "#0891b2", bg: "linear-gradient(135deg, #ecfeff, #cffafe)" },
+              ].map((k, i) => (
+                <div key={i} style={{ background: k.bg, borderRadius: 12, padding: "10px 12px", border: "1px solid rgba(16,185,129,0.15)" }}>
+                  <div style={{ fontSize: 8, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 }}>{k.label}</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: k.color }}>{k.value}</div>
                 </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 10, opacity: 0.8 }}>Período</div>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{fmtDate(fromDate)} — {fmtDate(toDate)}</div>
-                </div>
-              </div>
+              ))}
             </div>
 
-            {/* KPIs row */}
-            <div style={{ padding: "14px 40px 10px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
-              <KpiBox label="Cosecha" value={`${weeklyHarvestTotal.toFixed(1)} kg`} color="#10b981" />
-              <KpiBox label="1ra Calidad" value={`${firstQPct}%`} color="#059669" />
-              <KpiBox label="Cajas" value={`${weeklyBoxes}`} color="#0d9488" />
-              <KpiBox label={isGeneral ? "Parcelas" : "Días Activos"} value={isGeneral ? `${generalData?.totals?.parcelsCount || 0}` : `${reportData?.dailyHarvest?.length || 0}`} color="#0891b2" />
-            </div>
-
-            {/* Body split: left=harvest, right=satellite+weather+notes */}
-            <div style={{ padding: "6px 40px", display: "grid", gridTemplateColumns: isGeneral ? "1fr" : "1fr 1fr", gap: 14 }}>
-              {/* Left column */}
+            {/* Body: table + sidebar */}
+            <div style={{ padding: "6px 40px", display: "grid", gridTemplateColumns: isGeneral ? "1fr" : "1.2fr 1fr", gap: 14 }}>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#065f46", marginBottom: 6 }}>📦 Cosecha por Día</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#065f46", marginBottom: 5, display: "flex", alignItems: "center", gap: 4 }}>📦 {isGeneral ? "Rendimiento por Parcela" : "Cosecha Diaria"}</div>
                 {isGeneral ? (
-                  /* General: per-parcel table */
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 9 }}>
-                    <thead><tr style={{ background: "#065f46", color: "#fff" }}>
-                      {["Parcela", "kg", "1ra Cal.", "Cajas", "NDVI", "Notas"].map(h => <th key={h} style={{ padding: "5px 6px", textAlign: "left", fontWeight: 600 }}>{h}</th>)}
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 8.5 }}>
+                    <thead><tr style={{ background: "linear-gradient(90deg, #065f46, #059669)", color: "#fff" }}>
+                      {["Parcela", "kg", "1ra Cal.", "Cajas", "NDVI", "Notas"].map(h => <th key={h} style={{ padding: "5px 6px", textAlign: "left", fontWeight: 600, fontSize: 8 }}>{h}</th>)}
                     </tr></thead>
                     <tbody>
                       {(generalData?.parcels || []).map((p: any, i: number) => (
                         <tr key={p.id} style={{ background: i % 2 === 0 ? "#f0fdf4" : "#fff", borderBottom: "1px solid #d1fae5" }}>
-                          <td style={{ padding: "4px 6px", fontWeight: 600, color: "#065f46", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</td>
-                          <td style={{ padding: "4px 6px", fontWeight: 700 }}>{p.weekTotal}</td>
-                          <td style={{ padding: "4px 6px", color: "#059669" }}>{p.weekFirstQ}</td>
-                          <td style={{ padding: "4px 6px" }}>{p.weekBoxes}</td>
-                          <td style={{ padding: "4px 6px", fontWeight: 600, color: p.ndviAvg && p.ndviAvg > 0.5 ? "#059669" : p.ndviAvg && p.ndviAvg > 0.3 ? "#d97706" : "#ef4444" }}>{p.ndviAvg ? p.ndviAvg.toFixed(3) : "—"}</td>
-                          <td style={{ padding: "4px 6px", color: p.notesOpen > 0 ? "#ef4444" : "#059669" }}>{p.notesCount} ({p.notesOpen} abiertas)</td>
+                          <td style={{ padding: "3.5px 6px", fontWeight: 600, color: "#065f46", maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</td>
+                          <td style={{ padding: "3.5px 6px", fontWeight: 700 }}>{p.weekTotal}</td>
+                          <td style={{ padding: "3.5px 6px", color: "#059669" }}>{p.weekFirstQ}</td>
+                          <td style={{ padding: "3.5px 6px" }}>{p.weekBoxes}</td>
+                          <td style={{ padding: "3.5px 6px", fontWeight: 600, color: p.ndviAvg && p.ndviAvg > 0.5 ? "#059669" : p.ndviAvg && p.ndviAvg > 0.3 ? "#d97706" : "#ef4444" }}>{p.ndviAvg ? p.ndviAvg.toFixed(3) : "—"}</td>
+                          <td style={{ padding: "3.5px 6px", color: p.notesOpen > 0 ? "#ef4444" : "#059669" }}>{p.notesCount} ({p.notesOpen})</td>
                         </tr>
                       ))}
-                      <tr style={{ background: "#065f46", color: "#fff", fontWeight: 700 }}>
+                      <tr style={{ background: "linear-gradient(90deg, #065f46, #059669)", color: "#fff", fontWeight: 700 }}>
                         <td style={{ padding: "5px 6px" }}>TOTAL</td>
                         <td style={{ padding: "5px 6px" }}>{generalData?.totals?.harvest}</td>
                         <td style={{ padding: "5px 6px" }}>{generalData?.totals?.firstQ}</td>
@@ -337,20 +390,19 @@ export default function Reports() {
                     </tbody>
                   </table>
                 ) : (
-                  /* Single parcel: daily table */
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 9 }}>
-                    <thead><tr style={{ background: "#065f46", color: "#fff" }}>
-                      {["Fecha", "Cajas", "Total kg", "1ra Cal.", "2da", "Desp."].map(h => <th key={h} style={{ padding: "5px 6px", textAlign: "left", fontWeight: 600 }}>{h}</th>)}
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 8.5 }}>
+                    <thead><tr style={{ background: "linear-gradient(90deg, #065f46, #059669)", color: "#fff" }}>
+                      {["Fecha", "Cajas", "Total kg", "1ra Cal.", "2da", "Desp."].map(h => <th key={h} style={{ padding: "5px 6px", textAlign: "left", fontWeight: 600, fontSize: 8 }}>{h}</th>)}
                     </tr></thead>
                     <tbody>
                       {(reportData?.dailyHarvest || []).map((d: any, i: number) => (
                         <tr key={d.date} style={{ background: i % 2 === 0 ? "#f0fdf4" : "#fff", borderBottom: "1px solid #d1fae5" }}>
-                          <td style={{ padding: "4px 6px", fontWeight: 600, color: "#065f46" }}>{fmtDateShort(d.date)}</td>
-                          <td style={{ padding: "4px 6px" }}>{d.totalBoxes}</td>
-                          <td style={{ padding: "4px 6px", fontWeight: 700 }}>{d.totalWeight}</td>
-                          <td style={{ padding: "4px 6px", color: "#059669" }}>{d.firstQualityWeight}</td>
-                          <td style={{ padding: "4px 6px", color: "#d97706" }}>{d.secondQualityWeight}</td>
-                          <td style={{ padding: "4px 6px", color: "#ef4444" }}>{d.wasteWeight}</td>
+                          <td style={{ padding: "3.5px 6px", fontWeight: 600, color: "#065f46" }}>{fmtDateShort(d.date)}</td>
+                          <td style={{ padding: "3.5px 6px" }}>{d.totalBoxes}</td>
+                          <td style={{ padding: "3.5px 6px", fontWeight: 700 }}>{d.totalWeight}</td>
+                          <td style={{ padding: "3.5px 6px", color: "#059669" }}>{d.firstQualityWeight}</td>
+                          <td style={{ padding: "3.5px 6px", color: "#d97706" }}>{d.secondQualityWeight}</td>
+                          <td style={{ padding: "3.5px 6px", color: "#ef4444" }}>{d.wasteWeight}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -358,60 +410,55 @@ export default function Reports() {
                 )}
               </div>
 
-              {/* Right column (single parcel only) */}
+              {/* Right sidebar (single parcel) */}
               {!isGeneral && (
                 <div>
-                  {/* Satellite mini */}
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#065f46", marginBottom: 6 }}>🛰️ Índices Satelitales</div>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 9, marginBottom: 10 }}>
-                    <thead><tr style={{ background: "#065f46", color: "#fff" }}>
-                      {["Índice", "Media", "Último", "Tendencia"].map(h => <th key={h} style={{ padding: "4px 6px", textAlign: "left", fontWeight: 600 }}>{h}</th>)}
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#065f46", marginBottom: 5 }}>🛰️ Índices Satelitales</div>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 8.5, marginBottom: 8 }}>
+                    <thead><tr style={{ background: "linear-gradient(90deg, #065f46, #059669)", color: "#fff" }}>
+                      {["Índice", "Media", "Último", "Tendencia"].map(h => <th key={h} style={{ padding: "4px 5px", textAlign: "left", fontWeight: 600, fontSize: 8 }}>{h}</th>)}
                     </tr></thead>
                     <tbody>
                       {["NDVI", "NDRE", "NDMI"].map((idx, i) => {
-                        const sd = reportData?.satelliteData?.[idx]?.data;
-                        const pts = Array.isArray(sd) ? sd.filter((d: any) => d.mean != null) : [];
-                        const avg = pts.length > 0 ? (pts.reduce((s: number, d: any) => s + d.mean, 0) / pts.length) : null;
-                        const last = pts.length > 0 ? pts[pts.length - 1].mean : null;
+                        const pts = (reportData?.satelliteData?.[idx]?.data || []).filter((d: any) => d.mean != null);
+                        const avg = pts.length ? pts.reduce((s: number, d: any) => s + d.mean, 0) / pts.length : null;
+                        const last = pts.length ? pts[pts.length - 1].mean : null;
                         const t = getSatelliteTrend(reportData?.satelliteData?.[idx]);
                         return (
                           <tr key={idx} style={{ background: i % 2 === 0 ? "#f0fdf4" : "#fff", borderBottom: "1px solid #d1fae5" }}>
-                            <td style={{ padding: "4px 6px", fontWeight: 700, color: "#065f46" }}>{idx}</td>
-                            <td style={{ padding: "4px 6px" }}>{avg?.toFixed(4) || "—"}</td>
-                            <td style={{ padding: "4px 6px", fontWeight: 600 }}>{last?.toFixed(4) || "—"}</td>
-                            <td style={{ padding: "4px 6px", fontWeight: 700, color: t.color }}>{t.trend} {t.label}</td>
+                            <td style={{ padding: "3.5px 5px", fontWeight: 700, color: "#065f46" }}>{idx}</td>
+                            <td style={{ padding: "3.5px 5px" }}>{avg?.toFixed(4) || "—"}</td>
+                            <td style={{ padding: "3.5px 5px", fontWeight: 600 }}>{last?.toFixed(4) || "—"}</td>
+                            <td style={{ padding: "3.5px 5px", fontWeight: 700, color: t.color }}>{t.trend} {t.label}</td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
 
-                  {/* Notes summary */}
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#065f46", marginBottom: 6 }}>📋 Notas de Campo</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 8 }}>
-                    <div style={{ background: "#f0fdf4", borderRadius: 8, padding: "6px 8px", textAlign: "center", border: "1px solid #bbf7d0" }}>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: "#065f46" }}>{slaSummary?.total || 0}</div>
-                      <div style={{ fontSize: 8, color: "#6b7280" }}>Total</div>
-                    </div>
-                    <div style={{ background: "#f0fdf4", borderRadius: 8, padding: "6px 8px", textAlign: "center", border: "1px solid #bbf7d0" }}>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: "#059669" }}>{slaSummary?.resolved || 0}</div>
-                      <div style={{ fontSize: 8, color: "#6b7280" }}>Resueltas</div>
-                    </div>
-                    <div style={{ background: slaSummary && slaSummary.overSla > 0 ? "#fef2f2" : "#f0fdf4", borderRadius: 8, padding: "6px 8px", textAlign: "center", border: `1px solid ${slaSummary && slaSummary.overSla > 0 ? "#fecaca" : "#bbf7d0"}` }}>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: slaSummary && slaSummary.overSla > 0 ? "#ef4444" : "#065f46" }}>{slaSummary?.open || 0}</div>
-                      <div style={{ fontSize: 8, color: "#6b7280" }}>Abiertas</div>
-                    </div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#065f46", marginBottom: 5 }}>📋 Notas de Campo</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
+                    {[
+                      { label: "Total", value: slaSummary?.total || 0, color: "#065f46" },
+                      { label: "Resueltas", value: slaSummary?.resolved || 0, color: "#059669" },
+                      { label: "Abiertas", value: slaSummary?.open || 0, color: (slaSummary?.open || 0) > 0 ? "#ef4444" : "#065f46" },
+                    ].map((k, i) => (
+                      <div key={i} style={{ background: k.color === "#ef4444" ? "#fef2f2" : "#f0fdf4", borderRadius: 8, padding: "5px 6px", textAlign: "center", border: `1px solid ${k.color === "#ef4444" ? "#fecaca" : "#bbf7d0"}` }}>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: k.color }}>{k.value}</div>
+                        <div style={{ fontSize: 7, color: "#6b7280" }}>{k.label}</div>
+                      </div>
+                    ))}
                   </div>
-                  {slaSummary?.avgSla && <div style={{ fontSize: 9, color: "#374151" }}>⏱️ SLA promedio: <strong>{slaSummary.avgSla}h</strong></div>}
+                  {slaSummary?.avgSla && <div style={{ fontSize: 8, color: "#374151", marginTop: 4 }}>⏱️ SLA promedio: <strong>{slaSummary.avgSla}h</strong></div>}
                 </div>
               )}
             </div>
 
-            {/* Weather row */}
+            {/* Weather */}
             {weatherSummary && (
-              <div style={{ padding: "8px 40px 6px" }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#065f46", marginBottom: 4 }}>🌤️ Clima</div>
-                <div style={{ display: "flex", gap: 12, fontSize: 10, color: "#374151" }}>
+              <div style={{ padding: "6px 40px 4px" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#065f46", marginBottom: 3 }}>🌤️ Clima</div>
+                <div style={{ display: "flex", gap: 16, fontSize: 9, color: "#374151" }}>
                   <span>🌡️ Máx prom: <strong>{weatherSummary.avgMax}°C</strong></span>
                   <span>❄️ Mín prom: <strong>{weatherSummary.avgMin}°C</strong></span>
                   <span>🌧️ Lluvia acum: <strong>{weatherSummary.totalRain} mm</strong></span>
@@ -419,73 +466,76 @@ export default function Reports() {
               </div>
             )}
 
-            {/* AI Analysis */}
-            {(() => {
-              const ai = isGeneral ? (generalData as any)?.aiAnalysis : reportData?.aiAnalysis;
-              if (!ai) return null;
-              return (
-                <div style={{ padding: "6px 40px" }}>
-                  <div style={{ background: "#f0fdf4", borderRadius: 8, border: "1px solid #bbf7d0", padding: "8px 12px" }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: "#065f46", marginBottom: 4 }}>🧠 Análisis IA (DeepSeek v4-flash)</div>
-                    <div style={{ fontSize: 9, lineHeight: 1.5, color: "#1f2937", whiteSpace: "pre-wrap", maxHeight: reportMode === "compact" ? 130 : 200, overflow: "hidden" }}>
-                      {ai.substring(0, reportMode === "compact" ? 700 : 1200)}{ai.length > 700 ? "..." : ""}
-                    </div>
+            {/* AI Analysis — always show */}
+            {aiText && (
+              <div style={{ padding: "6px 40px" }}>
+                <div style={{ background: "linear-gradient(135deg, #f0fdf4, #ecfdf5)", borderRadius: 10, border: "1px solid #bbf7d0", padding: "10px 14px", position: "relative", overflow: "hidden" }}>
+                  <div style={{ position: "absolute", top: -10, right: -10, width: 60, height: 60, borderRadius: "50%", background: "rgba(16,185,129,0.06)" }} />
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#065f46", marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                    🧠 Análisis IA <span style={{ fontSize: 7, fontWeight: 500, color: "#6b7280", marginLeft: 4 }}>DeepSeek v4-flash</span>
+                  </div>
+                  <div style={{ fontSize: 8.5, lineHeight: 1.55, color: "#1f2937", whiteSpace: "pre-wrap", maxHeight: reportMode === "compact" ? 140 : 200, overflow: "hidden" }}>
+                    {aiText.substring(0, reportMode === "compact" ? 800 : 1500)}
                   </div>
                 </div>
-              );
-            })()}
+              </div>
+            )}
 
-            {/* Footer */}
-            <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "10px 40px", background: "#f9fafb", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between" }}>
-              <span style={{ fontSize: 8, color: "#9ca3af" }}>AgraTec v2.0 · {now} · Confidencial</span>
-              <span style={{ fontSize: 8, color: "#9ca3af" }}>Página 1{reportMode === "extended" ? " de 4" : ""}</span>
-            </div>
+            <PDFFooter page={1} total={totalPages} />
           </div>
 
-          {/* ── EXTENDED PAGES (2-4) — only rendered when mode=extended ── */}
+          {/* ── EXTENDED PAGES 2-4 ── */}
           {reportMode === "extended" && !isGeneral && reportData && (
             <>
-              {/* PAGE 2: Harvest detail + Weather table */}
-              <div className="report-page" style={{ width: 816, height: 1056, background: "#fff", fontFamily: "Helvetica, Arial, sans-serif", display: "none", overflow: "hidden", position: "relative" }}>
-                <PageHeader title="📦 Cosecha Detallada" parcel={titleName} fromDate={fromDate} toDate={toDate} />
-                <div style={{ padding: "16px 40px" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
-                    <thead><tr style={{ background: "#065f46", color: "#fff" }}>
-                      {["Fecha", "Cajas", "Total (kg)", "1ra Cal. (kg)", "2da Cal. (kg)", "Desp. (kg)"].map(h => <th key={h} style={{ padding: "7px 8px", textAlign: "left", fontWeight: 600 }}>{h}</th>)}
+              {/* PAGE 2: Harvest + Weather */}
+              <div className="report-page" style={{ width: 816, height: 1056, background: "#fff", fontFamily: "'Inter', Helvetica, Arial, sans-serif", display: "none", overflow: "hidden", position: "relative" }}>
+                <PDFPageHeader title="📦 Cosecha Detallada + Clima" />
+                <div style={{ padding: "14px 40px" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 9.5 }}>
+                    <thead><tr style={{ background: "linear-gradient(90deg, #065f46, #059669)", color: "#fff" }}>
+                      {["Fecha", "Cajas", "Total (kg)", "1ra Cal.", "2da Cal.", "Desperdicio"].map(h => <th key={h} style={{ padding: "6px 8px", textAlign: "left", fontWeight: 600 }}>{h}</th>)}
                     </tr></thead>
                     <tbody>
                       {(reportData.dailyHarvest || []).map((d: any, i: number) => (
                         <tr key={d.date} style={{ background: i % 2 === 0 ? "#f0fdf4" : "#fff", borderBottom: "1px solid #d1fae5" }}>
-                          <td style={{ padding: "6px 8px", fontWeight: 600, color: "#065f46" }}>{fmtDateShort(d.date)}</td>
-                          <td style={{ padding: "6px 8px" }}>{d.totalBoxes}</td>
-                          <td style={{ padding: "6px 8px", fontWeight: 700 }}>{d.totalWeight}</td>
-                          <td style={{ padding: "6px 8px", color: "#059669" }}>{d.firstQualityWeight}</td>
-                          <td style={{ padding: "6px 8px", color: "#d97706" }}>{d.secondQualityWeight}</td>
-                          <td style={{ padding: "6px 8px", color: "#ef4444" }}>{d.wasteWeight}</td>
+                          <td style={{ padding: "5px 8px", fontWeight: 600, color: "#065f46" }}>{fmtDateShort(d.date)}</td>
+                          <td style={{ padding: "5px 8px" }}>{d.totalBoxes}</td>
+                          <td style={{ padding: "5px 8px", fontWeight: 700 }}>{d.totalWeight}</td>
+                          <td style={{ padding: "5px 8px", color: "#059669" }}>{d.firstQualityWeight}</td>
+                          <td style={{ padding: "5px 8px", color: "#d97706" }}>{d.secondQualityWeight}</td>
+                          <td style={{ padding: "5px 8px", color: "#ef4444" }}>{d.wasteWeight}</td>
                         </tr>
                       ))}
-                      <tr style={{ background: "#065f46", color: "#fff", fontWeight: 700 }}>
-                        <td style={{ padding: "7px 8px" }}>TOTAL</td>
-                        <td style={{ padding: "7px 8px" }}>{weeklyBoxes}</td>
-                        <td style={{ padding: "7px 8px" }}>{weeklyHarvestTotal.toFixed(2)}</td>
-                        <td style={{ padding: "7px 8px" }}>{weeklyFirstQ.toFixed(2)}</td>
-                        <td style={{ padding: "7px 8px" }}>{(reportData.dailyHarvest || []).reduce((s: number, d: any) => s + (d.secondQualityWeight || 0), 0).toFixed(2)}</td>
-                        <td style={{ padding: "7px 8px" }}>{(reportData.dailyHarvest || []).reduce((s: number, d: any) => s + (d.wasteWeight || 0), 0).toFixed(2)}</td>
+                      <tr style={{ background: "linear-gradient(90deg, #065f46, #059669)", color: "#fff", fontWeight: 700 }}>
+                        <td style={{ padding: "6px 8px" }}>TOTAL</td>
+                        <td style={{ padding: "6px 8px" }}>{weeklyBoxes}</td>
+                        <td style={{ padding: "6px 8px" }}>{weeklyHarvestTotal.toFixed(2)}</td>
+                        <td style={{ padding: "6px 8px" }}>{weeklyFirstQ.toFixed(2)}</td>
+                        <td style={{ padding: "6px 8px" }}>{(reportData.dailyHarvest || []).reduce((s: number, d: any) => s + (d.secondQualityWeight || 0), 0).toFixed(2)}</td>
+                        <td style={{ padding: "6px 8px" }}>{(reportData.dailyHarvest || []).reduce((s: number, d: any) => s + (d.wasteWeight || 0), 0).toFixed(2)}</td>
                       </tr>
                     </tbody>
                   </table>
                 </div>
                 {weatherSummary && (
-                  <div style={{ padding: "0 40px" }}>
+                  <div style={{ padding: "8px 40px" }}>
                     <div style={{ fontSize: 12, fontWeight: 700, color: "#065f46", marginBottom: 8 }}>🌤️ Clima Diario</div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
-                      <WBox label="Temp. Máx" value={`${weatherSummary.avgMax}°C`} icon="🌡️" />
-                      <WBox label="Temp. Mín" value={`${weatherSummary.avgMin}°C`} icon="❄️" />
-                      <WBox label="Lluvia" value={`${weatherSummary.totalRain} mm`} icon="🌧️" />
-                      <WBox label="Días" value={`${weatherSummary.days}`} icon="📅" />
+                      {[
+                        { icon: "🌡️", label: "Temp. Máx", value: `${weatherSummary.avgMax}°C`, bg: "#fef2f2" },
+                        { icon: "❄️", label: "Temp. Mín", value: `${weatherSummary.avgMin}°C`, bg: "#eff6ff" },
+                        { icon: "🌧️", label: "Lluvia", value: `${weatherSummary.totalRain} mm`, bg: "#f0fdf4" },
+                        { icon: "📅", label: "Días", value: `${weatherSummary.days}`, bg: "#faf5ff" },
+                      ].map((w, i) => (
+                        <div key={i} style={{ background: w.bg, borderRadius: 10, padding: "8px", textAlign: "center", border: "1px solid rgba(0,0,0,0.06)" }}>
+                          <div style={{ fontSize: 16 }}>{w.icon}</div>
+                          <div style={{ fontSize: 14, fontWeight: 800, color: "#1e293b" }}>{w.value}</div>
+                          <div style={{ fontSize: 8, color: "#6b7280" }}>{w.label}</div>
+                        </div>
+                      ))}
                     </div>
                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 9 }}>
-                      <thead><tr style={{ background: "#1e40af", color: "#fff" }}>
+                      <thead><tr style={{ background: "linear-gradient(90deg, #1e40af, #3b82f6)", color: "#fff" }}>
                         {["Fecha", "Máx °C", "Mín °C", "Lluvia mm"].map(h => <th key={h} style={{ padding: "5px 6px", textAlign: "left", fontWeight: 600 }}>{h}</th>)}
                       </tr></thead>
                       <tbody>
@@ -501,21 +551,21 @@ export default function Reports() {
                     </table>
                   </div>
                 )}
-                <PageFooter now={now} page={2} total={4} />
+                <PDFFooter page={2} total={4} />
               </div>
 
-              {/* PAGE 3: Satellite with maps */}
-              <div className="report-page" style={{ width: 816, height: 1056, background: "#fff", fontFamily: "Helvetica, Arial, sans-serif", display: "none", overflow: "hidden", position: "relative" }}>
-                <PageHeader title="🛰️ Telemetría Satelital" parcel={titleName} fromDate={fromDate} toDate={toDate} />
-                <div style={{ padding: "16px 40px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+              {/* PAGE 3: Satellite */}
+              <div className="report-page" style={{ width: 816, height: 1056, background: "#fff", fontFamily: "'Inter', Helvetica, Arial, sans-serif", display: "none", overflow: "hidden", position: "relative" }}>
+                <PDFPageHeader title="🛰️ Telemetría Satelital" />
+                <div style={{ padding: "14px 40px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
                   {(["NDVI", "NDRE", "NDMI"] as const).map(idx => {
                     const img = satMaps[idx];
                     const t = getSatelliteTrend(reportData.satelliteData?.[idx]);
                     return (
                       <div key={idx} style={{ textAlign: "center" }}>
                         <div style={{ fontSize: 13, fontWeight: 700, color: "#065f46", marginBottom: 6 }}>{idx}</div>
-                        {img ? <img src={img} alt={idx} style={{ width: "100%", height: 170, objectFit: "contain", borderRadius: 8, border: "1px solid #d1fae5", background: "#f0fdf4" }} crossOrigin="anonymous" />
-                          : <div style={{ width: "100%", height: 170, borderRadius: 8, background: "#f9fafb", display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af", fontSize: 10 }}>Sin imagen</div>}
+                        {img ? <img src={img} alt={idx} style={{ width: "100%", height: 170, objectFit: "contain", borderRadius: 10, border: "1px solid #d1fae5", background: "#f0fdf4" }} crossOrigin="anonymous" />
+                          : <div style={{ width: "100%", height: 170, borderRadius: 10, background: "#f9fafb", display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af", fontSize: 10, border: "1px dashed #d1d5db" }}>Sin imagen</div>}
                         <div style={{ marginTop: 4, fontSize: 11, fontWeight: 600, color: t.color }}>{t.trend} {t.label}</div>
                       </div>
                     );
@@ -523,7 +573,7 @@ export default function Reports() {
                 </div>
                 <div style={{ padding: "0 40px" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
-                    <thead><tr style={{ background: "#065f46", color: "#fff" }}>
+                    <thead><tr style={{ background: "linear-gradient(90deg, #065f46, #059669)", color: "#fff" }}>
                       {["Índice", "Media", "Mín", "Máx", "Último", "Tendencia"].map(h => <th key={h} style={{ padding: "6px 8px", textAlign: "left", fontWeight: 600 }}>{h}</th>)}
                     </tr></thead>
                     <tbody>
@@ -534,12 +584,12 @@ export default function Reports() {
                         const t = getSatelliteTrend(reportData.satelliteData?.[idx]);
                         return (
                           <tr key={idx} style={{ background: i % 2 === 0 ? "#f0fdf4" : "#fff", borderBottom: "1px solid #d1fae5" }}>
-                            <td style={{ padding: "6px 8px", fontWeight: 700, color: "#065f46" }}>{idx}</td>
-                            <td style={{ padding: "6px 8px" }}>{avg?.toFixed(4) || "—"}</td>
-                            <td style={{ padding: "6px 8px" }}>{means.length ? Math.min(...means).toFixed(4) : "—"}</td>
-                            <td style={{ padding: "6px 8px" }}>{means.length ? Math.max(...means).toFixed(4) : "—"}</td>
-                            <td style={{ padding: "6px 8px", fontWeight: 600 }}>{means.length ? means[means.length - 1].toFixed(4) : "—"}</td>
-                            <td style={{ padding: "6px 8px", fontWeight: 700, color: t.color }}>{t.trend} {t.label}</td>
+                            <td style={{ padding: "5px 8px", fontWeight: 700, color: "#065f46" }}>{idx}</td>
+                            <td style={{ padding: "5px 8px" }}>{avg?.toFixed(4) || "—"}</td>
+                            <td style={{ padding: "5px 8px" }}>{means.length ? Math.min(...means).toFixed(4) : "—"}</td>
+                            <td style={{ padding: "5px 8px" }}>{means.length ? Math.max(...means).toFixed(4) : "—"}</td>
+                            <td style={{ padding: "5px 8px", fontWeight: 600 }}>{means.length ? means[means.length - 1].toFixed(4) : "—"}</td>
+                            <td style={{ padding: "5px 8px", fontWeight: 700, color: t.color }}>{t.trend} {t.label}</td>
                           </tr>
                         );
                       })}
@@ -548,7 +598,7 @@ export default function Reports() {
                 </div>
                 {reportData.aiAnalysis && (
                   <div style={{ padding: "14px 40px" }}>
-                    <div style={{ background: "#f0fdf4", borderRadius: 10, border: "1px solid #bbf7d0", padding: "12px 16px" }}>
+                    <div style={{ background: "linear-gradient(135deg, #f0fdf4, #ecfdf5)", borderRadius: 12, border: "1px solid #bbf7d0", padding: "12px 16px" }}>
                       <div style={{ fontSize: 11, fontWeight: 700, color: "#065f46", marginBottom: 6 }}>🧠 Análisis IA (DeepSeek v4-flash)</div>
                       <div style={{ fontSize: 9, lineHeight: 1.5, color: "#1f2937", whiteSpace: "pre-wrap", maxHeight: 280, overflow: "hidden" }}>
                         {reportData.aiAnalysis.substring(0, 1500)}
@@ -556,44 +606,51 @@ export default function Reports() {
                     </div>
                   </div>
                 )}
-                <PageFooter now={now} page={3} total={4} />
+                <PDFFooter page={3} total={4} />
               </div>
 
-              {/* PAGE 4: Field Notes + SLA */}
-              <div className="report-page" style={{ width: 816, height: 1056, background: "#fff", fontFamily: "Helvetica, Arial, sans-serif", display: "none", overflow: "hidden", position: "relative" }}>
-                <PageHeader title="📋 Notas de Campo & SLA" parcel={titleName} fromDate={fromDate} toDate={toDate} />
-                <div style={{ padding: "14px 40px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
-                  <KpiBox label="Total" value={`${slaSummary?.total || 0}`} color="#f59e0b" />
-                  <KpiBox label="Resueltas" value={`${slaSummary?.resolved || 0}`} color="#10b981" />
-                  <KpiBox label="Abiertas" value={`${slaSummary?.open || 0}`} color="#ef4444" />
-                  <KpiBox label="SLA Prom" value={slaSummary?.avgSla ? `${slaSummary.avgSla}h` : "N/A"} color="#8b5cf6" />
+              {/* PAGE 4: Notes + SLA */}
+              <div className="report-page" style={{ width: 816, height: 1056, background: "#fff", fontFamily: "'Inter', Helvetica, Arial, sans-serif", display: "none", overflow: "hidden", position: "relative" }}>
+                <PDFPageHeader title="📋 Notas de Campo & SLA" />
+                <div style={{ padding: "12px 40px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
+                  {[
+                    { label: "Total", value: `${slaSummary?.total || 0}`, color: "#f59e0b", bg: "#fffbeb" },
+                    { label: "Resueltas", value: `${slaSummary?.resolved || 0}`, color: "#10b981", bg: "#ecfdf5" },
+                    { label: "Abiertas", value: `${slaSummary?.open || 0}`, color: "#ef4444", bg: "#fef2f2" },
+                    { label: "SLA Prom", value: slaSummary?.avgSla ? `${slaSummary.avgSla}h` : "N/A", color: "#8b5cf6", bg: "#faf5ff" },
+                  ].map((k, i) => (
+                    <div key={i} style={{ background: k.bg, borderRadius: 10, padding: "10px 12px", border: "1px solid rgba(0,0,0,0.06)" }}>
+                      <div style={{ fontSize: 8, color: "#6b7280", textTransform: "uppercase" }}>{k.label}</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: k.color }}>{k.value}</div>
+                    </div>
+                  ))}
                 </div>
                 {slaSummary && slaSummary.overSla > 0 && (
-                  <div style={{ padding: "0 40px 8px" }}>
-                    <div style={{ background: "#fef2f2", borderRadius: 8, border: "1px solid #fecaca", padding: "8px 12px", fontSize: 10, color: "#991b1b" }}>
+                  <div style={{ padding: "0 40px 6px" }}>
+                    <div style={{ background: "#fef2f2", borderRadius: 8, border: "1px solid #fecaca", padding: "6px 12px", fontSize: 9, color: "#991b1b" }}>
                       ⚠️ <strong>{slaSummary.overSla} notas</strong> exceden SLA de 48 horas
                     </div>
                   </div>
                 )}
                 <div style={{ padding: "0 40px" }}>
                   {reportData.fieldNotes && reportData.fieldNotes.length > 0 ? (
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 9 }}>
-                      <thead><tr style={{ background: "#065f46", color: "#fff" }}>
-                        {["Folio", "Categoría", "Prioridad", "Estado", "Fecha", "SLA", "Descripción"].map(h => <th key={h} style={{ padding: "5px 6px", textAlign: "left", fontWeight: 600 }}>{h}</th>)}
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 8.5 }}>
+                      <thead><tr style={{ background: "linear-gradient(90deg, #065f46, #059669)", color: "#fff" }}>
+                        {["Folio", "Categoría", "Prior.", "Estado", "Fecha", "SLA", "Descripción"].map(h => <th key={h} style={{ padding: "5px 6px", textAlign: "left", fontWeight: 600, fontSize: 8 }}>{h}</th>)}
                       </tr></thead>
                       <tbody>
-                        {(reportData.fieldNotes as any[]).slice(0, 20).map((n: any, i: number) => {
+                        {(reportData.fieldNotes as any[]).slice(0, 22).map((n: any, i: number) => {
                           const sla = calcSlaHours(n.createdAt, n.resolvedAt);
                           const over = !n.resolvedAt && (Date.now() - new Date(n.createdAt).getTime()) / 3600000 > 48;
                           return (
                             <tr key={n.id} style={{ background: over ? "#fef2f2" : i % 2 === 0 ? "#f0fdf4" : "#fff", borderBottom: "1px solid #d1fae5" }}>
-                              <td style={{ padding: "4px 6px", fontWeight: 600, color: "#065f46", fontSize: 8 }}>{n.folio}</td>
-                              <td style={{ padding: "4px 6px" }}>{catLabels[n.category] || n.category}</td>
-                              <td style={{ padding: "4px 6px" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: sevColors[n.severity] || "#6b7280", display: "inline-block", marginRight: 3 }}></span>{sevLabels[n.severity] || n.severity}</td>
-                              <td style={{ padding: "4px 6px", fontWeight: 600, color: n.status === "resuelta" ? "#059669" : "#ef4444" }}>{statusLabels[n.status] || n.status}</td>
-                              <td style={{ padding: "4px 6px", fontSize: 8 }}>{fmtDateShort(n.createdAt)}</td>
-                              <td style={{ padding: "4px 6px", fontWeight: 600, color: over ? "#ef4444" : sla != null ? "#059669" : "#9ca3af" }}>{sla != null ? `${sla}h` : over ? "⚠️" : "—"}</td>
-                              <td style={{ padding: "4px 6px", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.description?.substring(0, 50)}</td>
+                              <td style={{ padding: "3.5px 6px", fontWeight: 600, color: "#065f46", fontSize: 7.5 }}>{n.folio}</td>
+                              <td style={{ padding: "3.5px 6px" }}>{catLabels[n.category] || n.category}</td>
+                              <td style={{ padding: "3.5px 6px" }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: sevColors[n.severity] || "#6b7280", display: "inline-block", marginRight: 2 }}></span>{sevLabels[n.severity]}</td>
+                              <td style={{ padding: "3.5px 6px", fontWeight: 600, color: n.status === "resuelta" ? "#059669" : "#ef4444" }}>{statusLabels[n.status] || n.status}</td>
+                              <td style={{ padding: "3.5px 6px", fontSize: 7.5 }}>{fmtDateShort(n.createdAt)}</td>
+                              <td style={{ padding: "3.5px 6px", fontWeight: 600, color: over ? "#ef4444" : sla != null ? "#059669" : "#9ca3af" }}>{sla != null ? `${sla}h` : over ? "⚠️" : "—"}</td>
+                              <td style={{ padding: "3.5px 6px", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.description?.substring(0, 45)}</td>
                             </tr>
                           );
                         })}
@@ -602,11 +659,11 @@ export default function Reports() {
                   ) : <div style={{ textAlign: "center", color: "#9ca3af", fontSize: 11, padding: 20 }}>Sin notas en este período</div>}
                 </div>
                 {slaSummary && Object.keys(slaSummary.catCounts).length > 0 && (
-                  <div style={{ padding: "12px 40px" }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "#065f46", marginBottom: 6 }}>📊 Por Categoría</div>
+                  <div style={{ padding: "10px 40px" }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#065f46", marginBottom: 6 }}>📊 Distribución por Categoría</div>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       {Object.entries(slaSummary.catCounts).sort((a, b) => b[1] - a[1]).map(([cat, count]) => (
-                        <div key={cat} style={{ background: "#f0fdf4", borderRadius: 6, padding: "5px 10px", border: "1px solid #bbf7d0", display: "flex", alignItems: "center", gap: 4 }}>
+                        <div key={cat} style={{ background: "#f0fdf4", borderRadius: 8, padding: "5px 10px", border: "1px solid #bbf7d0", display: "flex", alignItems: "center", gap: 4 }}>
                           <span style={{ fontSize: 14, fontWeight: 800, color: "#065f46" }}>{count}</span>
                           <span style={{ fontSize: 8, color: "#374151" }}>{catLabels[cat] || cat}</span>
                         </div>
@@ -614,7 +671,7 @@ export default function Reports() {
                     </div>
                   </div>
                 )}
-                <PageFooter now={now} page={4} total={4} />
+                <PDFFooter page={4} total={4} />
               </div>
             </>
           )}
@@ -624,40 +681,6 @@ export default function Reports() {
   );
 }
 
-// ── Reusable PDF sub-components ──
-function KpiBox({ label, value, color }: { label: string; value: string; color: string }) {
-  return (
-    <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", padding: "10px 12px", boxShadow: "0 1px 2px rgba(0,0,0,0.04)" }}>
-      <div style={{ fontSize: 8, color: "#6b7280", textTransform: "uppercase", marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 18, fontWeight: 800, color }}>{value}</div>
-    </div>
-  );
-}
-function WBox({ label, value, icon }: { label: string; value: string; icon: string }) {
-  return (
-    <div style={{ background: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe", padding: "8px", textAlign: "center" }}>
-      <div style={{ fontSize: 16 }}>{icon}</div>
-      <div style={{ fontSize: 14, fontWeight: 800, color: "#1e40af" }}>{value}</div>
-      <div style={{ fontSize: 8, color: "#6b7280" }}>{label}</div>
-    </div>
-  );
-}
-function PageHeader({ title, parcel, fromDate, toDate }: { title: string; parcel: string; fromDate: string; toDate: string }) {
-  return (
-    <div style={{ background: "linear-gradient(135deg, #10b981, #059669)", padding: "16px 40px", color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-      <span style={{ fontSize: 16, fontWeight: 700 }}>{title}</span>
-      <span style={{ fontSize: 10, opacity: 0.8 }}>{parcel} · {fmtDate(fromDate)} — {fmtDate(toDate)}</span>
-    </div>
-  );
-}
-function PageFooter({ now, page, total }: { now: string; page: number; total: number }) {
-  return (
-    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "10px 40px", background: "#f9fafb", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between" }}>
-      <span style={{ fontSize: 8, color: "#9ca3af" }}>AgraTec v2.0 · {now} · Confidencial</span>
-      <span style={{ fontSize: 8, color: "#9ca3af" }}>Página {page} de {total}</span>
-    </div>
-  );
-}
 function MiniKPI({ icon: Icon, label, value, color }: { icon: any; label: string; value: string; color: string }) {
   return (
     <div className="bg-white/50 rounded-xl border border-green-100/30 p-2.5">
