@@ -45,75 +45,114 @@ function useLogoBase64() {
 // ════════════════════════════════════════════════
 // jsPDF helpers
 // ════════════════════════════════════════════════
-const PW = 612; const PH = 792; const ML = 36; const MR = 36; const CW = PW-ML-MR;
+const PW = 612; const PH = 792; const ML = 40; const MR = 40; const CW = PW-ML-MR;
+const R = 6; // global corner radius
 
 function pdfHeader(pdf: jsPDF, title: string, subtitle: string, period: string, logo: string|null) {
-  pdf.setFillColor(6,95,70); pdf.rect(0,0,PW,58,"F");
-  pdf.setFillColor(16,185,129); pdf.rect(0,56,PW,3,"F");
-  if (logo) { try { pdf.addImage(logo,"PNG",ML,10,34,34); } catch {} }
-  const lx = ML+(logo?40:0);
-  pdf.setFont("helvetica","bold"); pdf.setFontSize(16); pdf.setTextColor(255,255,255);
-  pdf.text("AGRA TEC-TI", lx, 26);
-  pdf.setFontSize(7); pdf.setFont("helvetica","normal"); pdf.setTextColor(167,243,208);
-  pdf.text(safe(subtitle.toUpperCase()), lx, 36);
-  pdf.setFont("helvetica","bold"); pdf.setFontSize(10); pdf.setTextColor(255,255,255);
-  pdf.text(safe(title), PW-MR, 22, {align:"right"});
+  // Main header background
+  pdf.setFillColor(6,95,70); pdf.rect(0,0,PW,64,"F");
+  // Accent stripe
+  pdf.setFillColor(16,185,129); pdf.rect(0,62,PW,3,"F");
+  // Decorative circle (top-right)
+  pdf.setFillColor(16,185,129); pdf.circle(PW - 30, 30, 40, "F");
+  pdf.setFillColor(6,95,70); pdf.circle(PW - 30, 30, 36, "F");
+  // Logo
+  if (logo) { try { pdf.addImage(logo,"PNG",ML,12,38,38); } catch {} }
+  const lx = ML+(logo?46:0);
+  // Brand
+  pdf.setFont("helvetica","bold"); pdf.setFontSize(18); pdf.setTextColor(255,255,255);
+  pdf.text("AGRA TEC-TI", lx, 30);
   pdf.setFontSize(7.5); pdf.setFont("helvetica","normal"); pdf.setTextColor(167,243,208);
-  pdf.text(safe(period), PW-MR, 34, {align:"right"});
+  pdf.text(safe(subtitle.toUpperCase()), lx, 42);
+  // Right side info
+  pdf.setFont("helvetica","bold"); pdf.setFontSize(10); pdf.setTextColor(255,255,255);
+  pdf.text(safe(title), PW-MR-50, 26, {align:"right"});
+  pdf.setFontSize(7.5); pdf.setFont("helvetica","normal"); pdf.setTextColor(167,243,208);
+  pdf.text(safe(period), PW-MR-50, 38, {align:"right"});
+  // Type badge
+  const badgeW = 65;
+  pdf.setFillColor(16,185,129); pdf.roundedRect(PW-MR-50-badgeW/2-2, 44, badgeW, 12, 3, 3, "F");
+  pdf.setFontSize(6); pdf.setFont("helvetica","bold"); pdf.setTextColor(255,255,255);
+  pdf.text("REPORTE SEMANAL", PW-MR-50, 52, {align:"center"});
 }
 
 function pdfSubHeader(pdf: jsPDF, title: string, info: string, logo: string|null) {
-  pdf.setFillColor(6,95,70); pdf.rect(0,0,PW,34,"F");
-  pdf.setFillColor(16,185,129); pdf.rect(0,33,PW,2,"F");
-  if (logo) { try { pdf.addImage(logo,"PNG",ML,5,22,22); } catch {} }
-  pdf.setFont("helvetica","bold"); pdf.setFontSize(12); pdf.setTextColor(255,255,255);
-  pdf.text(safe(title), ML+(logo?28:0), 22);
+  pdf.setFillColor(6,95,70); pdf.rect(0,0,PW,38,"F");
+  pdf.setFillColor(16,185,129); pdf.rect(0,36,PW,3,"F");
+  if (logo) { try { pdf.addImage(logo,"PNG",ML,7,22,22); } catch {} }
+  pdf.setFont("helvetica","bold"); pdf.setFontSize(13); pdf.setTextColor(255,255,255);
+  pdf.text(safe(title), ML+(logo?30:0), 24);
   pdf.setFont("helvetica","normal"); pdf.setFontSize(7); pdf.setTextColor(167,243,208);
-  pdf.text(safe(info), PW-MR, 20, {align:"right"});
+  pdf.text(safe(info), PW-MR, 22, {align:"right"});
 }
 
 function pdfFooter(pdf: jsPDF, page: number, total: number, dateStr: string, logo: string|null) {
-  const y = PH-16;
-  pdf.setDrawColor(209,250,229); pdf.setLineWidth(0.5); pdf.line(ML,y-4,PW-MR,y-4);
-  if (logo) { try { pdf.addImage(logo,"PNG",ML,y-3,9,9); } catch {} }
-  pdf.setFontSize(5.5); pdf.setFont("helvetica","normal"); pdf.setTextColor(156,163,175);
-  pdf.text(`AGRA TEC-TI  |  ${safe(dateStr)}  |  Confidencial`, ML+13, y+3);
-  pdf.text(`Pagina ${page} de ${total}`, PW-MR, y+3, {align:"right"});
+  const y = PH-20;
+  // Footer background bar
+  pdf.setFillColor(245,252,248); pdf.rect(0,y-6,PW,26,"F");
+  pdf.setFillColor(16,185,129); pdf.rect(0,y-6,PW,1,"F");
+  if (logo) { try { pdf.addImage(logo,"PNG",ML,y-1,10,10); } catch {} }
+  pdf.setFontSize(6); pdf.setFont("helvetica","normal"); pdf.setTextColor(107,114,128);
+  pdf.text(`AGRA TEC-TI  |  ${safe(dateStr)}  |  Confidencial`, ML+14, y+6);
+  // Page number pill
+  const pageText = `${page} / ${total}`;
+  const ptw = pdf.getTextWidth(pageText) + 10;
+  pdf.setFillColor(6,95,70); pdf.roundedRect(PW-MR-ptw, y-1, ptw, 12, 3, 3, "F");
+  pdf.setFontSize(6); pdf.setFont("helvetica","bold"); pdf.setTextColor(255,255,255);
+  pdf.text(pageText, PW-MR-ptw/2, y+7, {align:"center"});
 }
 
 function pdfKpi(pdf: jsPDF, x: number, y: number, w: number, label: string, value: string, r: number, g: number, b: number) {
-  pdf.setFillColor(255,255,255); pdf.roundedRect(x,y,w,38,3,3,"F");
-  pdf.setDrawColor(229,231,235); pdf.roundedRect(x,y,w,38,3,3,"S");
-  pdf.setFillColor(r,g,b); pdf.rect(x,y+4,3,30,"F");
+  // Shadow simulation
+  pdf.setFillColor(230,230,230); pdf.roundedRect(x+1,y+1,w,40,R,R,"F");
+  // Card
+  pdf.setFillColor(255,255,255); pdf.roundedRect(x,y,w,40,R,R,"F");
+  pdf.setDrawColor(240,240,240); pdf.roundedRect(x,y,w,40,R,R,"S");
+  // Top colored bar
+  pdf.setFillColor(r,g,b); pdf.roundedRect(x,y,w,4,R,R,"F");
+  pdf.setFillColor(255,255,255); pdf.rect(x,y+3,w,2,"F"); // flatten bottom of bar
+  // Label
   pdf.setFontSize(6.5); pdf.setFont("helvetica","normal"); pdf.setTextColor(107,114,128);
-  pdf.text(safe(label.toUpperCase()), x+10, y+13);
-  pdf.setFontSize(15); pdf.setFont("helvetica","bold"); pdf.setTextColor(r,g,b);
-  pdf.text(safe(value), x+10, y+30);
+  pdf.text(safe(label.toUpperCase()), x+8, y+17);
+  // Value
+  pdf.setFontSize(16); pdf.setFont("helvetica","bold"); pdf.setTextColor(r,g,b);
+  pdf.text(safe(value), x+8, y+33);
 }
 
 function pdfSection(pdf: jsPDF, x: number, y: number, title: string) {
-  pdf.setFillColor(6,95,70); pdf.roundedRect(x,y,4,12,1,1,"F");
-  pdf.setFontSize(9); pdf.setFont("helvetica","bold"); pdf.setTextColor(6,95,70);
-  pdf.text(safe(title), x+8, y+9);
+  // Pill-style section header
+  const tw = pdf.getTextWidth(safe(title)) * 1.2 + 16;
+  pdf.setFillColor(240,253,244); pdf.roundedRect(x,y,Math.max(tw, 80),16,4,4,"F");
+  pdf.setDrawColor(187,247,208); pdf.roundedRect(x,y,Math.max(tw, 80),16,4,4,"S");
+  pdf.setFillColor(6,95,70); pdf.roundedRect(x+3,y+4,3,8,1,1,"F");
+  pdf.setFontSize(8); pdf.setFont("helvetica","bold"); pdf.setTextColor(6,95,70);
+  pdf.text(safe(title), x+10, y+11);
 }
 
 function pdfTable(pdf: jsPDF, x: number, y: number, headers: string[], rows: string[][], widths: number[], rowColors?: ([number,number,number]|null)[]): number {
-  const rh=13; const hh=15; const tw=widths.reduce((a,b)=>a+b,0);
-  pdf.setFillColor(6,95,70); pdf.rect(x,y,tw,hh,"F");
-  pdf.setFontSize(7); pdf.setFont("helvetica","bold"); pdf.setTextColor(255,255,255);
-  let cx=x; headers.forEach((h,i)=>{pdf.text(safe(h),cx+4,y+10);cx+=widths[i];});
+  const rh=14; const hh=16; const tw=widths.reduce((a,b)=>a+b,0);
+  const totalH = hh + rows.length * rh;
+  // Outer container with rounded corners
+  pdf.setFillColor(255,255,255); pdf.roundedRect(x-1,y-1,tw+2,totalH+2,R,R,"F");
+  pdf.setDrawColor(220,240,230); pdf.setLineWidth(0.5); pdf.roundedRect(x-1,y-1,tw+2,totalH+2,R,R,"S");
+  // Header with rounded top
+  pdf.setFillColor(6,95,70); pdf.roundedRect(x,y,tw,hh+4,R,R,"F");
+  pdf.setFillColor(6,95,70); pdf.rect(x,y+R,tw,hh-R+4,"F"); // flatten bottom
+  pdf.setFontSize(7.5); pdf.setFont("helvetica","bold"); pdf.setTextColor(255,255,255);
+  let cx=x; headers.forEach((h,i)=>{pdf.text(safe(h),cx+6,y+11);cx+=widths[i];});
   let cy=y+hh;
   rows.forEach((row,ri)=>{
     const rc=rowColors?.[ri];
     if(rc){pdf.setFillColor(rc[0],rc[1],rc[2]);pdf.rect(x,cy,tw,rh,"F");}
-    else if(ri%2===0){pdf.setFillColor(245,250,248);pdf.rect(x,cy,tw,rh,"F");}
-    pdf.setDrawColor(229,241,234);pdf.setLineWidth(0.3);pdf.line(x,cy+rh,x+tw,cy+rh);
+    else if(ri%2===0){pdf.setFillColor(248,252,250);pdf.rect(x,cy,tw,rh,"F");}
+    else{pdf.setFillColor(255,255,255);pdf.rect(x,cy,tw,rh,"F");}
+    pdf.setDrawColor(235,245,240);pdf.setLineWidth(0.3);pdf.line(x+4,cy+rh,x+tw-4,cy+rh);
     cx=x;
     row.forEach((cell,ci)=>{
-      pdf.setFontSize(7);pdf.setFont("helvetica",ci===0?"bold":"normal");
-      pdf.setTextColor(ci===0?6:55,ci===0?95:65,ci===0?70:81);
+      pdf.setFontSize(7.5);pdf.setFont("helvetica",ci===0?"bold":"normal");
+      pdf.setTextColor(ci===0?6:60,ci===0?95:70,ci===0?70:90);
       const t=cell.length>24?cell.substring(0,22)+"...":cell;
-      pdf.text(safe(t),cx+4,cy+9);cx+=widths[ci];
+      pdf.text(safe(t),cx+6,cy+10);cx+=widths[ci];
     });
     cy+=rh;
   });
@@ -121,28 +160,39 @@ function pdfTable(pdf: jsPDF, x: number, y: number, headers: string[], rows: str
 }
 
 function pdfTotalRow(pdf: jsPDF, x: number, y: number, cells: string[], widths: number[]): number {
-  const h=15; const tw=widths.reduce((a,b)=>a+b,0);
-  pdf.setFillColor(6,95,70); pdf.rect(x,y,tw,h,"F");
+  const h=16; const tw=widths.reduce((a,b)=>a+b,0);
+  // Rounded bottom
+  pdf.setFillColor(6,95,70); pdf.roundedRect(x,y-2,tw,h+2,R,R,"F");
+  pdf.setFillColor(6,95,70); pdf.rect(x,y-2,tw,R,"F"); // flatten top
   pdf.setFontSize(7.5); pdf.setFont("helvetica","bold"); pdf.setTextColor(255,255,255);
-  let cx=x; cells.forEach((c,i)=>{pdf.text(safe(c),cx+4,y+10);cx+=widths[i];});
+  let cx=x; cells.forEach((c,i)=>{pdf.text(safe(c),cx+6,y+10);cx+=widths[i];});
   return y+h;
 }
 
 function pdfAiBox(pdf: jsPDF, x: number, y: number, w: number, text: string, maxY: number = PH - 40): number {
   const clean = stripMd(text);
   pdf.setFontSize(7.5); pdf.setFont("helvetica","normal");
-  const lines = pdf.splitTextToSize(safe(clean), w-16);
-  const available = maxY - y - 22;
-  const maxLines = Math.min(lines.length, Math.floor(available / 9));
+  const lines = pdf.splitTextToSize(safe(clean), w-20);
+  const available = maxY - y - 30;
+  const maxLines = Math.min(lines.length, Math.floor(available / 9.5));
   if (maxLines < 2) return y;
-  const boxH = 22 + maxLines*9;
-  pdf.setFillColor(245,252,248); pdf.roundedRect(x,y,w,boxH,4,4,"F");
-  pdf.setDrawColor(187,247,208); pdf.setLineWidth(0.5); pdf.roundedRect(x,y,w,boxH,4,4,"S");
-  pdf.setFillColor(16,185,129); pdf.roundedRect(x,y+4,3,boxH-8,1,1,"F");
-  pdf.setFontSize(8); pdf.setFont("helvetica","bold"); pdf.setTextColor(6,95,70);
-  pdf.text("IA AGRA TEC-TI  |  Analisis Semanal", x+10, y+12);
+  const boxH = 30 + maxLines*9.5;
+  // Shadow
+  pdf.setFillColor(225,245,235); pdf.roundedRect(x+1,y+1,w,boxH,R,R,"F");
+  // Box
+  pdf.setFillColor(248,254,250); pdf.roundedRect(x,y,w,boxH,R,R,"F");
+  pdf.setDrawColor(187,247,208); pdf.setLineWidth(0.8); pdf.roundedRect(x,y,w,boxH,R,R,"S");
+  // Green accent bar on left
+  pdf.setFillColor(16,185,129); pdf.roundedRect(x+3,y+6,3,boxH-12,1,1,"F");
+  // Title bar
+  pdf.setFillColor(240,253,244); pdf.roundedRect(x+10,y+4,140,14,3,3,"F");
+  pdf.setFontSize(8.5); pdf.setFont("helvetica","bold"); pdf.setTextColor(6,95,70);
+  pdf.text("IA AGRA TEC-TI", x+16, y+13);
+  pdf.setFontSize(7); pdf.setFont("helvetica","normal"); pdf.setTextColor(107,140,120);
+  pdf.text("Analisis Semanal", x+80, y+13);
+  // Content
   pdf.setFontSize(7.5); pdf.setFont("helvetica","normal"); pdf.setTextColor(31,41,55);
-  pdf.text(lines.slice(0,maxLines), x+10, y+23);
+  pdf.text(lines.slice(0,maxLines), x+12, y+26);
   return y+boxH;
 }
 
@@ -252,23 +302,33 @@ export default function Reports() {
 
       // ── PAGE 1 ──
       pdfHeader(pdf, titleName, isGeneral?"Reporte General":"Reporte por Parcela", period, logoB64);
-      let y = 68;
-      const kw=(CW-18)/4;
-      [[`Cosecha Total`,`${weeklyHarvestTotal.toFixed(1)} kg`,5,150,105],[`1ra Calidad`,`${firstQPct}%`,4,120,87],[`Cajas`,`${weeklyBoxes}`,13,148,136],[isGeneral?`Parcelas`:`Dias Activos`,isGeneral?`${generalData?.totals?.parcelsCount||0}`:`${reportData?.dailyHarvest?.length||0}`,8,145,178]].forEach((k:any,i)=>pdfKpi(pdf,ML+i*(kw+6),y,kw,k[0],k[1],k[2],k[3],k[4]));
-      y+=48;
+      let y = 76;
+      const kw=(CW-24)/4;
+      [[`Cosecha Total`,`${weeklyHarvestTotal.toFixed(1)} kg`,5,150,105],[`1ra Calidad`,`${firstQPct}%`,4,120,87],[`Cajas`,`${weeklyBoxes}`,13,148,136],[isGeneral?`Parcelas`:`Dias Activos`,isGeneral?`${generalData?.totals?.parcelsCount||0}`:`${reportData?.dailyHarvest?.length||0}`,8,145,178]].forEach((k:any,i)=>pdfKpi(pdf,ML+i*(kw+8),y,kw,k[0],k[1],k[2],k[3],k[4]));
+      y+=54;
 
       if(isGeneral){
         const{active:withH,inactive:noH,risk:riskP}=generalParcels;
         if(riskP){
-          pdf.setFillColor(254,242,242);pdf.roundedRect(ML,y,CW,16,3,3,"F");
-          pdf.setDrawColor(252,165,165);pdf.roundedRect(ML,y,CW,16,3,3,"S");
-          pdf.setFillColor(239,68,68);pdf.roundedRect(ML,y+3,3,10,1,1,"F");
-          pdf.setFontSize(7);pdf.setFont("helvetica","bold");pdf.setTextColor(153,27,27);
-          pdf.text(safe(`MAYOR RIESGO: ${riskP.name} - NDVI ${(riskP.ndviLast||riskP.ndviAvg||0).toFixed(3)} | ${riskP.notesOpen} notas abiertas`),ML+10,y+11);
-          y+=20;
+          // Risk alert with shadow
+          pdf.setFillColor(250,230,230);pdf.roundedRect(ML+1,y+1,CW,20,R,R,"F"); // shadow
+          pdf.setFillColor(254,242,242);pdf.roundedRect(ML,y,CW,20,R,R,"F");
+          pdf.setDrawColor(252,165,165);pdf.setLineWidth(0.8);pdf.roundedRect(ML,y,CW,20,R,R,"S");
+          // Red accent bar
+          pdf.setFillColor(239,68,68);pdf.roundedRect(ML+3,y+4,3,12,1,1,"F");
+          // Alert icon circle
+          pdf.setFillColor(239,68,68);pdf.circle(ML+18,y+10,5,"F");
+          pdf.setFontSize(8);pdf.setFont("helvetica","bold");pdf.setTextColor(255,255,255);
+          pdf.text("!",ML+16.5,y+13);
+          // Text
+          pdf.setFontSize(7.5);pdf.setFont("helvetica","bold");pdf.setTextColor(153,27,27);
+          pdf.text(safe(`MAYOR RIESGO: ${riskP.name}`),ML+28,y+10);
+          pdf.setFontSize(7);pdf.setFont("helvetica","normal");pdf.setTextColor(185,28,28);
+          pdf.text(safe(`NDVI ${(riskP.ndviLast||riskP.ndviAvg||0).toFixed(3)} | ${riskP.notesOpen} notas abiertas`),ML+28,y+17);
+          y+=26;
         }
         if(withH.length>0){
-          pdfSection(pdf,ML,y,`Parcelas con Cosecha (${withH.length})`);y+=18;
+          pdfSection(pdf,ML,y,`Parcelas con Cosecha (${withH.length})`);y+=22;
           const gw=[CW*0.24,CW*0.11,CW*0.11,CW*0.10,CW*0.12,CW*0.14,CW*0.18];
           const gRows=withH.map((p:any)=>[p.name||p.code,`${p.weekTotal}`,`${p.weekFirstQ}`,`${p.weekBoxes}`,(p.ndviLast||p.ndviAvg)?(p.ndviLast||p.ndviAvg).toFixed(3):"-",p.ndviAvg?p.ndviAvg.toFixed(3):"-",`${p.notesCount} (${p.notesOpen})`]);
           const rc=withH.map((p:any)=>riskP&&p.id===riskP.id?[254,226,226] as [number,number,number]:[235,251,242] as [number,number,number]);
@@ -277,19 +337,23 @@ export default function Reports() {
           y+=8;
         }
         if(noH.length>0){
-          pdfSection(pdf,ML,y,`Sin Cosecha esta semana (${noH.length})`);y+=18;
+          pdfSection(pdf,ML,y,`Sin Cosecha esta semana (${noH.length})`);y+=22;
           const gw2=[CW*0.35,CW*0.18,CW*0.18,CW*0.29];
           const gRows2=noH.map((p:any)=>[p.name||p.code,(p.ndviLast||p.ndviAvg)?(p.ndviLast||p.ndviAvg).toFixed(3):"-",p.ndviAvg?p.ndviAvg.toFixed(3):"-",`${p.notesCount} (${p.notesOpen} abiertas)`]);
           y=pdfTable(pdf,ML,y,["Parcela","NDVI Ult.","NDVI Prom","Notas"],gRows2,gw2,noH.map(()=>[245,245,245] as [number,number,number]));
           y+=4;
         }
-        pdf.setFillColor(6,95,70);pdf.roundedRect(ML,y,CW,18,2,2,"F");
-        pdf.setFontSize(8);pdf.setFont("helvetica","bold");pdf.setTextColor(255,255,255);
-        pdf.text(safe(`TOTAL: ${generalData?.totals?.harvest} kg | ${generalData?.totals?.boxes} cajas | ${generalData?.totals?.notes} notas | ${generalData?.totals?.parcelsCount} parcelas`),ML+8,y+12);
-        y+=22;
+        // Total summary bar
+        pdf.setFillColor(4,80,58);pdf.roundedRect(ML+1,y+1,CW,22,R,R,"F"); // shadow
+        pdf.setFillColor(6,95,70);pdf.roundedRect(ML,y,CW,22,R,R,"F");
+        pdf.setFillColor(16,185,129);pdf.roundedRect(ML,y,CW,4,R,R,"F");
+        pdf.setFillColor(6,95,70);pdf.rect(ML,y+3,CW,3,"F"); // flatten
+        pdf.setFontSize(9);pdf.setFont("helvetica","bold");pdf.setTextColor(255,255,255);
+        pdf.text(safe(`TOTAL: ${generalData?.totals?.harvest} kg  |  ${generalData?.totals?.boxes} cajas  |  ${generalData?.totals?.notes} notas  |  ${generalData?.totals?.parcelsCount} parcelas`),ML+12,y+16);
+        y+=28;
       } else {
         const leftW=CW*0.54;const rightX=ML+leftW+12;const rightW=CW-leftW-12;
-        pdfSection(pdf,ML,y,"Cosecha Diaria");y+=18;
+        pdfSection(pdf,ML,y,"Cosecha Diaria");y+=22;
         const hw=[leftW*0.22,leftW*0.14,leftW*0.18,leftW*0.16,leftW*0.15,leftW*0.15];
         const hRows=(reportData?.dailyHarvest||[]).map((d:any)=>[fmtDateShort(d.date),`${d.totalBoxes}`,`${d.totalWeight}`,`${d.firstQualityWeight}`,`${d.secondQualityWeight}`,`${d.wasteWeight}`]);
         const tEnd=pdfTable(pdf,ML,y,["Fecha","Cajas","Total kg","1ra","2da","Desp."],hRows,hw);
