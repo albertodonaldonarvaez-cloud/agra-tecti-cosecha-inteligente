@@ -16,7 +16,7 @@ import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, 
   MapPin, AlertTriangle, Filter, ArrowUpDown, ArrowUp, ArrowDown,
   CheckSquare, Square, Edit3, Images, ZoomIn, ZoomOut, Archive, RotateCcw,
-  Wand2, PackageOpen
+  Wand2, PackageOpen, Scissors
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { toast } from "sonner";
@@ -138,6 +138,8 @@ export default function BoxEditor() {
   const [showBatchDialog, setShowBatchDialog] = useState(false);
   const [batchParcelCode, setBatchParcelCode] = useState("");
   const [batchParcelName, setBatchParcelName] = useState("");
+  const [showBatchHarvesterDialog, setShowBatchHarvesterDialog] = useState(false);
+  const [batchHarvesterId, setBatchHarvesterId] = useState("");
   
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<Partial<Box & { newParcelCode?: string; newParcelName?: string }>>({});
@@ -251,6 +253,19 @@ export default function BoxEditor() {
     },
     onError: (error) => {
       toast.error("Error al actualizar", { description: error.message });
+    },
+  });
+
+  const updateHarvesterBatch = trpc.boxes.updateHarvesterBatch.useMutation({
+    onSuccess: (data) => {
+      toast.success(`${data.updated} cajas actualizadas`);
+      setSelectedIds(new Set());
+      setShowBatchHarvesterDialog(false);
+      setBatchHarvesterId("");
+      refetch();
+    },
+    onError: (error) => {
+      toast.error("Error al actualizar cortadora", { description: error.message });
     },
   });
 
@@ -435,6 +450,14 @@ export default function BoxEditor() {
       parcelName: batchParcelName,
     });
   }, [selectedIds, batchParcelCode, batchParcelName, updateParcelBatch]);
+
+  const handleBatchHarvesterUpdate = useCallback(() => {
+    if (selectedIds.size === 0 || !batchHarvesterId) return;
+    updateHarvesterBatch.mutate({
+      boxIds: Array.from(selectedIds),
+      harvesterId: parseInt(batchHarvesterId),
+    });
+  }, [selectedIds, batchHarvesterId, updateHarvesterBatch]);
 
   const handleBatchDelete = useCallback(() => {
     if (selectedIds.size === 0) return;
@@ -811,6 +834,13 @@ export default function BoxEditor() {
                     >
                       <Edit3 className="h-4 w-4 mr-2" />
                       Cambiar Parcela
+                    </Button>
+                    <Button
+                      onClick={() => setShowBatchHarvesterDialog(true)}
+                      className="bg-emerald-600 hover:bg-emerald-700"
+                    >
+                      <Scissors className="h-4 w-4 mr-2" />
+                      Cambiar Cortadora
                     </Button>
                     <Button
                       onClick={() => {
@@ -1443,6 +1473,63 @@ export default function BoxEditor() {
               className="bg-blue-600 hover:bg-blue-700"
             >
               {updateParcelBatch.isPending ? "Actualizando..." : "Actualizar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de edición de cortadora por lotes */}
+      <Dialog open={showBatchHarvesterDialog} onOpenChange={setShowBatchHarvesterDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Scissors className="h-5 w-5 text-emerald-600" />
+              Cambiar Cortadora ({selectedIds.size} cajas)
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="py-4">
+            <label className="mb-2 block text-sm font-medium">Seleccionar nueva cortadora</label>
+            <Select value={batchHarvesterId} onValueChange={setBatchHarvesterId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Seleccionar cortadora..." />
+              </SelectTrigger>
+              <SelectContent>
+                {harvesters?.map(h => (
+                  <SelectItem key={h.number} value={String(h.number)}>
+                    {h.customName || `Cortadora ${h.number}`}
+                  </SelectItem>
+                ))}
+                {(!harvesters || harvesters.length === 0) && (
+                  <>
+                    {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+                      <SelectItem key={n} value={String(n)}>Cortadora {n}</SelectItem>
+                    ))}
+                    <SelectItem value="97">Recolecta</SelectItem>
+                    <SelectItem value="98">Segunda</SelectItem>
+                    <SelectItem value="99">Desperdicio</SelectItem>
+                  </>
+                )}
+              </SelectContent>
+            </Select>
+            
+            {batchHarvesterId && (
+              <p className="mt-2 text-sm text-gray-600">
+                Nueva cortadora: <strong>{harvesters?.find(h => h.number === parseInt(batchHarvesterId))?.customName || `Cortadora ${batchHarvesterId}`}</strong>
+              </p>
+            )}
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowBatchHarvesterDialog(false)}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleBatchHarvesterUpdate}
+              disabled={!batchHarvesterId || updateHarvesterBatch.isPending}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
+              {updateHarvesterBatch.isPending ? "Actualizando..." : "Actualizar"}
             </Button>
           </DialogFooter>
         </DialogContent>

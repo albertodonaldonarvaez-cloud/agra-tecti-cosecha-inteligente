@@ -1060,6 +1060,30 @@ IMPORTANTE:
         return { success: true, updated: input.boxIds.length };
       }),
 
+    // Actualizar cortadora en lote
+    updateHarvesterBatch: adminProcedure
+      .input(z.object({
+        boxIds: z.array(z.number()),
+        harvesterId: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const database = await getDb();
+        if (!database) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available" });
+        
+        const { inArray } = await import("drizzle-orm");
+        
+        await database.update(boxes)
+          .set({
+            harvesterId: input.harvesterId,
+            manuallyEdited: true,
+            editedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(inArray(boxes.id, input.boxIds));
+        
+        return { success: true, updated: input.boxIds.length };
+      }),
+
     // Eliminar cajas en lote
     deleteBatch: adminProcedure
       .input(z.object({
