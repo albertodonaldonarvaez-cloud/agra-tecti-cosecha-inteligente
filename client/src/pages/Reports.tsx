@@ -66,14 +66,14 @@ function getReportCss(): string {
     @page { size: letter; margin: 0; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: #f0fdf4; color: var(--text-dark); -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    .page { width: 8.5in; min-height: 11in; position: relative; overflow: hidden; padding: 0; margin: 0 auto; background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 30%, #f8fafc 100%); page-break-after: always; }
+    .page { width: 8.5in; min-height: 11in; position: relative; padding: 0; margin: 0 auto; background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 30%, #f8fafc 100%); page-break-after: always; page-break-inside: avoid; }
     .page:last-child { page-break-after: auto; }
     .glass-bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: hidden; }
     .blob { position: absolute; border-radius: 50%; filter: blur(60px); opacity: 0.5; }
     .blob-1 { width: 350px; height: 350px; top: -80px; right: -60px; background: radial-gradient(circle, rgba(16,185,129,0.25), transparent 70%); }
     .blob-2 { width: 300px; height: 300px; bottom: 40px; left: -80px; background: radial-gradient(circle, rgba(0,168,232,0.15), transparent 70%); }
     .blob-3 { width: 200px; height: 200px; top: 40%; left: 50%; background: radial-gradient(circle, rgba(6,78,59,0.1), transparent 70%); }
-    .main-content { position: relative; z-index: 1; padding: 28px 36px 60px 36px; }
+    .main-content { position: relative; z-index: 1; padding: 28px 36px 16px 36px; }
 
     /* Header */
     .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
@@ -214,13 +214,13 @@ function getReportCss(): string {
     .cat-pill .cp-label { font-size: 8px; color: var(--text-dark); }
 
     /* Footer */
-    .page-footer { position: absolute; bottom: 0; left: 0; right: 0; padding: 8px 36px; border-top: 1px solid rgba(16,185,129,0.15); display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.6); backdrop-filter: blur(8px); z-index: 2; }
+    .page-footer { position: relative; padding: 8px 36px; border-top: 1px solid rgba(16,185,129,0.15); display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.6); backdrop-filter: blur(8px); z-index: 2; margin-top: auto; }
     .footer-brand { font-size: 7.5px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
     .footer-brand img { height: 12px; width: 12px; border-radius: 3px; }
     .page-pill { background: var(--primary); color: white; border-radius: 10px; padding: 3px 10px; font-size: 7.5px; font-weight: 700; }
 
     /* Liquid line */
-    .liquid-line { position: absolute; bottom: 28px; left: 36px; right: 36px; height: 4px; background: linear-gradient(90deg, var(--primary-light), var(--accent), var(--primary-light)); border-radius: 4px; opacity: 0.3; z-index: 2; }
+    .liquid-line { position: relative; margin: 8px 36px; height: 4px; background: linear-gradient(90deg, var(--primary-light), var(--accent), var(--primary-light)); border-radius: 4px; opacity: 0.3; z-index: 2; }
 
     /* Sub-header for subsequent pages */
     .sub-header { background: linear-gradient(135deg, var(--primary), #065f46); padding: 10px 36px; display: flex; align-items: center; justify-content: space-between; }
