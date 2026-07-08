@@ -514,8 +514,6 @@ export default function Reports() {
         html += '</div>';
       }
 
-      // Summary bar
-      html += `<div class="summary-bar">${svgCheck()} TOTAL: ${generalData?.totals?.harvest} kg &nbsp;|&nbsp; ${generalData?.totals?.boxes} cajas &nbsp;|&nbsp; ${generalData?.totals?.notes} notas &nbsp;|&nbsp; ${generalData?.totals?.parcelsCount} parcelas</div>`;
 
     } else {
       // ── PER-PARCEL PAGE 1 ──
