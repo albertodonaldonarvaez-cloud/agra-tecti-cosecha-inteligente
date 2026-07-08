@@ -92,7 +92,7 @@ function getReportCss(): string {
     .date-banner svg { width: 16px; height: 16px; }
 
     /* Metric Cards */
-    .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 10px; margin-bottom: 14px; }
     .metric-card { background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 14px; padding: 12px 14px; position: relative; overflow: hidden; }
     .metric-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px; border-radius: 14px 14px 0 0; }
     .metric-card.green::before { background: linear-gradient(90deg, #10b981, #059669); }
@@ -445,6 +445,11 @@ export default function Reports() {
     html += buildMetricCard('Cajas', `${weeklyBoxes.toLocaleString('es-MX')}`, 'total periodo', 'cyan');
     if (isGeneral) {
       html += buildMetricCard('Parcelas', `${generalData?.totals?.parcelsCount || 0}`, 'activas', 'blue');
+      // Risk card inline
+      const riskPre = generalParcels.risk;
+      if (riskPre) {
+        html += buildMetricCard('Mayor Riesgo', safe(riskPre.name || riskPre.code), `NDVI ${(riskPre.ndviLast || riskPre.ndviAvg || 0).toFixed(3)}`, 'red');
+      }
     } else {
       html += buildMetricCard('Dias Activos', `${reportData?.dailyHarvest?.length || 0}`, 'con cosecha', 'blue');
     }
@@ -454,16 +459,6 @@ export default function Reports() {
       // ── GENERAL PAGE 1 ──
       const { active: withH, inactive: noH, risk: riskP } = generalParcels;
 
-      // Risk alert
-      if (riskP) {
-        html += `<div class="risk-alert">
-          <div class="risk-icon">${svgAlert()}</div>
-          <div class="risk-text">
-            <strong>MAYOR RIESGO: ${safe(riskP.name)}</strong>
-            <span>NDVI ${(riskP.ndviLast || riskP.ndviAvg || 0).toFixed(3)} | ${riskP.notesOpen} notas abiertas</span>
-          </div>
-        </div>`;
-      }
 
       // Active parcels table
       if (withH.length > 0) {
