@@ -152,6 +152,11 @@ function getReportCss(): string {
     .cl-rain { color: #0891b2; }
     .cl-days { color: #059669; }
 
+    /* Climate Vertical (for two-col layout) */
+    .climate-vertical { background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 10px; padding: 8px 12px; }
+    .climate-v-item { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(16,185,129,0.08); }
+    .climate-v-item:last-child { border-bottom: none; }
+
     /* AI Card */
     .ia-card { background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 12px; padding: 0; overflow: hidden; margin-bottom: 8px; }
     .ia-card-bar { height: 3px; background: linear-gradient(90deg, var(--primary-light), var(--primary)); }
@@ -459,7 +464,6 @@ export default function Reports() {
       // ── GENERAL PAGE 1 ──
       const { active: withH, inactive: noH, risk: riskP } = generalParcels;
 
-
       // Active parcels table
       if (withH.length > 0) {
         html += `<div class="section-title">${svgCheck()} Parcelas con Cosecha (${withH.length})</div>`;
@@ -488,27 +492,49 @@ export default function Reports() {
         html += '</tr></tfoot></table></div>';
       }
 
-      // Inactive parcels — NDVI bar chart
-      if (noH.length > 0) {
-        html += `<div class="section-title">Sin Cosecha esta semana (${noH.length}) - NDVI</div>`;
-        html += '<div class="ndvi-chart-container">';
-        // Sort by NDVI ascending so worst is on top
-        const sorted = [...noH].sort((a: any, b: any) => (a.ndviLast || a.ndviAvg || 0) - (b.ndviLast || b.ndviAvg || 0));
-        sorted.forEach((p: any) => {
-          const ndvi = p.ndviLast || p.ndviAvg;
-          const val = ndvi || 0;
-          const pct = Math.min(val * 100, 100);
-          const cls = ndviBadgeClass(val);
-          const color = val < 0.4 ? '#991b1b' : val <= 0.5 ? '#854d0e' : '#166534';
-          html += '<div class="ndvi-bar-row">';
-          html += `<span class="ndvi-bar-label">${safe(p.name || p.code)}</span>`;
-          html += `<div class="ndvi-bar-track"><div class="ndvi-bar-fill ${cls}" style="width:${pct}%"></div></div>`;
-          html += `<span class="ndvi-bar-val" style="color:${color}">${ndvi ? ndvi.toFixed(3) : 'N/A'}</span>`;
-          html += '</div>';
-        });
-        html += '</div>';
-      }
+      // ── Two-column: NDVI chart + Climate ──
+      const hasInactive = noH.length > 0;
+      const hasWeather = !!weatherSummary;
+      if (hasInactive || hasWeather) {
+        html += '<div class="two-col">';
 
+        // Left: NDVI bar chart
+        html += '<div>';
+        if (hasInactive) {
+          html += `<div class="section-title">Sin Cosecha (${noH.length}) - NDVI</div>`;
+          html += '<div class="ndvi-chart-container">';
+          const sorted = [...noH].sort((a: any, b: any) => (a.ndviLast || a.ndviAvg || 0) - (b.ndviLast || b.ndviAvg || 0));
+          sorted.forEach((p: any) => {
+            const ndvi = p.ndviLast || p.ndviAvg;
+            const val = ndvi || 0;
+            const pct = Math.min(val * 100, 100);
+            const cls = ndviBadgeClass(val);
+            const color = val < 0.4 ? '#991b1b' : val <= 0.5 ? '#854d0e' : '#166534';
+            html += '<div class="ndvi-bar-row">';
+            html += `<span class="ndvi-bar-label">${safe(p.name || p.code)}</span>`;
+            html += `<div class="ndvi-bar-track"><div class="ndvi-bar-fill ${cls}" style="width:${pct}%"></div></div>`;
+            html += `<span class="ndvi-bar-val" style="color:${color}">${ndvi ? ndvi.toFixed(3) : 'N/A'}</span>`;
+            html += '</div>';
+          });
+          html += '</div>';
+        }
+        html += '</div>';
+
+        // Right: Climate
+        html += '<div>';
+        if (hasWeather) {
+          html += `<div class="section-title">${svgThermo()} Clima del Periodo</div>`;
+          html += '<div class="climate-vertical">';
+          html += `<div class="climate-v-item"><span class="cl-label">TEMP MAX</span><span class="cl-value cl-temp-max">${weatherSummary.avgMax}°C</span></div>`;
+          html += `<div class="climate-v-item"><span class="cl-label">TEMP MIN</span><span class="cl-value cl-temp-min">${weatherSummary.avgMin}°C</span></div>`;
+          html += `<div class="climate-v-item"><span class="cl-label">LLUVIA</span><span class="cl-value cl-rain">${weatherSummary.totalRain} mm</span></div>`;
+          html += `<div class="climate-v-item"><span class="cl-label">DIAS</span><span class="cl-value cl-days">${weatherSummary.days}</span></div>`;
+          html += '</div>';
+        }
+        html += '</div>';
+
+        html += '</div>'; // close two-col
+      }
 
     } else {
       // ── PER-PARCEL PAGE 1 ──
@@ -546,15 +572,20 @@ export default function Reports() {
       html += `<div class="note-kpi"><div class="nk-val" style="color:${(slaSummary?.open || 0) > 0 ? '#ef4444' : '#064e3b'}">${slaSummary?.open || 0}</div><div class="nk-label">Abiertas</div></div>`;
       html += '</div>';
       if (slaSummary?.avgSla) {
-        html += `<div style="font-size:8px;color:#374151;margin-bottom:8px">SLA promedio: ${slaSummary.avgSla}h</div>`;
+        html += `<div style="font-size:7px;color:#374151;margin-bottom:6px">SLA promedio: ${slaSummary.avgSla}h</div>`;
+      }
+
+      // Climate in per-parcel right column
+      if (weatherSummary) {
+        html += `<div class="section-title">${svgThermo()} Clima</div>`;
+        html += '<div class="climate-vertical">';
+        html += `<div class="climate-v-item"><span class="cl-label">MAX</span><span class="cl-value cl-temp-max">${weatherSummary.avgMax}°C</span></div>`;
+        html += `<div class="climate-v-item"><span class="cl-label">MIN</span><span class="cl-value cl-temp-min">${weatherSummary.avgMin}°C</span></div>`;
+        html += `<div class="climate-v-item"><span class="cl-label">LLUVIA</span><span class="cl-value cl-rain">${weatherSummary.totalRain}mm</span></div>`;
+        html += '</div>';
       }
 
       html += '</div></div>'; // close two-col
-    }
-
-    // Climate strip
-    if (weatherSummary) {
-      html += buildClimateStrip(weatherSummary);
     }
 
     // AI card — always show if available, for both compact and extended
