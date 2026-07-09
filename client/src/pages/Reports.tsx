@@ -66,14 +66,14 @@ function getReportCss(): string {
     @page { size: letter; margin: 0; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: #f0fdf4; color: var(--text-dark); -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    .page { width: 8.5in; min-height: 11in; position: relative; padding: 0; margin: 0 auto; background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 30%, #f8fafc 100%); page-break-after: always; page-break-inside: avoid; }
+    .page { width: 8.5in; min-height: 11in; position: relative; padding: 0; margin: 0 auto; background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 30%, #f8fafc 100%); page-break-after: always; page-break-inside: avoid; display: flex; flex-direction: column; }
     .page:last-child { page-break-after: auto; }
     .glass-bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: hidden; }
     .blob { position: absolute; border-radius: 50%; filter: blur(60px); opacity: 0.5; }
     .blob-1 { width: 350px; height: 350px; top: -80px; right: -60px; background: radial-gradient(circle, rgba(16,185,129,0.25), transparent 70%); }
     .blob-2 { width: 300px; height: 300px; bottom: 40px; left: -80px; background: radial-gradient(circle, rgba(0,168,232,0.15), transparent 70%); }
     .blob-3 { width: 200px; height: 200px; top: 40%; left: 50%; background: radial-gradient(circle, rgba(6,78,59,0.1), transparent 70%); }
-    .main-content { position: relative; z-index: 1; padding: 18px 28px 10px 28px; }
+    .main-content { position: relative; z-index: 1; padding: 18px 28px 10px 28px; flex: 1; }
 
     /* Header */
     .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
