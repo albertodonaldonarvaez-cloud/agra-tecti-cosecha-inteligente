@@ -31,8 +31,11 @@ export default function LabelPrinter() {
   const folioStart = lastFolio + 1;
   const folioEnd = folioStart + quantity - 1;
 
+  // Pad folio to 6 digits
+  const pad6 = (n: number) => String(n).padStart(6, '0');
+
   const previewRef = useRef<SVGSVGElement>(null);
-  const barcodeValue = harvesterNum ? `${harvesterNum}-${folioStart}` : "0-0";
+  const barcodeValue = harvesterNum ? `${harvesterNum}-${pad6(folioStart)}` : "0-000000";
 
   useEffect(() => {
     if (previewRef.current && harvesterNum) {
@@ -88,7 +91,8 @@ body { font-family: Arial, Helvetica, sans-serif; -webkit-print-color-adjust: ex
 <script>
 document.querySelectorAll('.barcode').forEach((svg, i) => {
   const folio = ${folioStart} + i;
-  JsBarcode(svg, "${harvesterNum}-" + folio, { format: "CODE128", width: 1.5, height: 25, fontSize: 11, margin: 0, marginTop: 0, marginBottom: 0, displayValue: true, textMargin: 2, font: "Arial", fontOptions: "bold" });
+  const folioStr = String(folio).padStart(6, '0');
+  JsBarcode(svg, "${harvesterNum}-" + folioStr, { format: "CODE128", width: 1.5, height: 25, fontSize: 11, margin: 0, marginTop: 0, marginBottom: 0, displayValue: true, textMargin: 2, font: "Arial", fontOptions: "bold" });
 });
 setTimeout(() => { window.print(); }, 300);
 <\/script></body></html>`;
@@ -150,12 +154,12 @@ setTimeout(() => { window.print(); }, 300);
       <div className="grid grid-cols-4 gap-3 mb-5">
         <GlassCard className="p-3 text-center">
           <Hash className="h-4 w-4 mx-auto text-emerald-500 mb-1" />
-          <p className="text-xl font-bold text-emerald-600 font-mono">{lastFolio.toLocaleString()}</p>
+          <p className="text-xl font-bold text-emerald-600 font-mono">{pad6(lastFolio)}</p>
           <p className="text-xs text-gray-500">Último Folio</p>
         </GlassCard>
         <GlassCard className="p-3 text-center">
           <ArrowRight className="h-4 w-4 mx-auto text-blue-500 mb-1" />
-          <p className="text-xl font-bold text-blue-600 font-mono">{folioStart.toLocaleString()}</p>
+          <p className="text-xl font-bold text-blue-600 font-mono">{pad6(folioStart)}</p>
           <p className="text-xs text-gray-500">Siguiente</p>
         </GlassCard>
         <GlassCard className="p-3 text-center">
@@ -170,10 +174,9 @@ setTimeout(() => { window.print(); }, 300);
         </GlassCard>
       </div>
 
-      {/* Main: Config + Preview side by side */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Config - 3 cols */}
-        <GlassCard className="p-5">
+
+      {/* Config */}
+      <GlassCard className="p-5 mb-5">
           <h2 className="text-base font-semibold mb-4 flex items-center gap-2">
             <Printer className="h-5 w-5 text-emerald-500" />
             Configuración
@@ -216,9 +219,9 @@ setTimeout(() => { window.print(); }, 300);
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Rango de Folios</label>
               <div className="flex items-center gap-2 h-9 px-3 rounded-md border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/30 text-sm">
-                <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">{folioStart.toLocaleString()}</span>
+                <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">{pad6(folioStart)}</span>
                 <ArrowRight className="h-3 w-3 text-gray-400" />
-                <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">{folioEnd.toLocaleString()}</span>
+                <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">{pad6(folioEnd)}</span>
                 <span className="text-gray-400 ml-auto text-xs">({quantity})</span>
               </div>
             </div>
@@ -237,7 +240,7 @@ setTimeout(() => { window.print(); }, 300);
         </GlassCard>
 
         {/* Preview */}
-        <GlassCard className="p-5">
+        <GlassCard className="p-5 mb-5">
           <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
             <Eye className="h-5 w-5 text-blue-500" />
             Vista Previa
@@ -285,12 +288,11 @@ setTimeout(() => { window.print(); }, 300);
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Rango:</span>
-                <span className="font-mono text-emerald-600">{folioStart.toLocaleString()} - {folioEnd.toLocaleString()}</span>
+                <span className="font-mono text-emerald-600">{pad6(folioStart)} - {pad6(folioEnd)}</span>
               </div>
             </div>
           )}
         </GlassCard>
-      </div>
 
       {/* History */}
       <GlassCard className="p-5">
@@ -320,8 +322,8 @@ setTimeout(() => { window.print(); }, 300);
                     <td className="py-2 px-3 text-gray-500">{h.printedAt ? format(new Date(h.printedAt), "dd MMM yy", { locale: es }) : "-"}</td>
                     <td className="py-2 px-3 font-medium">{getHarvesterLabel(h.harvesterNumber)}</td>
                     <td className="py-2 px-3 text-gray-500">{h.labelText}</td>
-                    <td className="py-2 px-3 text-right font-mono text-gray-700 dark:text-gray-300">{h.folioStart?.toLocaleString()}</td>
-                    <td className="py-2 px-3 text-right font-mono text-gray-700 dark:text-gray-300">{h.folioEnd?.toLocaleString()}</td>
+                    <td className="py-2 px-3 text-right font-mono text-gray-700 dark:text-gray-300">{pad6(h.folioStart || 0)}</td>
+                    <td className="py-2 px-3 text-right font-mono text-gray-700 dark:text-gray-300">{pad6(h.folioEnd || 0)}</td>
                     <td className="py-2 px-3 text-right font-bold text-emerald-600">{h.quantity?.toLocaleString()}</td>
                   </tr>
                 ))}
