@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import JsBarcode from "jsbarcode";
+import { APP_LOGO } from "../const";
 
 export default function LabelPrinter() {
   const harvestersQ = trpc.harvesters.list.useQuery();
@@ -101,15 +102,14 @@ setTimeout(() => { window.print(); }, 300);
   };
 
   return (
-    <div className="space-y-5 max-w-6xl mx-auto">
+    <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
+      <div className="container px-3 md:px-6">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="p-2.5 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/25">
-          <Tag className="h-6 w-6" />
-        </div>
+      <div className="mb-6 md:mb-8 flex items-center gap-3 md:gap-4">
+        <img src={APP_LOGO} alt="Agratec" className="h-12 w-12 md:h-16 md:w-16" />
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Impresión de Etiquetas</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Genera códigos de barras CODE128 para cajas · 38mm × 25mm</p>
+          <h1 className="text-2xl md:text-4xl font-bold text-green-900">Impresión de Etiquetas</h1>
+          <p className="text-xs md:text-base text-green-700">Genera códigos de barras CODE128 para cajas · 38mm × 25mm</p>
         </div>
       </div>
 
@@ -300,6 +300,7 @@ setTimeout(() => { window.print(); }, 300);
           </div>
         )}
       </GlassCard>
+      </div>{/* close container */}
     </div>
   );
 }
