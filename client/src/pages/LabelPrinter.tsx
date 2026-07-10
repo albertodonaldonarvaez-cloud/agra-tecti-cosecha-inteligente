@@ -18,7 +18,7 @@ import JsBarcode from "jsbarcode";
 
 export default function LabelPrinter() {
   // Data queries
-  const harvestersQ = trpc.getHarvesters.useQuery();
+  const harvestersQ = trpc.harvesters.list.useQuery();
   const lastFolioQ = trpc.getLastFolio.useQuery();
   const historyQ = trpc.labelHistory.useQuery();
   const printMut = trpc.printLabels.useMutation();
