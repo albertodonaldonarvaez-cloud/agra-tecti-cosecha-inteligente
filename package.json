@@ -65,6 +65,7 @@
     "html2canvas": "^1.4.1",
     "input-otp": "^1.4.2",
     "jose": "6.1.0",
+    "jsbarcode": "^3.12.3",
     "jsonwebtoken": "^9.0.2",
     "jspdf": "^3.0.4",
     "lucide-react": "^0.453.0",

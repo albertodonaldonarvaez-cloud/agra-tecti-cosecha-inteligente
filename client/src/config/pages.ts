@@ -28,6 +28,7 @@ import {
   Warehouse as WarehouseIcon,
   ClipboardList,
   FileText,
+  Tag,
   UsersRound,
   type LucideIcon
 } from "lucide-react";
@@ -238,6 +239,18 @@ export const PAGES_CONFIG: PageConfig[] = [
     adminOnly: false,
     defaultValue: true,
     order: 15,
+    showInNav: true,
+  },
+  {
+    permissionKey: "canViewLabels",
+    path: "/labels",
+    icon: Tag,
+    label: "Etiquetas",
+    fullName: "Impresión de Etiquetas",
+    description: "Generar e imprimir etiquetas con código de barras para cajas",
+    adminOnly: true,
+    defaultValue: false,
+    order: 15.5,
     showInNav: true,
   },
   {

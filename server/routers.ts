@@ -7,7 +7,7 @@ import * as db from "./db";
 import * as dbExt from "./db_extended";
 import * as webodm from "./webodmService";
 import { getDb } from "./db";
-import { users, boxes, harvesters, parcels, parcelDetails, parcelAiAnalysis, crops, cropVarieties, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos, telegramLinkCodes, collaborators, collaboratorLinkCodes, fieldActivityAssignments } from "../drizzle/schema";
+import { users, boxes, harvesters, parcels, parcelDetails, parcelAiAnalysis, crops, cropVarieties, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos, telegramLinkCodes, collaborators, collaboratorLinkCodes, fieldActivityAssignments, labelPrintHistory } from "../drizzle/schema";
 import { eq, desc, and, gte, lte, inArray, sql } from "drizzle-orm";
 
 export const appRouter = router({
@@ -4114,5 +4114,43 @@ Da un análisis ejecutivo de 5-6 líneas máximo: estado general de la operació
         } catch (e) { return { image: null }; }
       }),
   }),
+
+  // ══════ LABELS ══════
+  getLastFolio: protectedProcedure
+    .query(async () => {
+      const drizzle = await getDb();
+      if (!drizzle) return { lastFolio: 0 };
+      const [last] = await drizzle.select({ folioEnd: labelPrintHistory.folioEnd }).from(labelPrintHistory).orderBy(desc(labelPrintHistory.folioEnd)).limit(1);
+      return { lastFolio: last?.folioEnd || 0 };
+    }),
+
+  printLabels: protectedProcedure
+    .input(z.object({
+      harvesterNumber: z.number(),
+      labelText: z.string(),
+      folioStart: z.number(),
+      folioEnd: z.number(),
+      quantity: z.number(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const drizzle = await getDb();
+      if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available" });
+      await drizzle.insert(labelPrintHistory).values({
+        harvesterNumber: input.harvesterNumber,
+        labelText: input.labelText,
+        folioStart: input.folioStart,
+        folioEnd: input.folioEnd,
+        quantity: input.quantity,
+        printedBy: (ctx as any).user?.id || null,
+      });
+      return { success: true };
+    }),
+
+  labelHistory: protectedProcedure
+    .query(async () => {
+      const drizzle = await getDb();
+      if (!drizzle) return [];
+      return await drizzle.select().from(labelPrintHistory).orderBy(desc(labelPrintHistory.printedAt)).limit(50);
+    }),
 });
 export type AppRouter = typeof appRouter;

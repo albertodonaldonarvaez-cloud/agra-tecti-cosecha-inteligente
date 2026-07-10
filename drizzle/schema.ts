@@ -29,6 +29,7 @@ export const users = mysqlTable("users", {
   canViewFieldNotebook: boolean("canViewFieldNotebook").default(true).notNull(),
   canViewWarehouse: boolean("canViewWarehouse").default(true).notNull(),
   canViewCollaborators: boolean("canViewCollaborators").default(false).notNull(),
+  canViewLabels: boolean("canViewLabels").default(false).notNull(),
   // Campos de personalización de perfil
   avatarColor: varchar("avatarColor", { length: 32 }).default("#16a34a"),
   avatarEmoji: varchar("avatarEmoji", { length: 16 }).default("🌿"),
@@ -647,3 +648,19 @@ export const fieldActivityAssignments = mysqlTable("fieldActivityAssignments", {
 });
 export type FieldActivityAssignment = typeof fieldActivityAssignments.$inferSelect;
 export type InsertFieldActivityAssignment = typeof fieldActivityAssignments.$inferInsert;
+
+// ══════════════════════════════════════
+// LABEL PRINT HISTORY
+// ══════════════════════════════════════
+export const labelPrintHistory = mysqlTable("labelPrintHistory", {
+  id: int("id").autoincrement().primaryKey(),
+  harvesterNumber: int("harvesterNumber").notNull(),
+  labelText: varchar("labelText", { length: 255 }).notNull(),
+  folioStart: int("folioStart").notNull(),
+  folioEnd: int("folioEnd").notNull(),
+  quantity: int("quantity").notNull(),
+  printedAt: timestamp("printedAt").defaultNow().notNull(),
+  printedBy: int("printedBy"),
+});
+export type LabelPrintHistory = typeof labelPrintHistory.$inferSelect;
+export type InsertLabelPrintHistory = typeof labelPrintHistory.$inferInsert;
