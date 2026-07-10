@@ -66,7 +66,7 @@ function getReportCss(): string {
     @page { size: letter; margin: 0; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: #f0fdf4; color: var(--text-dark); -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    .page { width: 8.5in; min-height: 11in; position: relative; padding: 0; margin: 0 auto; background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 30%, #f8fafc 100%); page-break-after: always; page-break-inside: avoid; display: flex; flex-direction: column; }
+    .page { width: 8.5in; min-height: 11in; position: relative; padding: 0; margin: 0 auto; background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 30%, #f8fafc 100%); page-break-after: always; display: flex; flex-direction: column; }
     .page:last-child { page-break-after: auto; }
     .glass-bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: hidden; }
     .blob { position: absolute; border-radius: 50%; filter: blur(60px); opacity: 0.5; }
@@ -164,7 +164,7 @@ function getReportCss(): string {
     .ia-card-header svg { width: 14px; height: 14px; color: var(--primary-light); }
     .ia-card-header .ia-title { font-size: 9px; font-weight: 700; color: var(--primary); }
     .ia-card-header .ia-sub { font-size: 7px; color: var(--text-muted); margin-left: 6px; }
-    .ia-card-body { padding: 4px 14px 10px 14px; font-size: 7.5px; line-height: 1.5; color: var(--text-dark); white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word; }
+    .ia-card-body { padding: 6px 14px 12px 14px; font-size: 8px; line-height: 1.55; color: var(--text-dark); white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word; }
 
     /* NDVI Bar Chart */
     .ndvi-chart-container { background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; }
