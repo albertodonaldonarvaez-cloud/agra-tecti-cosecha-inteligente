@@ -523,7 +523,7 @@ export default function Reports() {
         // Right: Climate
         html += '<div>';
         if (hasWeather) {
-          html += `<div class="section-title">${svgThermo()} Clima del Periodo</div>`;
+          html += `<div class="section-title">${svgThermH()} Clima del Periodo</div>`;
           html += '<div class="climate-vertical">';
           html += `<div class="climate-v-item"><span class="cl-label">TEMP MAX</span><span class="cl-value cl-temp-max">${weatherSummary.avgMax}°C</span></div>`;
           html += `<div class="climate-v-item"><span class="cl-label">TEMP MIN</span><span class="cl-value cl-temp-min">${weatherSummary.avgMin}°C</span></div>`;
@@ -577,7 +577,7 @@ export default function Reports() {
 
       // Climate in per-parcel right column
       if (weatherSummary) {
-        html += `<div class="section-title">${svgThermo()} Clima</div>`;
+        html += `<div class="section-title">${svgThermH()} Clima</div>`;
         html += '<div class="climate-vertical">';
         html += `<div class="climate-v-item"><span class="cl-label">MAX</span><span class="cl-value cl-temp-max">${weatherSummary.avgMax}°C</span></div>`;
         html += `<div class="climate-v-item"><span class="cl-label">MIN</span><span class="cl-value cl-temp-min">${weatherSummary.avgMin}°C</span></div>`;
