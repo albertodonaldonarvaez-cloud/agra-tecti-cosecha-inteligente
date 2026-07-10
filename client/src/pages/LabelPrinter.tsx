@@ -38,7 +38,7 @@ export default function LabelPrinter() {
     if (previewRef.current && harvesterNum) {
       try {
         JsBarcode(previewRef.current, barcodeValue, {
-          format: "CODE128", width: 1.8, height: 35, fontSize: 10,
+          format: "CODE128", width: 1.8, height: 25, fontSize: 11,
           margin: 2, displayValue: true, textMargin: 2,
         });
       } catch { /* invalid */ }
@@ -81,14 +81,14 @@ export default function LabelPrinter() {
 body { font-family: Arial, Helvetica, sans-serif; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 .label { width: 38mm; height: 25mm; display: flex; flex-direction: column; align-items: center; justify-content: center; page-break-after: always; padding: 1mm 1.5mm; overflow: hidden; }
 .label:last-child { page-break-after: auto; }
-.label-text { font-size: 8pt; font-weight: 700; text-align: center; margin-bottom: 1mm; letter-spacing: 0.5px; }
-.barcode { width: 34mm !important; height: auto !important; max-height: 16mm; }
+.label-text { font-size: 9pt; font-weight: 700; text-align: center; margin-bottom: 0.5mm; letter-spacing: 0.5px; }
+.barcode { width: 34mm !important; height: auto !important; max-height: 14mm; }
 @media screen { body { background: #f5f5f5; padding: 10px; } .label { background: white; border: 1px dashed #ccc; margin: 5px auto; box-shadow: 0 1px 3px rgba(0,0,0,0.1); } }
 </style></head><body>${labelsHtml}
 <script>
 document.querySelectorAll('.barcode').forEach((svg, i) => {
   const folio = ${folioStart} + i;
-  JsBarcode(svg, "${harvesterNum}-" + folio, { format: "CODE128", width: 1.5, height: 35, fontSize: 8, margin: 0, marginTop: 0, marginBottom: 0, displayValue: true, textMargin: 1, font: "Arial", fontOptions: "bold" });
+  JsBarcode(svg, "${harvesterNum}-" + folio, { format: "CODE128", width: 1.5, height: 25, fontSize: 11, margin: 0, marginTop: 0, marginBottom: 0, displayValue: true, textMargin: 2, font: "Arial", fontOptions: "bold" });
 });
 setTimeout(() => { window.print(); }, 300);
 <\/script></body></html>`;
@@ -147,33 +147,33 @@ setTimeout(() => { window.print(); }, 300);
       {activeTab === "cosecha" && (<>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <GlassCard className="p-4 text-center">
-          <Hash className="h-5 w-5 mx-auto text-emerald-500 mb-1" />
-          <p className="text-2xl font-bold text-emerald-600 font-mono">{lastFolio.toLocaleString()}</p>
+      <div className="grid grid-cols-4 gap-3 mb-5">
+        <GlassCard className="p-3 text-center">
+          <Hash className="h-4 w-4 mx-auto text-emerald-500 mb-1" />
+          <p className="text-xl font-bold text-emerald-600 font-mono">{lastFolio.toLocaleString()}</p>
           <p className="text-xs text-gray-500">Último Folio</p>
         </GlassCard>
-        <GlassCard className="p-4 text-center">
-          <ArrowRight className="h-5 w-5 mx-auto text-blue-500 mb-1" />
-          <p className="text-2xl font-bold text-blue-600 font-mono">{folioStart.toLocaleString()}</p>
+        <GlassCard className="p-3 text-center">
+          <ArrowRight className="h-4 w-4 mx-auto text-blue-500 mb-1" />
+          <p className="text-xl font-bold text-blue-600 font-mono">{folioStart.toLocaleString()}</p>
           <p className="text-xs text-gray-500">Siguiente</p>
         </GlassCard>
-        <GlassCard className="p-4 text-center">
-          <Package className="h-5 w-5 mx-auto text-purple-500 mb-1" />
-          <p className="text-2xl font-bold text-purple-600 font-mono">{totalPrinted.toLocaleString()}</p>
+        <GlassCard className="p-3 text-center">
+          <Package className="h-4 w-4 mx-auto text-purple-500 mb-1" />
+          <p className="text-xl font-bold text-purple-600 font-mono">{totalPrinted.toLocaleString()}</p>
           <p className="text-xs text-gray-500">Total Impresas</p>
         </GlassCard>
-        <GlassCard className="p-4 text-center">
-          <History className="h-5 w-5 mx-auto text-amber-500 mb-1" />
-          <p className="text-2xl font-bold text-amber-600">{(historyQ.data || []).length}</p>
-          <p className="text-xs text-gray-500">Lotes Registrados</p>
+        <GlassCard className="p-3 text-center">
+          <History className="h-4 w-4 mx-auto text-amber-500 mb-1" />
+          <p className="text-xl font-bold text-amber-600">{(historyQ.data || []).length}</p>
+          <p className="text-xs text-gray-500">Lotes</p>
         </GlassCard>
       </div>
 
-      {/* Main: Config + Preview */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
+      {/* Main: Config + Preview side by side */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Config - 3 cols */}
-        <GlassCard className="lg:col-span-3 p-5">
+        <GlassCard className="p-5">
           <h2 className="text-base font-semibold mb-4 flex items-center gap-2">
             <Printer className="h-5 w-5 text-emerald-500" />
             Configuración
@@ -236,8 +236,8 @@ setTimeout(() => { window.print(); }, 300);
           </div>
         </GlassCard>
 
-        {/* Preview - 2 cols */}
-        <GlassCard className="lg:col-span-2 p-5">
+        {/* Preview */}
+        <GlassCard className="p-5">
           <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
             <Eye className="h-5 w-5 text-blue-500" />
             Vista Previa
@@ -261,7 +261,7 @@ setTimeout(() => { window.print(); }, 300);
                 {labelText || "Cosecha SR 30"}
               </div>
               {harvesterNum ? (
-                <svg ref={previewRef} style={{ width: '34mm', maxHeight: '16mm' }}></svg>
+                <svg ref={previewRef} style={{ width: '34mm', maxHeight: '14mm' }}></svg>
               ) : (
                 <div style={{ fontSize: '7pt', color: '#999', textAlign: 'center' }}>Selecciona cortadora</div>
               )}

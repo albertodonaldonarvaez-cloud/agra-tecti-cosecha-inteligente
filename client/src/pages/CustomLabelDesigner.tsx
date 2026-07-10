@@ -111,7 +111,7 @@ export default function CustomLabelDesigner() {
   }, [elements]);
 
   // Scale: mm to pixels for preview (3.78 px/mm at 96dpi, but we use a multiplier for visibility)
-  const SCALE = 4; // 4px per mm for comfortable editing
+  const SCALE = 6; // 6px per mm for comfortable editing
   const previewW = labelW * SCALE;
   const previewH = labelH * SCALE;
 
