@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
 import { trpc } from "../lib/trpc";
 import { GlassCard } from "../components/GlassCard";
 import { Button } from "../components/ui/button";
@@ -6,12 +6,14 @@ import { Input } from "../components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "../components/ui/select";
-import { Tag, Printer, History, Eye, Hash, Package, ArrowRight } from "lucide-react";
+import { Tag, Printer, History, Eye, Hash, Package, ArrowRight, Palette } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import JsBarcode from "jsbarcode";
 import { APP_LOGO } from "../const";
+
+const CustomLabelDesigner = lazy(() => import("./CustomLabelDesigner"));
 
 export default function LabelPrinter() {
   const harvestersQ = trpc.harvesters.list.useQuery();
@@ -23,6 +25,7 @@ export default function LabelPrinter() {
   const [labelText, setLabelText] = useState("Cosecha SR 30");
   const [quantity, setQuantity] = useState(200);
   const [showHistory, setShowHistory] = useState(false);
+  const [activeTab, setActiveTab] = useState<"cosecha" | "personalizado">("cosecha");
 
   const lastFolio = lastFolioQ.data?.lastFolio || 0;
   const folioStart = lastFolio + 1;
@@ -109,9 +112,39 @@ setTimeout(() => { window.print(); }, 300);
         <img src={APP_LOGO} alt="Agratec" className="h-12 w-12 md:h-16 md:w-16" />
         <div>
           <h1 className="text-2xl md:text-4xl font-bold text-green-900">Impresión de Etiquetas</h1>
-          <p className="text-xs md:text-base text-green-700">Genera códigos de barras CODE128 para cajas · 38mm × 25mm</p>
+          <p className="text-xs md:text-base text-green-700">Etiquetas de cosecha con folios y etiquetas personalizadas</p>
         </div>
       </div>
+
+      {/* Tabs */}
+      <div className="mb-5 flex gap-2">
+        <Button
+          variant={activeTab === "cosecha" ? "default" : "outline"}
+          onClick={() => setActiveTab("cosecha")}
+          className={`gap-2 ${activeTab === "cosecha" ? "bg-green-600 hover:bg-green-700" : "border-green-300 text-green-700 hover:bg-green-50"}`}
+          size="sm"
+        >
+          <Tag className="h-4 w-4" /> Cosecha (Folios)
+        </Button>
+        <Button
+          variant={activeTab === "personalizado" ? "default" : "outline"}
+          onClick={() => setActiveTab("personalizado")}
+          className={`gap-2 ${activeTab === "personalizado" ? "bg-emerald-600 hover:bg-emerald-700" : "border-emerald-300 text-emerald-700 hover:bg-emerald-50"}`}
+          size="sm"
+        >
+          <Palette className="h-4 w-4" /> Personalizado
+        </Button>
+      </div>
+
+      {/* Tab: Personalizado */}
+      {activeTab === "personalizado" && (
+        <Suspense fallback={<div className="py-12 text-center text-gray-400">Cargando diseñador...</div>}>
+          <CustomLabelDesigner />
+        </Suspense>
+      )}
+
+      {/* Tab: Cosecha */}
+      {activeTab === "cosecha" && (<>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -300,6 +333,7 @@ setTimeout(() => { window.print(); }, 300);
           </div>
         )}
       </GlassCard>
+      </>)}{/* end cosecha tab */}
       </div>{/* close container */}
     </div>
   );
