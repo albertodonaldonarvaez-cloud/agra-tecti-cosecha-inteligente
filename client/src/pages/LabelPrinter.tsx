@@ -621,17 +621,31 @@ body { font-family: Arial, sans-serif; background: #000; }
 
 /** Build TSPL for parcel QR labels (76mm × 51mm landscape) */
 function buildParcelTspl(labelText: string, qty: number): string {
-  // Label: 76mm wide × 51mm tall (landscape)
-  // At 8 dots/mm: 608 wide × 408 tall
-  // Layout: text rotated 90° on left, large QR on right
-  const LABEL_H = 408;
-  const CHAR_W = 16; // font "4" char width becomes vertical height when rotated
-  const textH = labelText.length * CHAR_W;
-  const textY = Math.floor((LABEL_H + textH) / 2); // center text vertically
-  const qrCell = 14; // 25 modules × 14 = 350 dots
-  const qrSize = 25 * qrCell;
-  const qrX = 120 + Math.floor((488 - qrSize) / 2); // center in right portion
-  const qrY = Math.floor((LABEL_H - qrSize) / 2);   // center vertically
+  // 76mm × 51mm at 203 DPI (8 dots/mm) = 608 × 408 dots
+  // Layout: text rotated 90° left, large QR right (matching design)
+  // IMPORTANT: TSPL QRCODE cell width max = 10
+
+  const LH = 408; // label height in dots
+
+  // Text: font "4" (16×24), rotated 90°
+  // x-mul scales vertical size per char, y-mul scales horizontal thickness
+  const xMul = labelText.length <= 11 ? 2 : 1;
+  const yMul = 2;
+  const charV = 16 * xMul; // vertical dots per char when rotated
+  const textCol = 24 * yMul; // horizontal width of text column (48 dots = 6mm)
+  const textV = labelText.length * charV;
+  const textX = 15;
+  const textY = Math.min(LH - 10, Math.floor((LH + textV) / 2));
+
+  // QR: cell=10 (max allowed), ECC H forces larger version
+  // Version 1: 21 modules × 10 = 210 dots (~26mm)
+  // Version 2: 25 modules × 10 = 250 dots (~31mm)
+  const qrCell = 10;
+  const qrEst = 230; // average between v1 and v2
+  const qrStart = textX + textCol + 15; // after text column + gap
+  const qrArea = 608 - qrStart;
+  const qrX = qrStart + Math.floor((qrArea - qrEst) / 2);
+  const qrY = Math.max(10, Math.floor((LH - qrEst) / 2));
 
   let tspl = "";
   for (let i = 0; i < qty; i++) {
@@ -640,8 +654,8 @@ function buildParcelTspl(labelText: string, qty: number): string {
       "GAP 3 mm, 0 mm\r\n" +
       "DIRECTION 1\r\n" +
       "CLS\r\n" +
-      `TEXT 30,${textY},"4",90,1,1,"${labelText}"\r\n` +
-      `QRCODE ${qrX},${qrY},M,${qrCell},A,0,"${labelText}"\r\n` +
+      `TEXT ${textX},${textY},"4",90,${xMul},${yMul},"${labelText}"\r\n` +
+      `QRCODE ${qrX},${qrY},H,${qrCell},A,0,"${labelText}"\r\n` +
       "PRINT 1,1\r\n";
   }
   return tspl;
