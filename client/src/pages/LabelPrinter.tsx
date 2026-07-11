@@ -6,11 +6,12 @@ import { Input } from "../components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "../components/ui/select";
-import { Tag, Printer, History, Eye, Hash, Package, ArrowRight, Palette, Zap, Wifi, WifiOff } from "lucide-react";
+import { Tag, Printer, History, Eye, Hash, Package, ArrowRight, Palette, Zap, Wifi, WifiOff, MapPin, QrCode } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import JsBarcode from "jsbarcode";
+import QRCode from "qrcode";
 import { APP_LOGO } from "../const";
 
 const CustomLabelDesigner = lazy(() => import("./CustomLabelDesigner"));
@@ -25,9 +26,16 @@ export default function LabelPrinter() {
   const [labelText, setLabelText] = useState("Cosecha SR 30");
   const [quantity, setQuantity] = useState(200);
   const [showHistory, setShowHistory] = useState(false);
-  const [activeTab, setActiveTab] = useState<"cosecha" | "personalizado">("cosecha");
+  const [activeTab, setActiveTab] = useState<"cosecha" | "personalizado" | "parcelas">("cosecha");
   const [agentOnline, setAgentOnline] = useState(false);
   const [directPrinting, setDirectPrinting] = useState(false);
+
+  // Parcelas tab state
+  const parcelsQ = trpc.parcels.list.useQuery();
+  const [selectedParcel, setSelectedParcel] = useState<string>("");
+  const [parcelQty, setParcelQty] = useState(1);
+  const [parcelQrUrl, setParcelQrUrl] = useState<string>("");
+  const [parcelPrinting, setParcelPrinting] = useState(false);
 
   // Check print agent status
   useEffect(() => {
@@ -189,6 +197,14 @@ setTimeout(() => { window.print(); }, 300);
           size="sm"
         >
           <Palette className="h-4 w-4" /> Personalizado
+        </Button>
+        <Button
+          variant={activeTab === "parcelas" ? "default" : "outline"}
+          onClick={() => setActiveTab("parcelas")}
+          className={`gap-2 ${activeTab === "parcelas" ? "bg-amber-600 hover:bg-amber-700 text-white" : "border-amber-300 text-amber-700 hover:bg-amber-50"}`}
+          size="sm"
+        >
+          <MapPin className="h-4 w-4" /> Parcelas (QR)
         </Button>
       </div>
 
@@ -412,7 +428,205 @@ setTimeout(() => { window.print(); }, 300);
         )}
       </GlassCard>
       </>)}{/* end cosecha tab */}
+
+      {/* Tab: Parcelas (QR) */}
+      {activeTab === "parcelas" && (<ParcelLabels parcels={(parcelsQ.data || []) as any[]} agentOnline={agentOnline} />)}
       </div>{/* close container */}
     </div>
   );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ParcelLabels — Etiquetas de parcela con QR (76mm × 51mm)
+   ═══════════════════════════════════════════════════════════ */
+function ParcelLabels({ parcels, agentOnline }: { parcels: any[]; agentOnline: boolean }) {
+  const [selectedCode, setSelectedCode] = useState("");
+  const [qty, setQty] = useState(1);
+  const [qrUrl, setQrUrl] = useState("");
+  const [printing, setPrinting] = useState(false);
+
+  // Build QR label text from parcel
+  const selected = parcels.find((p: any) => p.code === selectedCode);
+  const labelText = selected ? `${selected.code} -${selected.name}` : "";
+
+  // Generate QR preview
+  useEffect(() => {
+    if (labelText) {
+      QRCode.toDataURL(labelText, { width: 200, margin: 1, errorCorrectionLevel: "M" })
+        .then(setQrUrl).catch(() => setQrUrl(""));
+    } else {
+      setQrUrl("");
+    }
+  }, [labelText]);
+
+  // Chrome print
+  const handleChromePrint = () => {
+    if (!labelText) return;
+    const pw = window.open("", "_blank", "width=600,height=400");
+    if (!pw) return;
+    QRCode.toDataURL(labelText, { width: 300, margin: 1, errorCorrectionLevel: "M" }).then(qrDataUrl => {
+      let labelsHtml = "";
+      for (let i = 0; i < qty; i++) {
+        labelsHtml += `<div class="label">
+          <div class="text-col"><span class="label-name">${labelText}</span></div>
+          <div class="qr-col"><img src="${qrDataUrl}" class="qr" /></div>
+        </div>`;
+      }
+      pw.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Parcelas</title>
+<style>
+@page { size: 76mm 51mm; margin: 0; }
+* { margin:0;padding:0;box-sizing:border-box; }
+body { font-family: Arial, sans-serif; background: #000; }
+.label { width:76mm; height:51mm; display:flex; align-items:center; background:#000; color:#fff; page-break-after:always; padding:3mm; overflow:hidden; }
+.label:last-child { page-break-after:auto; }
+.text-col { writing-mode:vertical-rl; text-orientation:mixed; transform:rotate(180deg); display:flex; align-items:center; justify-content:center; height:100%; padding-right:2mm; }
+.label-name { font-size:14pt; font-weight:900; letter-spacing:1px; white-space:nowrap; }
+.qr-col { flex:1; display:flex; align-items:center; justify-content:center; }
+.qr { width:42mm; height:42mm; }
+@media screen { body{background:#f5f5f5;padding:10px} .label{margin:5px auto;box-shadow:0 2px 8px rgba(0,0,0,.3)} }
+</style></head><body>${labelsHtml}</body></html>`);
+      pw.document.close();
+      setTimeout(() => pw.print(), 300);
+    });
+    toast.success(`${qty} etiqueta(s) de parcela enviadas (Chrome)`);
+  };
+
+  // Direct TSPL print
+  const handleDirectPrint = async () => {
+    if (!labelText) return;
+    setPrinting(true);
+    try {
+      const res = await fetch("http://127.0.0.1:9199/print", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "raw",
+          tspl: buildParcelTspl(labelText, qty),
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(`${qty} etiqueta(s) de parcela enviadas directo`);
+      } else {
+        toast.error(`Error: ${data.error}`);
+      }
+    } catch {
+      toast.error("No se pudo conectar al agente");
+    } finally {
+      setPrinting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <GlassCard className="p-5">
+        <h2 className="text-base font-semibold mb-4 flex items-center gap-2">
+          <MapPin className="h-5 w-5 text-amber-500" /> Etiquetas de Parcela (76mm × 51mm)
+        </h2>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Parcela</label>
+            <Select value={selectedCode} onValueChange={setSelectedCode}>
+              <SelectTrigger><SelectValue placeholder="Selecciona parcela..." /></SelectTrigger>
+              <SelectContent>
+                {parcels.map((p: any) => (
+                  <SelectItem key={p.id} value={p.code}>{p.code} - {p.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Cantidad</label>
+            <div className="flex gap-2">
+              <Input type="number" min={1} max={500} value={qty} onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))} className="flex-1" />
+              <Button variant="outline" size="sm" onClick={() => setQty(1)} className="text-xs px-2">1</Button>
+              <Button variant="outline" size="sm" onClick={() => setQty(5)} className="text-xs px-2">5</Button>
+              <Button variant="outline" size="sm" onClick={() => setQty(10)} className="text-xs px-2">10</Button>
+              <Button variant="outline" size="sm" onClick={() => setQty(20)} className="text-xs px-2">20</Button>
+            </div>
+          </div>
+        </div>
+
+        {/* QR data */}
+        {labelText && (
+          <div className="mt-3 flex items-center gap-2 h-9 px-3 rounded-md border border-amber-200 bg-amber-50 text-sm">
+            <QrCode className="h-4 w-4 text-amber-600" />
+            <span className="font-mono font-bold text-amber-700">{labelText}</span>
+            <span className="text-gray-400 ml-auto text-xs">Dato del QR</span>
+          </div>
+        )}
+
+        {/* Print buttons */}
+        <div className="mt-5 space-y-2">
+          <Button onClick={handleDirectPrint}
+            disabled={!selectedCode || !agentOnline || printing}
+            className="w-full bg-gradient-to-r from-amber-600 to-orange-700 hover:from-amber-700 hover:to-orange-800 text-white gap-2 h-11 text-base font-semibold shadow-lg shadow-amber-500/25">
+            <Zap className="h-5 w-5" />
+            {printing ? "Enviando..." : `Impresión Directa ${qty} Etiqueta(s)`}
+          </Button>
+          <div className={`flex items-center justify-center gap-2 text-xs py-1.5 rounded-md ${agentOnline ? 'text-green-600 bg-green-50' : 'text-red-500 bg-red-50'}`}>
+            {agentOnline ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+            {agentOnline ? 'Agente conectado' : (
+              <span>Agente no detectado — <a href="/AGRATEC_PrintAgent.exe" download className="underline font-semibold">Descargar .exe</a></span>
+            )}
+          </div>
+          <Button variant="outline" onClick={handleChromePrint} disabled={!selectedCode}
+            className="w-full gap-2 h-9 text-sm border-gray-300 text-gray-600">
+            <Printer className="h-4 w-4" /> Imprimir via Chrome
+          </Button>
+        </div>
+      </GlassCard>
+
+      {/* Preview */}
+      {labelText && (
+        <GlassCard className="p-5">
+          <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
+            <Eye className="h-5 w-5 text-blue-500" /> Vista Previa
+            <span className="text-xs text-gray-400 ml-auto">76mm × 51mm</span>
+          </h2>
+          <div className="flex justify-center">
+            <div style={{
+              width: '76mm', height: '51mm',
+              background: '#000', borderRadius: '4px',
+              display: 'flex', alignItems: 'center',
+              padding: '3mm', overflow: 'hidden',
+            }}>
+              <div style={{
+                writingMode: 'vertical-rl', textOrientation: 'mixed',
+                transform: 'rotate(180deg)', display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+                height: '100%', paddingRight: '2mm',
+              }}>
+                <span style={{ color: '#fff', fontSize: '12pt', fontWeight: 900, letterSpacing: '1px', whiteSpace: 'nowrap', fontFamily: 'Arial, sans-serif' }}>
+                  {labelText}
+                </span>
+              </div>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {qrUrl && <img src={qrUrl} alt="QR" style={{ width: '42mm', height: '42mm' }} />}
+              </div>
+            </div>
+          </div>
+        </GlassCard>
+      )}
+    </div>
+  );
+}
+
+/** Build TSPL for parcel QR labels (76mm × 51mm) */
+function buildParcelTspl(labelText: string, qty: number): string {
+  let tspl = "";
+  for (let i = 0; i < qty; i++) {
+    tspl +=
+      "SIZE 76 mm, 51 mm\r\n" +
+      "GAP 3 mm, 0 mm\r\n" +
+      "DIRECTION 1\r\n" +
+      "CLS\r\n" +
+      "REVERSE 0,0,608,408\r\n" +
+      `TEXT 40,50,"4",90,1,1,"${labelText}"\r\n` +
+      `QRCODE 170,30,M,7,A,0,"${labelText}"\r\n` +
+      "PRINT 1,1\r\n";
+  }
+  return tspl;
 }
