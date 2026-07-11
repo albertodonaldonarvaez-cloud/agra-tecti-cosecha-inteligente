@@ -293,10 +293,9 @@ setTimeout(() => { window.print(); }, 300);
               {agentOnline ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
               {agentOnline ? 'Agente conectado — Impresora-Etiquetas' : (
                 <span>Agente no detectado —{' '}
-                  <a href="/setup_print_agent.ps1" download className="underline font-semibold hover:text-red-700">
-                    Descargar instalador
+                  <a href="/AGRATEC_PrintAgent.exe" download className="underline font-semibold hover:text-red-700">
+                    Descargar agente (.exe)
                   </a>
-                  {' '}(clic derecho → Ejecutar con PowerShell)
                 </span>
               )}
             </div>
