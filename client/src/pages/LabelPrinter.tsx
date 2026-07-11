@@ -621,25 +621,14 @@ body { font-family: Arial, sans-serif; background: #000; }
 
 /** Build TSPL for parcel QR labels (76mm × 51mm landscape) */
 function buildParcelTspl(labelText: string, qty: number): string {
-  // 76mm × 51mm at 203 DPI (8 dots/mm) = 608 wide × 408 tall
-  // DIRECTION 1 flips X: x=0 = physical RIGHT, x=608 = physical LEFT
-  // Design: text rotated 90° on LEFT, large QR on RIGHT
-  // So: text → high X values, QR → low X values
+  // QR: EXACT position from the print that worked perfectly
+  const qrX = 228;
+  const qrY = 89;
 
-  const LW = 608;
-  const LH = 408;
-
-  // QR: cell=10 (TSPL max), centered in physical right half
-  const qrCell = 10;
-  const qrEst = 250; // ~25 modules × 10
-  const qrX = Math.floor((LW / 2 - qrEst) / 2); // center in right half (low X)
-  const qrY = Math.floor((LH - qrEst) / 2);
-
-  // Text: font "4" (16×24), rotation 90, on physical LEFT side (high X)
-  const charV = 16; // vertical dots per char (rotated)
-  const textV = labelText.length * charV;
-  const textX = LW - 30; // near physical left edge
-  const textY = Math.floor((LH + textV) / 2); // centered vertically
+  // Text: font "4" (16×24), rotation 90, on the left side (high X = physical left)
+  const textX = 578;
+  const textV = labelText.length * 16; // 16 dots per char vertically when rotated
+  const textY = Math.floor((408 - textV) / 2); // centered vertically
 
   let tspl = "";
   for (let i = 0; i < qty; i++) {
@@ -649,7 +638,7 @@ function buildParcelTspl(labelText: string, qty: number): string {
       "DIRECTION 1\r\n" +
       "CLS\r\n" +
       `TEXT ${textX},${textY},"4",90,1,1,"${labelText}"\r\n` +
-      `QRCODE ${qrX},${qrY},H,${qrCell},A,0,"${labelText}"\r\n` +
+      `QRCODE ${qrX},${qrY},H,10,A,0,"${labelText}"\r\n` +
       "PRINT 1,1\r\n";
   }
   return tspl;
