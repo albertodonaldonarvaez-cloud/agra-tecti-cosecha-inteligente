@@ -23,8 +23,8 @@ def build_tspl_label(text, barcode):
         "GAP 3 mm, 0 mm\r\n"
         "DIRECTION 1\r\n"
         "CLS\r\n"
-        f'TEXT 20,10,"4",0,1,1,"{text}"\r\n'
-        f'BARCODE 15,55,"128",80,1,0,2,4,"{barcode}"\r\n'
+        f'TEXT 65,10,"2",0,1,1,"{text}"\r\n'
+        f'BARCODE 45,50,"128",75,1,0,2,3,"{barcode}"\r\n'
         "PRINT 1,1\r\n"
     )
 
