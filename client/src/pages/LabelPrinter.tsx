@@ -291,7 +291,13 @@ setTimeout(() => { window.print(); }, 300);
             {/* Estado del agente */}
             <div className={`flex items-center justify-center gap-2 text-xs py-1.5 rounded-md ${agentOnline ? 'text-green-600 bg-green-50' : 'text-red-500 bg-red-50'}`}>
               {agentOnline ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
-              {agentOnline ? 'Agente conectado — Impresora-Etiquetas' : 'Agente desconectado — Inicia start_agent.bat'}
+              {agentOnline ? 'Agente conectado — Impresora-Etiquetas' : (
+                <span>Agente desconectado —{' '}
+                  <a href="/instalador_impresora.bat" download className="underline font-semibold hover:text-red-700">
+                    Descargar instalador
+                  </a>
+                </span>
+              )}
             </div>
 
             {/* Botón Chrome fallback */}
