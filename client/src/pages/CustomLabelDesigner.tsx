@@ -8,6 +8,7 @@ import {
 import {
   Type, QrCode, BarChart3, ImageIcon, Printer, Save, FolderOpen,
   Trash2, Plus, Copy, ChevronUp, ChevronDown, GripVertical, X,
+  Zap, Wifi, WifiOff,
 } from "lucide-react";
 import { toast } from "sonner";
 import JsBarcode from "jsbarcode";
@@ -79,6 +80,22 @@ export default function CustomLabelDesigner() {
 
   // Print
   const [printQty, setPrintQty] = useState(1);
+
+  // Agent status
+  const [agentOnline, setAgentOnline] = useState(false);
+  const [directPrinting, setDirectPrinting] = useState(false);
+
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const res = await fetch("http://127.0.0.1:9199/status", { signal: AbortSignal.timeout(2000) });
+        setAgentOnline(res.ok);
+      } catch { setAgentOnline(false); }
+    };
+    check();
+    const iv = setInterval(check, 10000);
+    return () => clearInterval(iv);
+  }, []);
 
   // QR data URLs cache
   const [qrCache, setQrCache] = useState<Record<string, string>>({});
@@ -255,7 +272,41 @@ body { font-family: Arial, sans-serif; -webkit-print-color-adjust: exact !import
 
     pw.document.write(html);
     pw.document.close();
-    toast.success(`${printQty} etiqueta(s) enviadas a impresión`);
+    toast.success(`${printQty} etiqueta(s) enviadas a impresión (Chrome)`);
+  };
+
+  // ── Direct TSPL print ──
+  const handleDirectPrint = async () => {
+    if (elements.length === 0) { toast.error("Agrega al menos un elemento"); return; }
+    setDirectPrinting(true);
+    try {
+      // Build TSPL for each label
+      const textEls = elements.filter(e => e.type === "text");
+      const barcodeEls = elements.filter(e => e.type === "barcode");
+      const mainText = textEls[0]?.content || "";
+      const mainBarcode = barcodeEls[0]?.content || mainText;
+
+      const labels = [];
+      for (let i = 0; i < printQty; i++) {
+        labels.push({ text: mainText, barcode: mainBarcode });
+      }
+
+      const res = await fetch("http://127.0.0.1:9199/print", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "custom", labels }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(`${printQty} etiqueta(s) enviadas directo a la impresora`);
+      } else {
+        toast.error(`Error: ${data.error || "Fallo"}`);
+      }
+    } catch {
+      toast.error("No se pudo conectar al agente. ¿Está corriendo?");
+    } finally {
+      setDirectPrinting(false);
+    }
   };
 
   // ── Render element in preview ──
@@ -576,11 +627,22 @@ body { font-family: Arial, sans-serif; -webkit-print-color-adjust: exact !import
               <div className="flex items-center gap-2">
                 <label className="text-xs text-gray-500">Cantidad:</label>
                 <Input type="number" min={1} max={5000} value={printQty} onChange={e => setPrintQty(Math.max(1, Number(e.target.value) || 1))} className="w-20 h-8 text-sm" />
-                <Button onClick={handlePrint} disabled={elements.length === 0}
-                  className="gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-lg">
-                  <Printer className="h-4 w-4" /> Imprimir {printQty > 1 ? `${printQty}x` : ""}
+                <Button onClick={handleDirectPrint} disabled={elements.length === 0 || !agentOnline || directPrinting}
+                  className="gap-1.5 bg-gradient-to-r from-green-600 to-emerald-700 hover:from-green-700 hover:to-emerald-800 text-white shadow-lg">
+                  <Zap className="h-4 w-4" /> {directPrinting ? "Enviando..." : "Directa"}
+                </Button>
+                <Button variant="outline" onClick={handlePrint} disabled={elements.length === 0}
+                  className="gap-1.5 text-gray-600 border-gray-300">
+                  <Printer className="h-4 w-4" /> Chrome
                 </Button>
               </div>
+            </div>
+            {/* Agent status */}
+            <div className={`flex items-center justify-center gap-2 text-xs py-1 rounded-md mb-2 ${agentOnline ? 'text-green-600 bg-green-50' : 'text-red-500 bg-red-50'}`}>
+              {agentOnline ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+              {agentOnline ? 'Agente conectado' : (
+                <span>Agente no detectado — <a href="/AGRATEC_PrintAgent.exe" download className="underline font-semibold">Descargar .exe</a></span>
+              )}
             </div>
 
             {/* Canvas */}
