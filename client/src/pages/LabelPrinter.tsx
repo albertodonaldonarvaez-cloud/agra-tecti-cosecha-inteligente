@@ -588,20 +588,26 @@ body { font-family: Arial, sans-serif; background: #000; }
         <GlassCard className="p-5">
           <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
             <Eye className="h-5 w-5 text-blue-500" /> Vista Previa
-            <span className="text-xs text-gray-400 ml-auto">51mm × 76mm</span>
+            <span className="text-xs text-gray-400 ml-auto">76mm × 51mm</span>
           </h2>
           <div className="flex justify-center">
             <div style={{
-              width: '51mm', height: '76mm',
+              width: '76mm', height: '51mm',
               background: '#fff', borderRadius: '4px',
               border: '2px solid #ccc',
-              display: 'flex', flexDirection: 'column',
-              alignItems: 'center', justifyContent: 'flex-start',
-              padding: '4mm 3mm', overflow: 'hidden',
+              display: 'flex', alignItems: 'center',
+              padding: '3mm', overflow: 'hidden',
             }}>
-              <span style={{ color: '#000', fontSize: '11pt', fontWeight: 900, letterSpacing: '0.5px', whiteSpace: 'nowrap', fontFamily: 'Arial, sans-serif', marginBottom: '3mm' }}>
-                {labelText}
-              </span>
+              <div style={{
+                writingMode: 'vertical-rl', textOrientation: 'mixed',
+                transform: 'rotate(180deg)', display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+                height: '100%', paddingRight: '3mm',
+              }}>
+                <span style={{ color: '#000', fontSize: '13pt', fontWeight: 900, letterSpacing: '1px', whiteSpace: 'nowrap', fontFamily: 'Arial, sans-serif' }}>
+                  {labelText}
+                </span>
+              </div>
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 {qrUrl && <img src={qrUrl} alt="QR" style={{ width: '42mm', height: '42mm' }} />}
               </div>
@@ -613,27 +619,29 @@ body { font-family: Arial, sans-serif; background: #000; }
   );
 }
 
-/** Build TSPL for parcel QR labels (76mm × 51mm) */
+/** Build TSPL for parcel QR labels (76mm × 51mm landscape) */
 function buildParcelTspl(labelText: string, qty: number): string {
-  // Label: 51mm wide × 76mm tall (portrait, roll is 51mm wide)
-  // At 8 dots/mm: 408 wide × 608 tall
-  const LABEL_W = 408;
-  const CHAR_W = 16; // font "4" = 16px wide per char
-  const textW = labelText.length * CHAR_W * 2; // x-mul = 2
-  const textX = Math.max(10, Math.floor((LABEL_W - textW) / 2));
-  const qrCell = 13; // 25 modules × 13 = 325 dots
-  const qrW = 25 * qrCell;
-  const qrX = Math.max(10, Math.floor((LABEL_W - qrW) / 2));
+  // Label: 76mm wide × 51mm tall (landscape)
+  // At 8 dots/mm: 608 wide × 408 tall
+  // Layout: text rotated 90° on left, large QR on right
+  const LABEL_H = 408;
+  const CHAR_W = 16; // font "4" char width becomes vertical height when rotated
+  const textH = labelText.length * CHAR_W;
+  const textY = Math.floor((LABEL_H + textH) / 2); // center text vertically
+  const qrCell = 14; // 25 modules × 14 = 350 dots
+  const qrSize = 25 * qrCell;
+  const qrX = 120 + Math.floor((488 - qrSize) / 2); // center in right portion
+  const qrY = Math.floor((LABEL_H - qrSize) / 2);   // center vertically
 
   let tspl = "";
   for (let i = 0; i < qty; i++) {
     tspl +=
-      "SIZE 51 mm, 76 mm\r\n" +
+      "SIZE 76 mm, 51 mm\r\n" +
       "GAP 3 mm, 0 mm\r\n" +
       "DIRECTION 1\r\n" +
       "CLS\r\n" +
-      `TEXT ${textX},30,"4",0,2,2,"${labelText}"\r\n` +
-      `QRCODE ${qrX},120,M,${qrCell},A,0,"${labelText}"\r\n` +
+      `TEXT 30,${textY},"4",90,1,1,"${labelText}"\r\n` +
+      `QRCODE ${qrX},${qrY},M,${qrCell},A,0,"${labelText}"\r\n` +
       "PRINT 1,1\r\n";
   }
   return tspl;
