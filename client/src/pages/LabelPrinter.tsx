@@ -47,11 +47,12 @@ export default function LabelPrinter() {
   const folioStart = lastFolio + 1;
   const folioEnd = folioStart + quantity - 1;
 
-  // Pad folio to 6 digits
+  // Pad folio to 6 digits, harvester to 2 digits
   const pad6 = (n: number) => String(n).padStart(6, '0');
+  const pad2 = (s: string) => s.padStart(2, '0');
 
   const previewRef = useRef<SVGSVGElement>(null);
-  const barcodeValue = harvesterNum ? `${harvesterNum}-${pad6(folioStart)}` : "0-000000";
+  const barcodeValue = harvesterNum ? `${pad2(harvesterNum)}-${pad6(folioStart)}` : "00-000000";
 
   useEffect(() => {
     if (previewRef.current && harvesterNum) {
@@ -108,7 +109,8 @@ body { font-family: Arial, Helvetica, sans-serif; -webkit-print-color-adjust: ex
 document.querySelectorAll('.barcode').forEach((svg, i) => {
   const folio = ${folioStart} + i;
   const folioStr = String(folio).padStart(6, '0');
-  JsBarcode(svg, "${harvesterNum}-" + folioStr, { format: "CODE128", width: 1.5, height: 25, fontSize: 11, margin: 0, marginTop: 0, marginBottom: 0, displayValue: true, textMargin: 2, font: "Arial", fontOptions: "bold" });
+  const hn = "${harvesterNum}".padStart(2, '0');
+  JsBarcode(svg, hn + "-" + folioStr, { format: "CODE128", width: 1.5, height: 25, fontSize: 11, margin: 0, marginTop: 0, marginBottom: 0, displayValue: true, textMargin: 2, font: "Arial", fontOptions: "bold" });
 });
 setTimeout(() => { window.print(); }, 300);
 <\/script></body></html>`;

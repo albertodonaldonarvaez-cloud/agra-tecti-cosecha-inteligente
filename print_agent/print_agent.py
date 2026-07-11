@@ -23,17 +23,18 @@ def build_tspl_label(text, barcode):
         "GAP 3 mm, 0 mm\r\n"
         "DIRECTION 1\r\n"
         "CLS\r\n"
-        f'TEXT 150,20,"3",0,1,1,"{text}"\r\n'
-        f'BARCODE 40,70,"128",80,1,0,2,4,"{barcode}"\r\n'
+        f'TEXT 20,10,"4",0,1,1,"{text}"\r\n'
+        f'BARCODE 15,55,"128",80,1,0,2,4,"{barcode}"\r\n'
         "PRINT 1,1\r\n"
     )
 
 def build_tspl_batch(text, harvester_num, folio_start, quantity):
+    hn = str(harvester_num).zfill(2)
     commands = ""
     for i in range(quantity):
         folio = folio_start + i
         folio_str = str(folio).zfill(6)
-        commands += build_tspl_label(text, f"{harvester_num}-{folio_str}")
+        commands += build_tspl_label(text, f"{hn}-{folio_str}")
     return commands
 
 def build_tspl_custom(labels):
