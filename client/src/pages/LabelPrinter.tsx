@@ -430,7 +430,7 @@ setTimeout(() => { window.print(); }, 300);
       </>)}{/* end cosecha tab */}
 
       {/* Tab: Parcelas (QR) */}
-      {activeTab === "parcelas" && (<ParcelLabels parcels={(parcelsQ.data || []) as any[]} agentOnline={agentOnline} />)}
+      {activeTab === "parcelas" && (<ParcelLabels parcels={(parcelsQ.data || []).filter((p: any) => p.polygon && p.polygon.length > 10) as any[]} agentOnline={agentOnline} />)}
       </div>{/* close container */}
     </div>
   );
@@ -447,7 +447,11 @@ function ParcelLabels({ parcels, agentOnline }: { parcels: any[]; agentOnline: b
 
   // Build QR label text from parcel
   const selected = parcels.find((p: any) => p.code === selectedCode);
-  const labelText = selected ? `${selected.code} -${selected.name}` : "";
+  const labelText = selected
+    ? (selected.code && /\d/.test(selected.code)
+        ? `${selected.code} -${selected.name}`
+        : `-${selected.name}`)
+    : "";
 
   // Generate QR preview
   useEffect(() => {

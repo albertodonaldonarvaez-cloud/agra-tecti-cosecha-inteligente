@@ -3713,7 +3713,7 @@ IMPORTANTE:
     // Obtener parcelas (para selector offline)
     getParcels: protectedProcedure.query(async () => {
       const drizzle = await getDb();
-      return drizzle.select({ id: parcels.id, code: parcels.code, name: parcels.name })
+      return drizzle.select({ id: parcels.id, code: parcels.code, name: parcels.name, polygon: parcels.polygon })
         .from(parcels)
         .where(eq(parcels.isActive, true))
         .orderBy(parcels.name);
