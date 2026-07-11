@@ -6,7 +6,7 @@ import { Input } from "../components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "../components/ui/select";
-import { Tag, Printer, History, Eye, Hash, Package, ArrowRight, Palette } from "lucide-react";
+import { Tag, Printer, History, Eye, Hash, Package, ArrowRight, Palette, Zap, Wifi, WifiOff } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -26,6 +26,22 @@ export default function LabelPrinter() {
   const [quantity, setQuantity] = useState(200);
   const [showHistory, setShowHistory] = useState(false);
   const [activeTab, setActiveTab] = useState<"cosecha" | "personalizado">("cosecha");
+  const [agentOnline, setAgentOnline] = useState(false);
+  const [directPrinting, setDirectPrinting] = useState(false);
+
+  // Check print agent status
+  useEffect(() => {
+    const checkAgent = async () => {
+      try {
+        const res = await fetch("http://127.0.0.1:9199/status", { signal: AbortSignal.timeout(2000) });
+        if (res.ok) setAgentOnline(true);
+        else setAgentOnline(false);
+      } catch { setAgentOnline(false); }
+    };
+    checkAgent();
+    const interval = setInterval(checkAgent, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   const lastFolio = lastFolioQ.data?.lastFolio || 0;
   const folioStart = lastFolio + 1;
@@ -106,6 +122,40 @@ setTimeout(() => { window.print(); }, 300);
       historyQ.refetch();
       toast.success(`${quantity} etiqueta(s) enviadas a impresión`);
     } catch { toast.error("Error guardando historial"); }
+  };
+
+  // ── Impresión DIRECTA via agente TSPL ──
+  const handleDirectPrint = async () => {
+    if (!harvesterNum) { toast.error("Selecciona una cortadora"); return; }
+    if (quantity < 1) { toast.error("Cantidad debe ser al menos 1"); return; }
+
+    setDirectPrinting(true);
+    try {
+      const res = await fetch("http://127.0.0.1:9199/print", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "cosecha",
+          text: labelText,
+          harvesterNum: harvesterNum,
+          folioStart: folioStart,
+          quantity: quantity,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        await printMut.mutateAsync({ harvesterNumber: parseInt(harvesterNum), labelText, folioStart, folioEnd, quantity });
+        lastFolioQ.refetch();
+        historyQ.refetch();
+        toast.success(`✅ ${quantity} etiqueta(s) enviadas directo a la impresora`);
+      } else {
+        toast.error(`Error: ${data.error || "Fallo de impresión"}`);
+      }
+    } catch (err) {
+      toast.error("No se pudo conectar al agente de impresión. ¿Está corriendo?");
+    } finally {
+      setDirectPrinting(false);
+    }
   };
 
   return (
@@ -227,14 +277,32 @@ setTimeout(() => { window.print(); }, 300);
             </div>
           </div>
 
-          <div className="mt-5">
+          <div className="mt-5 space-y-2">
+            {/* Botón impresión directa TSPL */}
             <Button
+              onClick={handleDirectPrint}
+              disabled={!harvesterNum || !agentOnline || directPrinting || printMut.isPending}
+              className="w-full bg-gradient-to-r from-green-600 to-emerald-700 hover:from-green-700 hover:to-emerald-800 text-white gap-2 h-11 text-base font-semibold shadow-lg shadow-green-500/25"
+            >
+              <Zap className="h-5 w-5" />
+              {directPrinting ? "Enviando..." : `Impresión Directa ${quantity.toLocaleString()} Etiqueta(s)`}
+            </Button>
+
+            {/* Estado del agente */}
+            <div className={`flex items-center justify-center gap-2 text-xs py-1.5 rounded-md ${agentOnline ? 'text-green-600 bg-green-50' : 'text-red-500 bg-red-50'}`}>
+              {agentOnline ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+              {agentOnline ? 'Agente conectado — Impresora-Etiquetas' : 'Agente desconectado — Inicia start_agent.bat'}
+            </div>
+
+            {/* Botón Chrome fallback */}
+            <Button
+              variant="outline"
               onClick={handlePrint}
               disabled={!harvesterNum || printMut.isPending}
-              className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white gap-2 h-11 text-base font-semibold shadow-lg shadow-emerald-500/25"
+              className="w-full gap-2 h-9 text-sm border-gray-300 text-gray-600"
             >
-              <Printer className="h-5 w-5" />
-              {printMut.isPending ? "Guardando..." : `Imprimir ${quantity.toLocaleString()} Etiqueta(s)`}
+              <Printer className="h-4 w-4" />
+              {printMut.isPending ? "Guardando..." : "Imprimir via Chrome (navegador)"}
             </Button>
           </div>
         </GlassCard>
