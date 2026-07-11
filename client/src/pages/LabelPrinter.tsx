@@ -627,9 +627,9 @@ function buildParcelTspl(labelText: string, qty: number): string {
       "GAP 3 mm, 0 mm\r\n" +
       "DIRECTION 1\r\n" +
       "CLS\r\n" +
-      `TEXT 40,50,"4",90,1,1,"${labelText}"\r\n` +
-      `QRCODE 170,30,M,7,A,0,"${labelText}"\r\n` +
-      "REVERSE 0,0,608,408\r\n" +
+      `TEXT 30,30,"4",90,1,1,"${labelText}"\r\n` +
+      "REVERSE 0,0,155,408\r\n" +
+      `QRCODE 200,20,M,14,A,0,"${labelText}"\r\n` +
       "PRINT 1,1\r\n";
   }
   return tspl;
