@@ -401,10 +401,10 @@ export default function Reports() {
       </div>
     </div>`;
   }
-  function buildDateBanner(period: string): string {
+  function buildDateBanner(period: string, periodLabel: string): string {
     return `<div class="date-banner">
       <div class="period">${svgCalendar()} ${safe(period)}</div>
-      <div class="badge">REPORTE SEMANAL</div>
+      <div class="badge">${safe(periodLabel)}</div>
     </div>`;
   }
   function buildMetricCard(label: string, value: string, sub: string, colorClass: string): string {
@@ -425,10 +425,12 @@ export default function Reports() {
   }
   function buildAiCard(text: string): string {
     const clean = stripMd(text);
+    // Don't use safe() here — AI text is in Spanish and needs accents/ñ
+    const escaped = clean.replace(/</g, '&lt;').replace(/>/g, '&gt;');
     return `<div class="ia-card">
       <div class="ia-card-bar"></div>
-      <div class="ia-card-header">${svgBrain()}<span class="ia-title">IA AGRA TEC-TI</span><span class="ia-sub">Analisis Semanal</span></div>
-      <div class="ia-card-body">${safe(clean)}</div>
+      <div class="ia-card-header">${svgBrain()}<span class="ia-title">IA AGRA TEC-TI</span><span class="ia-sub">Análisis Semanal</span></div>
+      <div class="ia-card-body">${escaped}</div>
     </div>`;
   }
 
@@ -441,7 +443,8 @@ export default function Reports() {
     // ── PAGE 1 ──
     html += buildPageOpen(1, nPages, logo, now);
     html += buildHeader(titleName, isGeneral ? 'Reporte General' : 'Reporte por Parcela', logo);
-    html += buildDateBanner(period);
+    const periodLabel = periodDays <= 7 ? 'REPORTE SEMANAL' : periodDays <= 14 ? 'REPORTE QUINCENAL' : 'REPORTE MENSUAL';
+    html += buildDateBanner(period, periodLabel);
 
     // Metric cards
     html += '<div class="metrics-grid">';
@@ -760,7 +763,7 @@ export default function Reports() {
         gParcels.forEach((p: any) => {
           const isRisk = p.weekTotal > 0 && generalParcels.risk && p.id === generalParcels.risk.id;
           const ndvi = p.ndviLast || p.ndviAvg;
-          html += `<tr class="${isRisk ? 'risk-row' : p.weekTotal <= 0 ? 'style="opacity:0.6"' : ''}">`;
+          html += `<tr class="${isRisk ? 'risk-row' : ''}" ${p.weekTotal <= 0 && !isRisk ? 'style="opacity:0.6"' : ''}>`;;
           html += `<td class="parcel-name">${safe(p.name || p.code)}</td>`;
           html += `<td class="text-right font-bold">${p.weekTotal}</td>`;
           html += `<td class="text-right">${p.weekFirstQ}</td>`;
