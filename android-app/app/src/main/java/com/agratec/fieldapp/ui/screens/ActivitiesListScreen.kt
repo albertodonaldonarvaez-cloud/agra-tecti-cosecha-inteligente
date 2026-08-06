@@ -1,0 +1,354 @@
+package com.agratec.fieldapp.ui.screens
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.agratec.fieldapp.data.local.entity.FieldActivityEntity
+import com.agratec.fieldapp.data.repository.FieldActivityRepository
+import com.agratec.fieldapp.sync.SyncWorker
+import com.agratec.fieldapp.ui.components.AgraBottomBar
+import com.agratec.fieldapp.ui.components.GlassCard
+import com.agratec.fieldapp.ui.theme.*
+import kotlinx.coroutines.launch
+
+// ===== Catálogo de la libreta de campo (mismos valores que la web) =====
+
+data class ActivityTypeUi(val value: String, val label: String, val emoji: String, val color: Color)
+
+val ACTIVITY_TYPES_UI = listOf(
+    ActivityTypeUi("riego", "Riego", "💧", CatRiego),
+    ActivityTypeUi("fertilizacion", "Fertilización", "🧪", CatFertilizacion),
+    ActivityTypeUi("nutricion", "Nutrición", "🍃", AgraGreen),
+    ActivityTypeUi("poda", "Poda", "✂️", Color(0xFF9333EA)),
+    ActivityTypeUi("control_maleza", "Control Maleza", "🌿", CatMaleza),
+    ActivityTypeUi("control_plagas", "Control Plagas", "🐛", CatPlaga),
+    ActivityTypeUi("aplicacion_fitosanitaria", "Fitosanitaria", "🛡️", Color(0xFF0D9488)),
+    ActivityTypeUi("otro", "Otro", "📝", CatOtro),
+)
+
+val ACTIVITY_SUBTYPES_UI: Map<String, List<String>> = mapOf(
+    "riego" to listOf("Goteo", "Aspersión", "Gravedad", "Microaspersión", "Inundación", "Fertirriego"),
+    "fertilizacion" to listOf("Granular al suelo", "Líquida", "Foliar", "Orgánica", "Fertirriego", "Enmienda", "Cal agrícola", "Yeso agrícola"),
+    "nutricion" to listOf("Foliar", "Radicular", "Bioestimulante", "Ácidos húmicos", "Aminoácidos", "Microelementos"),
+    "poda" to listOf("Formación", "Producción", "Sanitaria", "Rejuvenecimiento", "Despunte", "Aclareo", "Deshoje"),
+    "control_maleza" to listOf("Herbicida preemergente", "Herbicida postemergente", "Herbicida selectivo", "Herbicida no selectivo", "Mecánico (desbrozadora)", "Mecánico (machete)", "Mecánico (azadón)", "Manual", "Cobertura vegetal"),
+    "control_plagas" to listOf("Insecticida", "Fungicida", "Acaricida", "Nematicida", "Biológico", "Trampas", "Monitoreo"),
+    "aplicacion_fitosanitaria" to listOf("Preventiva", "Curativa", "Erradicante", "Protectante"),
+)
+
+fun activityTypeUi(value: String): ActivityTypeUi =
+    ACTIVITY_TYPES_UI.find { it.value == value } ?: ACTIVITY_TYPES_UI.last()
+
+fun statusLabelUi(status: String): Pair<String, Color> = when (status) {
+    "planificada" -> "Planificada" to StatusInProgress
+    "en_progreso" -> "En progreso" to SyncPending
+    "completada" -> "Completada" to StatusResolved
+    "cancelada" -> "Cancelada" to StatusCritical
+    else -> status to TextTertiary
+}
+
+/**
+ * Pantalla de la Libreta de Campo:
+ * lista de actividades (planificadas desde la web o creadas en el campo),
+ * con filtro por estado y acción rápida para marcarlas completadas.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ActivitiesListScreen(
+    onCreateActivity: () -> Unit,
+    onBackToNotes: () -> Unit,
+    onLogout: () -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val repository = remember { FieldActivityRepository(context) }
+    val activities by repository.getAll().collectAsState(initial = emptyList())
+
+    var filter by remember { mutableStateOf("pendientes") } // pendientes | realizadas | todas
+    var unsyncedCount by remember { mutableIntStateOf(0) }
+    var confirmActivity by remember { mutableStateOf<FieldActivityEntity?>(null) }
+
+    LaunchedEffect(activities) {
+        unsyncedCount = repository.getUnsyncedCount()
+    }
+
+    // Al abrir, bajar actividades nuevas del servidor (si hay red)
+    LaunchedEffect(Unit) {
+        repository.pullFromServer()
+    }
+
+    val filtered = when (filter) {
+        "pendientes" -> activities.filter { it.status == "planificada" || it.status == "en_progreso" }
+        "realizadas" -> activities.filter { it.status == "completada" }
+        else -> activities
+    }
+    val pendingCount = activities.count { it.status == "planificada" || it.status == "en_progreso" }
+    val doneCount = activities.count { it.status == "completada" }
+
+    // Diálogo para marcar completada
+    confirmActivity?.let { act ->
+        val typeUi = activityTypeUi(act.activityType)
+        AlertDialog(
+            onDismissRequest = { confirmActivity = null },
+            title = { Text("${typeUi.emoji} ${typeUi.label}", color = TextPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "¿Marcar esta actividad como completada?\n\n\"${act.description.take(120)}\"",
+                    color = TextSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        repository.setStatus(act.clientUuid, "completada")
+                        confirmActivity = null
+                    }
+                }) {
+                    Text("✅ Completada", color = AgraGreen, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmActivity = null }) {
+                    Text("Cancelar", color = TextTertiary)
+                }
+            },
+            containerColor = Color.White,
+            shape = RoundedCornerShape(20.dp),
+        )
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                brush = Brush.linearGradient(
+                    colors = listOf(AgraGreenSurface, AgraEmerald50, AgraTeal50),
+                    start = Offset(0f, 0f),
+                    end = Offset(1000f, 2000f),
+                )
+            ),
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            // ── Header ──
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .shadow(elevation = 2.dp, shape = RoundedCornerShape(0.dp), ambientColor = Color.Black.copy(alpha = 0.04f))
+                    .background(Color.White.copy(alpha = 0.88f))
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Brush.horizontalGradient(listOf(AgraGreen, AgraEmerald600))),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("📖", fontSize = 20.sp)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text("Libreta de Campo", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            "$pendingCount por realizar · $doneCount realizadas",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    if (unsyncedCount > 0) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(SyncPending.copy(alpha = 0.15f))
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
+                        ) {
+                            Text("$unsyncedCount sin sync", color = SyncPending, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+
+            // ── Filtros ──
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(
+                    selected = filter == "pendientes",
+                    onClick = { filter = "pendientes" },
+                    label = { Text("🗓️ Por realizar ($pendingCount)") },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = AgraGreen,
+                        selectedLabelColor = Color.White,
+                    ),
+                )
+                FilterChip(
+                    selected = filter == "realizadas",
+                    onClick = { filter = "realizadas" },
+                    label = { Text("✅ Realizadas") },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = AgraGreen,
+                        selectedLabelColor = Color.White,
+                    ),
+                )
+                FilterChip(
+                    selected = filter == "todas",
+                    onClick = { filter = "todas" },
+                    label = { Text("Todas") },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = AgraGreen,
+                        selectedLabelColor = Color.White,
+                    ),
+                )
+            }
+
+            // ── Lista ──
+            if (filtered.isEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text("📖", fontSize = 44.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        when (filter) {
+                            "pendientes" -> "No hay actividades pendientes"
+                            "realizadas" -> "Aún no hay actividades realizadas"
+                            else -> "Aún no hay actividades"
+                        },
+                        color = TextSecondary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Registra riegos, fertilizaciones, podas y más con el botón Nueva Actividad",
+                        color = TextTertiary,
+                        fontSize = 13.sp,
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 110.dp, top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    items(filtered, key = { it.id }) { act ->
+                        ActivityCard(
+                            activity = act,
+                            onClick = {
+                                if (act.status != "completada" && act.status != "cancelada") {
+                                    confirmActivity = act
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
+        AgraBottomBar(
+            unsyncedCount = unsyncedCount,
+            onSync = { SyncWorker.enqueueImmediateSync(context) },
+            onCreateNote = onCreateActivity,
+            onLogout = onLogout,
+            createLabel = "Nueva Actividad",
+            switchLabel = "Notas",
+            switchIcon = Icons.Default.StickyNote2,
+            onSwitch = onBackToNotes,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
+    }
+}
+
+@Composable
+private fun ActivityCard(activity: FieldActivityEntity, onClick: () -> Unit) {
+    val typeUi = activityTypeUi(activity.activityType)
+    val (statusLabel, statusColor) = statusLabelUi(activity.status)
+
+    GlassCard(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(typeUi.color.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(typeUi.emoji, fontSize = 20.sp)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(typeUi.label, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    activity.activitySubtype?.let {
+                        Spacer(Modifier.width(6.dp))
+                        Text(it, color = TextTertiary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                if (activity.description.isNotBlank()) {
+                    Text(
+                        activity.description,
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.height(3.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("📅 ${activity.activityDate}", color = TextTertiary, fontSize = 11.sp)
+                    if (activity.performedBy.isNotBlank()) {
+                        Text("  ·  👤 ${activity.performedBy}", color = TextTertiary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(statusColor.copy(alpha = 0.12f))
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                ) {
+                    Text(statusLabel, color = statusColor, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.height(4.dp))
+                Icon(
+                    if (activity.isSynced) Icons.Default.CloudDone else Icons.Default.CloudUpload,
+                    contentDescription = null,
+                    tint = if (activity.isSynced) SyncOk else SyncPending,
+                    modifier = Modifier.size(15.dp),
+                )
+            }
+        }
+    }
+}

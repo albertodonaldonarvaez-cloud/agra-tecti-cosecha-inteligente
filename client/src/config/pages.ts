@@ -30,6 +30,7 @@ import {
   FileText,
   Tag,
   UsersRound,
+  RefreshCcw,
   type LucideIcon
 } from "lucide-react";
 
@@ -107,6 +108,18 @@ export const PAGES_CONFIG: PageConfig[] = [
     adminOnly: false,
     defaultValue: true,
     order: 4,
+    showInNav: true,
+  },
+  {
+    permissionKey: "canViewCycles",
+    path: "/cycles",
+    icon: RefreshCcw,
+    label: "Ciclos",
+    fullName: "Ciclos de Producción",
+    description: "Ciclos del cultivo: poda/dormancia, cosecha y cierre",
+    adminOnly: false,
+    defaultValue: true,
+    order: 4.5,
     showInNav: true,
   },
   {

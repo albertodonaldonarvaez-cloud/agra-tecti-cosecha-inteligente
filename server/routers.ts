@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { randomUUID } from "crypto";
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, protectedProcedure, adminProcedure } from "./_core/trpcNew";
 import { COOKIE_NAME } from "./_core/authContext";
@@ -7,8 +8,20 @@ import * as db from "./db";
 import * as dbExt from "./db_extended";
 import * as webodm from "./webodmService";
 import { getDb } from "./db";
-import { users, boxes, harvesters, parcels, parcelDetails, parcelAiAnalysis, crops, cropVarieties, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos, telegramLinkCodes, collaborators, collaboratorLinkCodes, fieldActivityAssignments, labelPrintHistory } from "../drizzle/schema";
-import { eq, desc, and, gte, lte, inArray, sql } from "drizzle-orm";
+import { users, boxes, harvesters, parcels, parcelDetails, parcelAiAnalysis, crops, cropVarieties, productionCycles, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos, telegramLinkCodes, collaborators, collaboratorLinkCodes, fieldActivityAssignments, labelPrintHistory } from "../drizzle/schema";
+import { eq, desc, asc, and, gte, lte, inArray, isNull, sql } from "drizzle-orm";
+
+// Fecha local de México "YYYY-MM-DD" (el negocio opera en America/Mexico_City)
+function todayMx(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
+}
+
+// Suma días a una fecha "YYYY-MM-DD" sin desfases de zona horaria
+function addDaysStr(dateStr: string, days: number): string {
+  const d = new Date(dateStr + "T12:00:00");
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 export const appRouter = router({
   auth: router({
@@ -768,21 +781,30 @@ IMPORTANTE:
     }),
 
     // Estadísticas agregadas para Dashboard (no descarga todas las cajas)
-    dashboardStats: protectedProcedure.query(async () => {
-      return await db.getDashboardStats();
-    }),
+    // startDate/endDate opcionales para acotar a un ciclo de producción
+    dashboardStats: protectedProcedure
+      .input(z.object({ startDate: z.string().optional(), endDate: z.string().optional() }).optional())
+      .query(async ({ input }) => {
+        return await db.getDashboardStats(input?.startDate, input?.endDate);
+      }),
 
     // Datos diarios agregados para gráfica de evolución
     dailyChartData: protectedProcedure
-      .input(z.object({ month: z.string().optional() }).optional())
+      .input(z.object({
+        month: z.string().optional(),
+        startDate: z.string().optional(),
+        endDate: z.string().optional(),
+      }).optional())
       .query(async ({ input }) => {
-        return await db.getDailyChartData(input?.month);
+        return await db.getDailyChartData(input?.month, input?.startDate, input?.endDate);
       }),
 
     // Meses disponibles con datos de cosecha
-    availableMonths: protectedProcedure.query(async () => {
-      return await db.getAvailableMonths();
-    }),
+    availableMonths: protectedProcedure
+      .input(z.object({ startDate: z.string().optional(), endDate: z.string().optional() }).optional())
+      .query(async ({ input }) => {
+        return await db.getAvailableMonths(input?.startDate, input?.endDate);
+      }),
 
     // Datos de cosecha agrupados por día (para correlación clima-cosecha)
     harvestByDay: protectedProcedure.query(async () => {
@@ -2167,6 +2189,182 @@ IMPORTANTE:
       }),
   }),
 
+  // ===== CICLOS DE PRODUCCIÓN =====
+  // El higo se maneja por ciclos que inician con la poda/dormancia y terminan
+  // después de la cosecha. La pertenencia de cajas/actividades se resuelve por
+  // rango de fechas (sin FKs en boxes), así los datos históricos no se tocan.
+  cycles: router({
+    // Vista integral: todos los ciclos con sus estadísticas de cosecha,
+    // el ciclo activo, si su cosecha ya inició y la última poda registrada
+    overview: protectedProcedure.query(async () => {
+      const drizzle = await getDb();
+      if (!drizzle) throw new Error("Base de datos no disponible");
+      const allCycles = await drizzle
+        .select()
+        .from(productionCycles)
+        .orderBy(desc(productionCycles.startDate), desc(productionCycles.id));
+
+      const today = todayMx();
+
+      const cycles = await Promise.all(
+        allCycles.map(async (c) => {
+          // La cosecha del ciclo son las cajas entre su inicio y su cierre
+          // (fin de cosecha si existe; si no, fin de ciclo; si sigue abierto, hasta hoy)
+          const rangeEnd = c.harvestEndDate ?? c.endDate ?? undefined;
+          const stats = await db.getDashboardStats(c.startDate, rangeEnd);
+          return {
+            ...c,
+            stats,
+            // Inicio de cosecha: manual si se capturó, si no la primera caja del ciclo
+            harvestStartDetected: c.harvestStartDate ?? stats?.firstDate ?? null,
+            isActive: !c.endDate || c.endDate >= today,
+          };
+        })
+      );
+
+      const activeCycle = cycles.find((c) => c.isActive) ?? null;
+      // La cosecha "roba la atención" cuando el ciclo activo ya tiene cajas
+      // y todavía no se marca la finalización de cosecha
+      const harvestActive = !!(
+        activeCycle &&
+        !activeCycle.harvestEndDate &&
+        activeCycle.stats &&
+        activeCycle.stats.total > 0
+      );
+
+      // Detección del arranque de ciclo: última poda realizada en la libreta
+      // (las planificadas o canceladas no cuentan como inicio real)
+      const lastPoda = await drizzle
+        .select({
+          activityDate: fieldActivities.activityDate,
+          activitySubtype: fieldActivities.activitySubtype,
+        })
+        .from(fieldActivities)
+        .where(and(
+          eq(fieldActivities.activityType, "poda"),
+          inArray(fieldActivities.status, ["completada", "en_progreso"]),
+        ))
+        .orderBy(desc(fieldActivities.activityDate))
+        .limit(1);
+
+      // activityDate puede ser Date (drizzle date mode) — normalizar a "YYYY-MM-DD"
+      const rawPodaDate = lastPoda[0]?.activityDate;
+      const lastPodaDate = !rawPodaDate
+        ? null
+        : typeof rawPodaDate === "string"
+          ? (rawPodaDate as string).slice(0, 10)
+          : new Date(rawPodaDate as any).toISOString().slice(0, 10);
+
+      return {
+        cycles,
+        activeCycleId: activeCycle?.id ?? null,
+        harvestActive,
+        lastPodaDate,
+        lastPodaSubtype: lastPoda[0]?.activitySubtype ?? null,
+      };
+    }),
+
+    create: adminProcedure
+      .input(z.object({
+        name: z.string().min(1).max(255),
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        notes: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new Error("Base de datos no disponible");
+
+        // Cerrar automáticamente los ciclos que sigan abiertos:
+        // terminan el día anterior al inicio del nuevo
+        const open = await drizzle
+          .select()
+          .from(productionCycles)
+          .where(isNull(productionCycles.endDate));
+
+        // Un ciclo nuevo no puede iniciar antes (o el mismo día) que un ciclo abierto:
+        // generaría rangos solapados y un "ciclo actual" ambiguo
+        const conflicting = open.find((c) => c.startDate >= input.startDate);
+        if (conflicting) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `El ciclo abierto "${conflicting.name}" inicia el ${conflicting.startDate}. El nuevo ciclo debe iniciar después; edita o elimina el anterior primero.`,
+          });
+        }
+
+        const dayBefore = addDaysStr(input.startDate, -1);
+        for (const c of open) {
+          // Solo se fija el fin de ciclo; el fin de cosecha no se inventa
+          // (queda vacío si nunca se capturó — se puede editar después)
+          await drizzle
+            .update(productionCycles)
+            .set({ endDate: dayBefore })
+            .where(eq(productionCycles.id, c.id));
+        }
+
+        const result = await drizzle.insert(productionCycles).values({
+          name: input.name,
+          startDate: input.startDate,
+          notes: input.notes || null,
+          createdByUserId: ctx.user!.id,
+        });
+
+        return {
+          success: true,
+          id: Number((result as any)[0].insertId),
+          closedPrevious: open.length,
+        };
+      }),
+
+    update: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        name: z.string().min(1).max(255).optional(),
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        harvestStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+        harvestEndDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+        notes: z.string().nullable().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new Error("Base de datos no disponible");
+        const { id, ...data } = input;
+        const updateData: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(data)) {
+          if (value !== undefined) updateData[key] = value;
+        }
+        if (Object.keys(updateData).length === 0) return { success: true };
+
+        // Validación cruzada de fechas sobre el estado resultante
+        const [current] = await drizzle.select().from(productionCycles)
+          .where(eq(productionCycles.id, id)).limit(1);
+        if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Ciclo no encontrado" });
+        const merged = { ...current, ...updateData } as typeof current;
+        const checks: [string | null, string | null, string][] = [
+          [merged.startDate, merged.endDate, "El fin del ciclo no puede ser anterior a su inicio"],
+          [merged.startDate, merged.harvestStartDate, "El inicio de cosecha no puede ser anterior al inicio del ciclo"],
+          [merged.harvestStartDate ?? merged.startDate, merged.harvestEndDate, "El fin de cosecha no puede ser anterior a su inicio"],
+        ];
+        for (const [from, to, message] of checks) {
+          if (from && to && to < from) {
+            throw new TRPCError({ code: "BAD_REQUEST", message });
+          }
+        }
+
+        await drizzle.update(productionCycles).set(updateData).where(eq(productionCycles.id, id));
+        return { success: true };
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new Error("Base de datos no disponible");
+        await drizzle.delete(productionCycles).where(eq(productionCycles.id, input.id));
+        return { success: true };
+      }),
+  }),
+
   // Sincronización semanal de vuelos ODM
   odmSync: router({
     status: protectedProcedure.query(async () => {
@@ -2598,6 +2796,83 @@ IMPORTANTE:
         byType: byType.reduce((acc, r) => { acc[r.type] = r.count; return acc; }, {} as Record<string, number>),
       };
     }),
+
+    // Resumen ligero para el Dashboard: actividades por realizar y realizadas,
+    // con nombres de parcela en una sola query (sin el enriquecido pesado de list)
+    dashboard: protectedProcedure
+      .input(z.object({
+        startDate: z.string().optional(), // acotar conteos/recientes a un ciclo
+        pendingLimit: z.number().min(1).max(50).default(15),
+        recentLimit: z.number().min(1).max(50).default(10),
+      }).optional())
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new Error("Base de datos no disponible");
+        const pendingLimit = input?.pendingLimit ?? 15;
+        const recentLimit = input?.recentLimit ?? 10;
+
+        // Por realizar: planificadas o en progreso, las más próximas primero
+        const pending = await drizzle
+          .select()
+          .from(fieldActivities)
+          .where(inArray(fieldActivities.status, ["planificada", "en_progreso"]))
+          .orderBy(asc(fieldActivities.activityDate), asc(fieldActivities.id))
+          .limit(pendingLimit);
+
+        // Realizadas recientemente (dentro del ciclo si se indica)
+        const doneFilters: any[] = [eq(fieldActivities.status, "completada")];
+        if (input?.startDate) doneFilters.push(gte(fieldActivities.activityDate, input.startDate as any));
+        const recent = await drizzle
+          .select()
+          .from(fieldActivities)
+          .where(and(...doneFilters))
+          .orderBy(desc(fieldActivities.activityDate), desc(fieldActivities.id))
+          .limit(recentLimit);
+
+        // Nombres de parcelas de todas las actividades en una sola query
+        const ids = [...pending, ...recent].map((a) => a.id);
+        const parcelsByActivity: Record<number, string[]> = {};
+        if (ids.length > 0) {
+          const links = await drizzle
+            .select({ activityId: fieldActivityParcels.activityId, name: parcels.name })
+            .from(fieldActivityParcels)
+            .leftJoin(parcels, eq(fieldActivityParcels.parcelId, parcels.id))
+            .where(inArray(fieldActivityParcels.activityId, ids));
+          for (const l of links) {
+            if (!parcelsByActivity[l.activityId]) parcelsByActivity[l.activityId] = [];
+            if (l.name) parcelsByActivity[l.activityId].push(l.name);
+          }
+        }
+
+        // Conteos por estado. Las pendientes se cuentan SIN filtro de fecha
+        // (igual que la lista "Por realizar": el backlog no caduca con el ciclo);
+        // solo las completadas se acotan al ciclo indicado.
+        const countRows = await drizzle
+          .select({ status: fieldActivities.status, count: sql<number>`COUNT(*)` })
+          .from(fieldActivities)
+          .groupBy(fieldActivities.status);
+
+        const counts: Record<string, number> = { planificada: 0, en_progreso: 0, completada: 0, cancelada: 0 };
+        for (const r of countRows) counts[r.status] = Number(r.count);
+
+        if (input?.startDate) {
+          const [doneRow] = await drizzle
+            .select({ count: sql<number>`COUNT(*)` })
+            .from(fieldActivities)
+            .where(and(
+              eq(fieldActivities.status, "completada"),
+              gte(fieldActivities.activityDate, input.startDate as any),
+            ));
+          counts.completada = Number(doneRow?.count ?? 0);
+        }
+
+        const attach = (a: typeof pending[number]) => ({ ...a, parcelNames: parcelsByActivity[a.id] ?? [] });
+        return {
+          pending: pending.map(attach),
+          recent: recent.map(attach),
+          counts,
+        };
+      }),
   }),
 
   // ===== ALMACENES =====
@@ -3718,6 +3993,176 @@ IMPORTANTE:
         .where(eq(parcels.isActive, true))
         .orderBy(parcels.name);
     }),
+
+    // Sincronizar actividades de la libreta de campo desde la app móvil
+    // IDEMPOTENTE: usa clientUuid como clave única (reintentos no duplican)
+    syncFieldActivities: protectedProcedure
+      .input(z.object({
+        activities: z.array(z.object({
+          clientUuid: z.string().uuid(),
+          // Para actividades creadas en la web (sin clientUuid): el servidor
+          // actualiza por id y adopta el UUID del dispositivo
+          serverId: z.number().optional(),
+          activityType: z.enum([
+            "riego", "fertilizacion", "nutricion", "poda",
+            "control_maleza", "control_plagas", "aplicacion_fitosanitaria", "otro"
+          ]),
+          activitySubtype: z.string().max(128).optional(),
+          description: z.string().min(1),
+          performedBy: z.string().max(255).optional(),
+          activityDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+          status: z.enum(["planificada", "en_progreso", "completada", "cancelada"]).default("planificada"),
+          parcelIds: z.array(z.number()).optional(),
+        })),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new Error("Base de datos no disponible");
+        const userId = (ctx as any).user?.id || 0;
+        const userName = (ctx as any).user?.name || "App Móvil";
+        const results: { clientUuid: string; serverId?: number; status: "created" | "updated" | "deleted" | "error"; error?: string }[] = [];
+
+        for (const act of input.activities) {
+          try {
+            let [existingBefore] = await drizzle.select({ id: fieldActivities.id })
+              .from(fieldActivities)
+              .where(eq(fieldActivities.clientUuid, act.clientUuid))
+              .limit(1);
+
+            // Fallback: actividad que la app conoce por serverId (creada en la web).
+            // Si la fila aún no tiene clientUuid, adopta el del dispositivo; si ya
+            // tiene otro (otro dispositivo la reclamó primero), solo se actualiza
+            // por id — NUNCA se inserta un duplicado.
+            if (!existingBefore && act.serverId) {
+              const [byId] = await drizzle.select({ id: fieldActivities.id, clientUuid: fieldActivities.clientUuid })
+                .from(fieldActivities)
+                .where(eq(fieldActivities.id, act.serverId))
+                .limit(1);
+              if (byId) {
+                if (!byId.clientUuid) {
+                  await drizzle.update(fieldActivities)
+                    .set({ clientUuid: act.clientUuid })
+                    .where(eq(fieldActivities.id, byId.id));
+                }
+                existingBefore = { id: byId.id };
+              } else {
+                // La actividad fue eliminada en la web: no resucitarla
+                results.push({ clientUuid: act.clientUuid, serverId: undefined, status: "deleted" });
+                continue;
+              }
+            }
+            const isNew = !existingBefore;
+
+            if (isNew) {
+              // Actividad creada en el dispositivo: insert completo
+              await drizzle.insert(fieldActivities).values({
+                clientUuid: act.clientUuid,
+                activityType: act.activityType as any,
+                activitySubtype: act.activitySubtype || null,
+                description: act.description,
+                performedBy: act.performedBy || userName,
+                activityDate: act.activityDate as any,
+                status: act.status as any,
+                createdByUserId: userId,
+              }).onDuplicateKeyUpdate({
+                // Reintento del mismo dispositivo tras respuesta perdida
+                set: { status: act.status as any },
+              });
+            } else {
+              // Actividad ya existente: la app solo puede cambiar el estado.
+              // No se pisan descripción/fechas/parcelas editadas en la web.
+              await drizzle.update(fieldActivities)
+                .set({ status: act.status as any })
+                .where(eq(fieldActivities.id, existingBefore.id));
+            }
+
+            const [row] = await drizzle.select({ id: fieldActivities.id })
+              .from(fieldActivities)
+              .where(eq(fieldActivities.clientUuid, act.clientUuid))
+              .limit(1);
+            const rowId = row?.id ?? existingBefore?.id;
+
+            // Vínculos de parcelas solo al crear (en updates la web es la autoridad)
+            if (isNew && rowId && act.parcelIds) {
+              await drizzle.delete(fieldActivityParcels).where(eq(fieldActivityParcels.activityId, rowId));
+              for (const parcelId of act.parcelIds) {
+                await drizzle.insert(fieldActivityParcels).values({ activityId: rowId, parcelId });
+              }
+            }
+
+            results.push({ clientUuid: act.clientUuid, serverId: rowId, status: isNew ? "created" : "updated" });
+          } catch (error: any) {
+            console.error(`[OfflineSync] Error syncing actividad ${act.clientUuid}:`, error.message);
+            results.push({ clientUuid: act.clientUuid, status: "error", error: error.message });
+          }
+        }
+
+        return { success: true, results, syncedCount: results.filter(r => r.status !== "error").length };
+      }),
+
+    // Obtener actividades de la libreta para la app móvil (lista ligera,
+    // incluye las planificadas desde la web para verlas en campo)
+    getActivities: protectedProcedure
+      .input(z.object({
+        since: z.string().optional(), // ISO timestamp de updatedAt
+        limit: z.number().max(500).default(100),
+      }))
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new Error("Base de datos no disponible");
+        const activities = input.since
+          ? await drizzle.select().from(fieldActivities)
+              .where(gte(fieldActivities.updatedAt, new Date(input.since)))
+              .orderBy(desc(fieldActivities.updatedAt)).limit(input.limit)
+          : await drizzle.select().from(fieldActivities)
+              .orderBy(desc(fieldActivities.updatedAt)).limit(input.limit);
+
+        // Asignar un clientUuid canónico a las filas creadas en la web:
+        // así todos los dispositivos comparten la misma clave de idempotencia
+        // y no se generan duplicados entre teléfonos.
+        for (const a of activities) {
+          if (!a.clientUuid) {
+            const uuid = randomUUID();
+            await drizzle.update(fieldActivities)
+              .set({ clientUuid: uuid })
+              .where(and(eq(fieldActivities.id, a.id), isNull(fieldActivities.clientUuid)));
+            const [refreshed] = await drizzle.select({ clientUuid: fieldActivities.clientUuid })
+              .from(fieldActivities)
+              .where(eq(fieldActivities.id, a.id))
+              .limit(1);
+            a.clientUuid = refreshed?.clientUuid ?? uuid;
+          }
+        }
+
+        // parcelIds de todas las actividades en una sola query
+        const ids = activities.map((a) => a.id);
+        const parcelsByActivity: Record<number, number[]> = {};
+        if (ids.length > 0) {
+          const links = await drizzle
+            .select({ activityId: fieldActivityParcels.activityId, parcelId: fieldActivityParcels.parcelId })
+            .from(fieldActivityParcels)
+            .where(inArray(fieldActivityParcels.activityId, ids));
+          for (const l of links) {
+            if (!parcelsByActivity[l.activityId]) parcelsByActivity[l.activityId] = [];
+            parcelsByActivity[l.activityId].push(l.parcelId);
+          }
+        }
+
+        return activities.map((a) => ({
+          id: a.id,
+          clientUuid: a.clientUuid,
+          activityType: a.activityType,
+          activitySubtype: a.activitySubtype,
+          description: a.description,
+          performedBy: a.performedBy,
+          activityDate: typeof a.activityDate === "string"
+            ? a.activityDate
+            : new Date(a.activityDate as any).toISOString().split("T")[0],
+          status: a.status,
+          parcelIds: parcelsByActivity[a.id] ?? [],
+          updatedAt: a.updatedAt,
+        }));
+      }),
   }),
 
   // ============================================

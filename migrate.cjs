@@ -49,6 +49,9 @@ async function migrate() {
       { col: 'canViewFieldNotebook', sql: "ALTER TABLE users ADD COLUMN canViewFieldNotebook BOOLEAN NOT NULL DEFAULT TRUE" },
       { col: 'canViewWarehouse', sql: "ALTER TABLE users ADD COLUMN canViewWarehouse BOOLEAN NOT NULL DEFAULT TRUE" },
       { col: 'canViewCollaborators', sql: "ALTER TABLE users ADD COLUMN canViewCollaborators BOOLEAN NOT NULL DEFAULT FALSE" },
+      { col: 'canViewLabels', sql: "ALTER TABLE users ADD COLUMN canViewLabels BOOLEAN NOT NULL DEFAULT FALSE" },
+      { col: 'canViewCycles', sql: "ALTER TABLE users ADD COLUMN canViewCycles BOOLEAN NOT NULL DEFAULT TRUE" },
+      { col: 'canViewReports', sql: "ALTER TABLE users ADD COLUMN canViewReports BOOLEAN NOT NULL DEFAULT TRUE" },
       { col: 'avatarColor', sql: "ALTER TABLE users ADD COLUMN avatarColor VARCHAR(32) DEFAULT '#16a34a'" },
       { col: 'avatarEmoji', sql: "ALTER TABLE users ADD COLUMN avatarEmoji VARCHAR(16) DEFAULT '🌿'" },
       { col: 'bio', sql: "ALTER TABLE users ADD COLUMN bio VARCHAR(255) DEFAULT NULL" },
@@ -104,6 +107,38 @@ async function migrate() {
       for (const c of problematic) {
         console.log('  - ' + c.COLUMN_NAME + ' (' + c.COLUMN_TYPE + ')');
       }
+    }
+
+    // ── Ciclos de producción (0019) ──────────────────────────────
+    // Tabla nueva: idempotente por IF NOT EXISTS
+    await conn.query(`CREATE TABLE IF NOT EXISTS productionCycles (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      startDate DATE NOT NULL,
+      harvestStartDate DATE NULL,
+      harvestEndDate DATE NULL,
+      endDate DATE NULL,
+      notes TEXT NULL,
+      createdByUserId INT NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`);
+    console.log('[Migration] productionCycles OK');
+
+    // fieldActivities.clientUuid — idempotencia del sync móvil
+    const [faCols] = await conn.query(
+      "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'fieldActivities' AND COLUMN_NAME = 'clientUuid'"
+    );
+    if (faCols.length === 0) {
+      await conn.query("ALTER TABLE fieldActivities ADD COLUMN clientUuid VARCHAR(64) NULL");
+      console.log('[Migration] + ADDED fieldActivities.clientUuid');
+    }
+    const [faIdx] = await conn.query(
+      "SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'fieldActivities' AND INDEX_NAME = 'fieldActivities_clientUuid_unique'"
+    );
+    if (faIdx.length === 0) {
+      await conn.query("ALTER TABLE fieldActivities ADD UNIQUE INDEX fieldActivities_clientUuid_unique (clientUuid)");
+      console.log('[Migration] + ADDED unique index fieldActivities.clientUuid');
     }
   } catch (err) {
     console.error('[Migration] Error:', err.message);

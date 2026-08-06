@@ -35,6 +35,10 @@ fun AgraBottomBar(
     onCreateNote: () -> Unit,
     onLogout: () -> Unit,
     modifier: Modifier = Modifier,
+    createLabel: String = "Nueva Nota",
+    switchLabel: String? = null,
+    switchIcon: ImageVector? = null,
+    onSwitch: (() -> Unit)? = null,
 ) {
     Box(
         modifier = modifier
@@ -61,6 +65,24 @@ fun AgraBottomBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            // Switch button (Notas ↔ Libreta)
+            if (onSwitch != null && switchIcon != null) {
+                BottomBarIcon(
+                    icon = switchIcon,
+                    label = switchLabel ?: "Cambiar",
+                    tint = AgraEmerald600,
+                    onClick = onSwitch,
+                )
+
+                // Separator
+                Box(
+                    Modifier
+                        .width(1.dp)
+                        .height(24.dp)
+                        .background(AgraGreenLight.copy(alpha = 0.2f))
+                )
+            }
+
             // Sync button
             BottomBarIcon(
                 icon = Icons.Default.CloudUpload,
@@ -103,7 +125,7 @@ fun AgraBottomBar(
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        "Nueva Nota",
+                        createLabel,
                         color = Color.White,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,

@@ -62,6 +62,30 @@ interface ApiService {
     ): Response<PhotoUploadResponse>
 
     // ============================================
+    // OFFLINE SYNC — LIBRETA DE CAMPO (ACTIVIDADES)
+    // ============================================
+
+    /**
+     * Enviar batch de actividades de la libreta de campo al servidor.
+     * Upsert idempotente por clientUuid (con fallback a serverId para
+     * actividades creadas en la web).
+     */
+    @POST("api/trpc/offlineSync.syncFieldActivities")
+    suspend fun syncFieldActivities(
+        @Body body: TrpcMutationRequest<SyncActivitiesRequest>
+    ): Response<TrpcResponse<SyncActivitiesResponseData>>
+
+    /**
+     * Descargar actividades del servidor (incluye las planificadas en la web).
+     * Es un tRPC query: GET con el input JSON en el parámetro "input",
+     * con el formato superjson { "json": { ... } }.
+     */
+    @GET("api/trpc/offlineSync.getActivities")
+    suspend fun getActivities(
+        @Query("input") inputJson: String
+    ): Response<TrpcResponse<List<ActivityData>>>
+
+    // ============================================
     // DATOS DE REFERENCIA (para selector offline)
     // ============================================
 

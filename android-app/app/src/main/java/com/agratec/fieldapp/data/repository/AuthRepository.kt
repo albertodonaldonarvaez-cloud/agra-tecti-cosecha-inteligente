@@ -14,6 +14,13 @@ class AuthRepository(private val context: Context) {
 
     companion object {
         private const val TAG = "AuthRepository"
+        private const val PREFS = "agra_prefs"
+        private const val KEY_USER_NAME = "user_name"
+
+        /** Nombre del usuario logueado (para prellenar "realizado por") */
+        fun getUserName(context: Context): String =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(KEY_USER_NAME, "") ?: ""
     }
 
     private val apiService = RetrofitClient.getApiService(context)
@@ -37,6 +44,9 @@ class AuthRepository(private val context: Context) {
                 if (data?.success == true && data.token != null) {
                     // Guardar token de forma segura
                     RetrofitClient.saveToken(context, data.token)
+                    // Guardar nombre para prellenar "realizado por" en la libreta
+                    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                        .edit().putString(KEY_USER_NAME, data.user?.name ?: "").apply()
                     Log.i(TAG, "Login exitoso para: ${data.user?.name}")
                     Result.success(
                         LoginResult(

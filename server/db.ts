@@ -635,14 +635,23 @@ export async function updateBoxCode(id: number, newBoxCode: string) {
 // ==========================================
 
 // Estadísticas generales: totales, pesos, calidades
-export async function getDashboardStats() {
+// startDate/endDate opcionales ("YYYY-MM-DD") para acotar a un ciclo de producción
+export async function getDashboardStats(startDate?: string, endDate?: string) {
   const db = await getDb();
   if (!db) return null;
-  
+
   const { sql } = await import("drizzle-orm");
-  
+
+  let dateFilter = sql``;
+  if (startDate) {
+    dateFilter = sql`${dateFilter} AND DATE(submissionTime) >= ${startDate}`;
+  }
+  if (endDate) {
+    dateFilter = sql`${dateFilter} AND DATE(submissionTime) <= ${endDate}`;
+  }
+
   const result = await db.execute(sql`
-    SELECT 
+    SELECT
       COUNT(*) as total,
       SUM(weight) as totalWeight,
       COUNT(CASE WHEN harvesterId NOT IN (98, 99) THEN 1 END) as firstQuality,
@@ -653,8 +662,8 @@ export async function getDashboardStats() {
       SUM(CASE WHEN harvesterId = 99 THEN weight ELSE 0 END) as wasteWeight,
       MIN(submissionTime) as firstDate,
       MAX(submissionTime) as lastDate
-    FROM boxes 
-    WHERE archived = 0
+    FROM boxes
+    WHERE archived = 0 ${dateFilter}
   `);
   
   const row = (result[0] as unknown as any[])[0];
@@ -673,18 +682,27 @@ export async function getDashboardStats() {
     firstQualityPercent: total > 0 ? Number((Number(row.firstQuality) / total * 100).toFixed(1)) : 0,
     secondQualityPercent: total > 0 ? Number((Number(row.secondQuality) / total * 100).toFixed(1)) : 0,
     wastePercent: total > 0 ? Number((Number(row.waste) / total * 100).toFixed(1)) : 0,
-    firstDate: row.firstDate ? new Date(row.firstDate).toISOString().split('T')[0] : null,
-    lastDate: row.lastDate ? new Date(row.lastDate).toISOString().split('T')[0] : null,
+    // Fecha local (no toISOString/UTC): las cajas de la tarde-noche cambiaban de día
+    // y la fecha dejaba de coincidir con el DATE(submissionTime) de las gráficas
+    firstDate: row.firstDate ? toLocalDateString(row.firstDate) : null,
+    lastDate: row.lastDate ? toLocalDateString(row.lastDate) : null,
   };
 }
 
+// "YYYY-MM-DD" usando las partes locales de la fecha (mismo criterio que DATE() en SQL)
+function toLocalDateString(value: string | Date): string {
+  const d = new Date(value);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 // Datos diarios agregados para gráfica de evolución (GROUP BY fecha)
-export async function getDailyChartData(month?: string) {
+// rangeStart/rangeEnd opcionales ("YYYY-MM-DD") acotan a un ciclo; se combinan con el filtro de mes
+export async function getDailyChartData(month?: string, rangeStart?: string, rangeEnd?: string) {
   const db = await getDb();
   if (!db) return [];
-  
+
   const { sql } = await import("drizzle-orm");
-  
+
   let dateFilter = sql``;
   if (month && month !== 'all') {
     const [year, m] = month.split('-').map(Number);
@@ -693,6 +711,12 @@ export async function getDailyChartData(month?: string) {
     const lastDay = new Date(year, m, 0).getDate();
     const endDate = `${year}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
     dateFilter = sql` AND DATE(submissionTime) >= ${startDate} AND DATE(submissionTime) <= ${endDate}`;
+  }
+  if (rangeStart) {
+    dateFilter = sql`${dateFilter} AND DATE(submissionTime) >= ${rangeStart}`;
+  }
+  if (rangeEnd) {
+    dateFilter = sql`${dateFilter} AND DATE(submissionTime) <= ${rangeEnd}`;
   }
   
   const result = await db.execute(sql`
@@ -722,16 +746,25 @@ export async function getDailyChartData(month?: string) {
 }
 
 // Obtener meses disponibles con datos de cosecha
-export async function getAvailableMonths() {
+// startDate/endDate opcionales ("YYYY-MM-DD") acotan a un ciclo de producción
+export async function getAvailableMonths(startDate?: string, endDate?: string) {
   const db = await getDb();
   if (!db) return [];
-  
+
   const { sql } = await import("drizzle-orm");
-  
+
+  let dateFilter = sql``;
+  if (startDate) {
+    dateFilter = sql`${dateFilter} AND DATE(submissionTime) >= ${startDate}`;
+  }
+  if (endDate) {
+    dateFilter = sql`${dateFilter} AND DATE(submissionTime) <= ${endDate}`;
+  }
+
   const result = await db.execute(sql`
     SELECT DISTINCT DATE_FORMAT(submissionTime, '%Y-%m') as month
-    FROM boxes 
-    WHERE archived = 0
+    FROM boxes
+    WHERE archived = 0 ${dateFilter}
     ORDER BY month DESC
   `);
   

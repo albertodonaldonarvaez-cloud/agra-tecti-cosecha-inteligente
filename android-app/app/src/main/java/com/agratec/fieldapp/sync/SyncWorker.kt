@@ -5,6 +5,8 @@ import android.util.Log
 import androidx.work.*
 import com.agratec.fieldapp.data.local.AppDatabase
 import com.agratec.fieldapp.data.remote.RetrofitClient
+import com.agratec.fieldapp.data.remote.dto.SyncActivitiesRequest
+import com.agratec.fieldapp.data.remote.dto.SyncActivityItem
 import com.agratec.fieldapp.data.remote.dto.SyncNoteItem
 import com.agratec.fieldapp.data.remote.dto.SyncNotesRequest
 import com.agratec.fieldapp.data.remote.dto.TrpcMutationRequest
@@ -252,13 +254,84 @@ class SyncWorker(
             return Result.retry()
         }
 
-        Log.i(TAG, "=== Sincronización completada: $notesSynced notas, $photosSynced fotos, $errors errores ===")
+        // ===== PASO 3: Subir actividades de la libreta de campo =====
+        var activitiesSynced = 0
+        try {
+            val unsyncedActivities = db.fieldActivityDao().getUnsynced(limit = 10)
+
+            if (unsyncedActivities.isNotEmpty()) {
+                Log.i(TAG, "Sincronizando ${unsyncedActivities.size} actividades...")
+
+                val items = unsyncedActivities.map { act ->
+                    SyncActivityItem(
+                        clientUuid = act.clientUuid,
+                        serverId = act.serverId,
+                        activityType = act.activityType,
+                        activitySubtype = act.activitySubtype?.take(128),
+                        description = act.description.ifBlank { act.activityType },
+                        performedBy = act.performedBy.takeIf { it.isNotBlank() }?.take(255),
+                        activityDate = act.activityDate,
+                        status = act.status,
+                        parcelIds = act.parcelIds().takeIf { it.isNotEmpty() },
+                    )
+                }
+
+                val response = apiService.syncFieldActivities(
+                    TrpcMutationRequest(SyncActivitiesRequest(activities = items))
+                )
+
+                if (response.isSuccessful) {
+                    val data = response.body()?.result?.data?.json
+                    if (data?.success == true) {
+                        data.results?.forEach { result ->
+                            if (result.status != "error") {
+                                // Solo se marca sincronizada si el estado no cambió
+                                // mientras la subida estaba en vuelo
+                                val uploaded = unsyncedActivities.find { it.clientUuid == result.clientUuid }
+                                db.fieldActivityDao().markAsSyncedIfStatus(
+                                    result.clientUuid,
+                                    result.serverId,
+                                    uploaded?.status ?: "",
+                                )
+                                activitiesSynced++
+                                Log.d(TAG, "Actividad ${result.clientUuid} -> ${result.status}")
+                            } else {
+                                db.fieldActivityDao().markSyncFailed(
+                                    result.clientUuid,
+                                    result.error ?: "Error desconocido"
+                                )
+                                errors++
+                                Log.w(TAG, "Error en actividad ${result.clientUuid}: ${result.error}")
+                            }
+                        }
+                    }
+                } else {
+                    Log.e(TAG, "Error HTTP al sincronizar actividades: ${response.code()}")
+                    if (response.code() == 401) return Result.failure()
+                    return Result.retry()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Excepción al sincronizar actividades", e)
+            return Result.retry()
+        }
+
+        // ===== PASO 4: Bajar actividades del servidor (planificadas en la web) =====
+        try {
+            val activityRepo = com.agratec.fieldapp.data.repository.FieldActivityRepository(applicationContext)
+            activityRepo.pullFromServer()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error bajando actividades (no crítico)", e)
+        }
+
+        Log.i(TAG, "=== Sincronización completada: $notesSynced notas, $photosSynced fotos, $activitiesSynced actividades, $errors errores ===")
 
         // Si quedan más items pendientes, programar otro run
         val remainingNotes = db.fieldNoteDao().getUnsyncedCount()
         val remainingPhotos = db.photoDao().getUnsyncedCount()
-        if (remainingNotes > 0 || remainingPhotos > 0) {
-            Log.i(TAG, "Quedan $remainingNotes notas y $remainingPhotos fotos pendientes")
+        val remainingActivities = db.fieldActivityDao().getUnsyncedCount()
+        if (remainingNotes > 0 || remainingPhotos > 0 || remainingActivities > 0) {
+            Log.i(TAG, "Quedan $remainingNotes notas, $remainingPhotos fotos y $remainingActivities actividades pendientes")
         }
 
         return Result.success()

@@ -6,10 +6,29 @@ import { getProxiedImageUrl } from "@/lib/imageProxy";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Package, TrendingUp, CheckCircle, Cloud, Calendar as CalendarIcon, RefreshCw, ChevronDown, ChevronUp, Sparkles, X, Satellite, MapPin, WifiOff, ClipboardList, BookOpen, Users, Brain, Leaf, ArrowRight, ChevronLeft, ChevronRight } from "lucide-react";
+import { Package, TrendingUp, CheckCircle, Cloud, Calendar as CalendarIcon, RefreshCw, ChevronDown, ChevronUp, Sparkles, X, Satellite, MapPin, WifiOff, ClipboardList, BookOpen, Users, Brain, Leaf, ArrowRight, ChevronLeft, ChevronRight, RefreshCcw, Scissors, Sun, Moon, Sprout, Flag, AlertTriangle, Scale } from "lucide-react";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useLocation } from "wouter";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { getActivityTypeInfo, getStatusInfo } from "@/config/fieldNotebook";
+
+// Fecha local de México "YYYY-MM-DD"
+function todayMx(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
+}
+
+function formatShortDate(d?: string | null): string {
+  if (!d) return "—";
+  return new Date(d + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" });
+}
+
+// Fase del ciclo (misma lógica que la página Ciclos)
+function cyclePhase(c: { endDate: string | null; harvestEndDate: string | null; stats: { total: number } | null }, today: string) {
+  if (c.endDate && c.endDate < today) return { label: "Cerrado", color: "bg-gray-100 text-gray-600 border-gray-200", icon: Moon };
+  if (c.harvestEndDate) return { label: "Post-cosecha", color: "bg-purple-50 text-purple-700 border-purple-200", icon: Scissors };
+  if (c.stats && c.stats.total > 0) return { label: "Cosecha activa", color: "bg-green-50 text-green-700 border-green-200", icon: Sun };
+  return { label: "En desarrollo", color: "bg-blue-50 text-blue-700 border-blue-200", icon: Sprout };
+}
 
 const UPDATE_VERSION = "2.0";
 
@@ -72,6 +91,57 @@ function HomeContent() {
   const [tourStep, setTourStep] = useState(0);
   const [, navigate] = useLocation();
 
+  // ====== CICLOS DE PRODUCCIÓN ======
+  const [selectedCycleId, setSelectedCycleId] = useState<number | null>(null);
+  const [cycleInitDone, setCycleInitDone] = useState(false);
+  const today = todayMx();
+
+  const { data: cyclesOverview, isLoading: cyclesLoading } = trpc.cycles.overview.useQuery(undefined, {
+    enabled: !!user,
+    staleTime: 2 * 60 * 1000,
+    refetchInterval: 3 * 60 * 1000,
+  });
+
+  const cycles = cyclesOverview?.cycles ?? [];
+  const cyclesExist = cycles.length > 0;
+  const activeCycle = cycles.find((c) => c.id === cyclesOverview?.activeCycleId) ?? null;
+  const harvestActive = !!cyclesOverview?.harvestActive;
+
+  // Al cargar: si la cosecha del ciclo actual está activa, es la que roba la atención
+  useEffect(() => {
+    if (!cyclesOverview || cycleInitDone) return;
+    if (cyclesOverview.harvestActive && cyclesOverview.activeCycleId) {
+      setSelectedCycleId(cyclesOverview.activeCycleId);
+    }
+    setCycleInitDone(true);
+  }, [cyclesOverview, cycleInitDone]);
+
+  const selectedCycle = cycles.find((c) => c.id === selectedCycleId) ?? null;
+
+  // Rango de fechas del ciclo seleccionado para acotar las estadísticas de cosecha
+  const cycleScope = useMemo(() => {
+    if (!selectedCycle) return {} as { startDate?: string; endDate?: string };
+    return {
+      startDate: selectedCycle.startDate,
+      endDate: selectedCycle.harvestEndDate ?? selectedCycle.endDate ?? undefined,
+    };
+  }, [selectedCycle]);
+
+  const selectCycle = useCallback((id: number | null) => {
+    setSelectedCycleId(id);
+    setSelectedMonth('all');
+  }, []);
+
+  // Actividades de la libreta de campo (realizadas / por realizar)
+  const { data: notebookData, isLoading: notebookLoading } = trpc.fieldNotebook.dashboard.useQuery(
+    { startDate: activeCycle?.startDate ?? undefined },
+    {
+      enabled: !!user,
+      staleTime: 60 * 1000,
+      refetchInterval: 3 * 60 * 1000,
+    }
+  );
+
   // Mostrar modal de novedades una vez por version
   useEffect(() => {
     if (!user) return;
@@ -102,8 +172,8 @@ function HomeContent() {
   
   // ====== OPTIMIZACIÓN: Usar endpoints agregados en lugar de descargar todas las cajas ======
   
-  // 1. Estadísticas agregadas (SUM, COUNT en el servidor)
-  const { data: stats, isLoading: statsLoading } = trpc.boxes.dashboardStats.useQuery(undefined, {
+  // 1. Estadísticas agregadas (SUM, COUNT en el servidor), acotadas al ciclo seleccionado
+  const { data: stats, isLoading: statsLoading } = trpc.boxes.dashboardStats.useQuery(cycleScope, {
     enabled: !!user,
     staleTime: 2 * 60 * 1000,
     refetchInterval: 3 * 60 * 1000,
@@ -111,7 +181,7 @@ function HomeContent() {
 
   // 2. Datos diarios agregados para la gráfica (GROUP BY fecha en el servidor)
   const { data: dailyData, isLoading: chartLoading } = trpc.boxes.dailyChartData.useQuery(
-    { month: selectedMonth },
+    { month: selectedMonth, ...cycleScope },
     {
       enabled: !!user,
       staleTime: 2 * 60 * 1000,
@@ -119,8 +189,8 @@ function HomeContent() {
     }
   );
 
-  // 3. Meses disponibles (DISTINCT en el servidor)
-  const { data: availableMonths } = trpc.boxes.availableMonths.useQuery(undefined, {
+  // 3. Meses disponibles (DISTINCT en el servidor), acotados al ciclo seleccionado
+  const { data: availableMonths } = trpc.boxes.availableMonths.useQuery(cycleScope, {
     enabled: !!user,
     staleTime: 10 * 60 * 1000,
   });
@@ -259,6 +329,10 @@ function HomeContent() {
   }
 
   const isLoadingData = statsLoading;
+  // Sin ciclos configurados el dashboard se comporta exactamente como antes;
+  // con ciclos, el detalle de cosecha solo se muestra para el ciclo seleccionado
+  const showHarvestDetail = !cyclesExist || !!selectedCycle;
+  const activePhase = activeCycle ? cyclePhase(activeCycle, today) : null;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24 pt-8">
@@ -267,12 +341,145 @@ function HomeContent() {
         <div className="mb-6 md:mb-8 flex items-center gap-3 md:gap-4">
           <img src={APP_LOGO} alt="Agratec" className="h-12 w-12 md:h-16 md:w-16" />
           <div>
-            <h1 className="text-2xl md:text-4xl font-bold text-green-900">Dashboard de Cosecha</h1>
+            <h1 className="text-2xl md:text-4xl font-bold text-green-900">
+              {cyclesExist ? "Dashboard" : "Dashboard de Cosecha"}
+            </h1>
             <p className="text-sm md:text-base text-green-700">Bienvenido, {user.name}</p>
           </div>
         </div>
 
-        {isLoadingData ? (
+        {/* Banda del ciclo activo */}
+        {activeCycle && activePhase && (
+          <GlassCard className="mb-4 md:mb-6 p-4" hover={false}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <RefreshCcw className="h-5 w-5 text-green-600" />
+                <span className="font-bold text-green-900">{activeCycle.name}</span>
+                <span className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${activePhase.color}`}>
+                  <activePhase.icon className="h-3.5 w-3.5" /> {activePhase.label}
+                </span>
+                <span className="text-xs md:text-sm text-green-600">
+                  <Scissors className="mr-1 inline h-3.5 w-3.5" />
+                  Inicio (poda): {formatShortDate(activeCycle.startDate)}
+                </span>
+                {activeCycle.harvestStartDetected && (
+                  <span className="text-xs md:text-sm text-green-600">
+                    <Sun className="mr-1 inline h-3.5 w-3.5" />
+                    Cosecha: {formatShortDate(activeCycle.harvestStartDetected)}
+                    {activeCycle.harvestEndDate ? ` – ${formatShortDate(activeCycle.harvestEndDate)}` : " (en curso)"}
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => navigate("/cycles")}
+                className="flex items-center gap-1 text-sm font-medium text-green-700 hover:text-green-900"
+              >
+                Gestionar ciclos <ArrowRight className="h-4 w-4" />
+              </button>
+            </div>
+          </GlassCard>
+        )}
+
+        {/* Invitación a configurar el primer ciclo (solo admin, no invasivo) */}
+        {!cyclesLoading && !cyclesExist && user.role === "admin" && (
+          <button
+            onClick={() => navigate("/cycles")}
+            className="mb-4 md:mb-6 flex w-full items-center gap-3 rounded-2xl border border-dashed border-green-300 bg-green-50/60 p-3 text-left text-sm text-green-700 transition hover:bg-green-100/60"
+          >
+            <RefreshCcw className="h-5 w-5 shrink-0 text-green-600" />
+            <span>
+              <strong>Nuevo:</strong> registra tus ciclos de producción (inician con la poda/dormancia) para agrupar
+              la cosecha por temporada y poner la libreta de campo al frente. <span className="underline">Configurar ciclos →</span>
+            </span>
+          </button>
+        )}
+
+        {/* Libreta de campo en protagonismo cuando no hay cosecha activa */}
+        {cyclesExist && !harvestActive && (
+          <div className="mb-4 md:mb-6">
+            <FieldNotebookPanel
+              data={notebookData}
+              loading={notebookLoading}
+              spotlight
+              today={today}
+              onGo={() => navigate("/field-notebook")}
+            />
+          </div>
+        )}
+
+        {/* Cosecha agrupada por ciclos */}
+        {cyclesExist && (
+          <div className="mb-4 md:mb-6">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-lg md:text-2xl font-semibold text-green-900">
+                {harvestActive ? "Cosecha por ciclo" : "Cosecha de ciclos anteriores"}
+              </h2>
+              <span className="text-xs md:text-sm text-green-600">Toca un ciclo para ver su detalle</span>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {cycles.map((c) => {
+                const phase = cyclePhase(c, today);
+                const isSelected = c.id === selectedCycleId;
+                const isCurrent = c.id === cyclesOverview?.activeCycleId;
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => selectCycle(isSelected ? null : c.id)}
+                    className={`rounded-3xl border bg-white/40 p-4 text-left shadow-sm backdrop-blur-xl transition hover:shadow-md ${
+                      isSelected ? "border-green-500 ring-2 ring-green-400/50" : "border-green-200/40"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-green-900">{c.name}</span>
+                      {isCurrent ? (
+                        <span className="rounded-full bg-green-600 px-2.5 py-0.5 text-[10px] font-bold text-white">ACTUAL</span>
+                      ) : (
+                        <span className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${phase.color}`}>
+                          {phase.label}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-xs text-green-600">
+                      {formatShortDate(c.startDate)} – {c.endDate ? formatShortDate(c.endDate) : "abierto"}
+                    </p>
+                    {c.stats && c.stats.total > 0 ? (
+                      <div className="mt-3 flex items-center gap-4 text-sm">
+                        <span className="flex items-center gap-1 text-green-900">
+                          <Package className="h-4 w-4 text-green-500" />
+                          <strong>{c.stats.total.toLocaleString()}</strong> cajas
+                        </span>
+                        <span className="flex items-center gap-1 text-green-900">
+                          <Scale className="h-4 w-4 text-green-500" />
+                          <strong>{c.stats.totalWeight.toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong> kg
+                        </span>
+                        <span className="flex items-center gap-1 text-green-900">
+                          <CheckCircle className="h-4 w-4 text-green-500" />
+                          <strong>{c.stats.firstQualityPercent}%</strong> 1ra
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-sm text-green-500">Sin cosecha registrada</p>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Título del detalle del ciclo seleccionado */}
+        {cyclesExist && selectedCycle && (
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-lg md:text-2xl font-semibold text-green-900">
+              Cosecha — {selectedCycle.name}
+            </h2>
+            <button onClick={() => selectCycle(null)} className="text-sm text-green-600 hover:text-green-900">
+              Ocultar detalle ✕
+            </button>
+          </div>
+        )}
+
+        {!showHarvestDetail ? null : isLoadingData ? (
           <div className="space-y-6 animate-pulse">
             <div className="grid gap-4 md:gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
               {[1, 2, 3].map(i => (
@@ -503,14 +710,20 @@ function HomeContent() {
         ) : (
           <GlassCard className="p-8 md:p-12 text-center">
             <Package className="mx-auto mb-4 h-16 w-16 text-green-300" />
-            <h3 className="mb-2 text-xl font-semibold text-green-900">No hay datos disponibles</h3>
-            <p className="text-green-600">Sincroniza datos desde KoboToolbox para ver estadísticas</p>
+            <h3 className="mb-2 text-xl font-semibold text-green-900">
+              {selectedCycle ? "Sin cosecha en este ciclo" : "No hay datos disponibles"}
+            </h3>
+            <p className="text-green-600">
+              {selectedCycle
+                ? "Todavía no hay cajas registradas dentro de las fechas de este ciclo"
+                : "Sincroniza datos desde KoboToolbox para ver estadísticas"}
+            </p>
           </GlassCard>
         )}
       </div>
 
       {/* Tabla de Temperatura y Cosecha - AHORA BASADA EN chartData (cosecha), NO en weatherData */}
-      {chartData.length > 0 && (
+      {showHarvestDetail && chartData.length > 0 && (
         <div className="container px-3 md:px-6 mt-6 md:mt-8">
           <GlassCard className="p-4 md:p-6">
             <div className="mb-4 md:mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -648,6 +861,18 @@ function HomeContent() {
               {sortedTableData.length} días con cosecha
             </div>
           </GlassCard>
+        </div>
+      )}
+
+      {/* Libreta de campo (versión compacta) cuando la cosecha roba la atención */}
+      {cyclesExist && harvestActive && (
+        <div className="container px-3 md:px-6 mt-6 md:mt-8">
+          <FieldNotebookPanel
+            data={notebookData}
+            loading={notebookLoading}
+            today={today}
+            onGo={() => navigate("/field-notebook")}
+          />
         </div>
       )}
 
@@ -829,5 +1054,157 @@ function HomeContent() {
         );
       })()}
     </div>
+  );
+}
+
+// ===== PANEL DE LIBRETA DE CAMPO =====
+// spotlight=true: versión protagonista (sin cosecha activa) — más grande y al frente.
+// spotlight=false: versión compacta debajo de la cosecha.
+interface NotebookActivity {
+  id: number;
+  activityType: string;
+  activitySubtype: string | null;
+  description: string;
+  performedBy: string;
+  activityDate: string | Date;
+  status: string;
+  parcelNames: string[];
+}
+
+interface FieldNotebookPanelProps {
+  data?: {
+    pending: NotebookActivity[];
+    recent: NotebookActivity[];
+    counts: Record<string, number>;
+  };
+  loading: boolean;
+  spotlight?: boolean;
+  today: string;
+  onGo: () => void;
+}
+
+function activityDateStr(d: string | Date): string {
+  if (typeof d === "string") return d.slice(0, 10);
+  return new Date(d).toISOString().slice(0, 10);
+}
+
+function ActivityRow({ activity, today, done }: { activity: NotebookActivity; today: string; done?: boolean }) {
+  const typeInfo = getActivityTypeInfo(activity.activityType);
+  const statusInfo = getStatusInfo(activity.status);
+  const TypeIcon = typeInfo.icon;
+  const dateStr = activityDateStr(activity.activityDate);
+  const isOverdue = !done && activity.status === "planificada" && dateStr < today;
+
+  return (
+    <div className={`flex items-start gap-3 rounded-2xl border p-3 ${isOverdue ? "border-red-200 bg-red-50/60" : "border-green-100 bg-white/60"}`}>
+      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${typeInfo.color}`}>
+        <TypeIcon className="h-4.5 w-4.5" style={{ width: 18, height: 18 }} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-semibold text-green-900">{typeInfo.label}</span>
+          {activity.activitySubtype && (
+            <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700">{activity.activitySubtype}</span>
+          )}
+          {isOverdue ? (
+            <span className="flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-600">
+              <AlertTriangle className="h-3 w-3" /> Atrasada
+            </span>
+          ) : (
+            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${statusInfo.color}`}>{statusInfo.label}</span>
+          )}
+        </div>
+        <p className="mt-0.5 truncate text-xs text-gray-600">{activity.description}</p>
+        <p className="mt-0.5 text-[11px] text-green-600">
+          {new Date(dateStr + "T12:00:00").toLocaleDateString("es-MX", { weekday: "short", day: "numeric", month: "short" })}
+          {activity.parcelNames.length > 0 && <> · {activity.parcelNames.join(", ")}</>}
+          {activity.performedBy && <> · {activity.performedBy}</>}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function FieldNotebookPanel({ data, loading, spotlight, today, onGo }: FieldNotebookPanelProps) {
+  const pending = data?.pending ?? [];
+  const recent = data?.recent ?? [];
+  const counts = data?.counts ?? { planificada: 0, en_progreso: 0, completada: 0, cancelada: 0 };
+  const pendingCount = (counts.planificada ?? 0) + (counts.en_progreso ?? 0);
+  const shownPending = spotlight ? pending : pending.slice(0, 5);
+  const shownRecent = spotlight ? recent : recent.slice(0, 5);
+
+  return (
+    <GlassCard className={spotlight ? "p-4 md:p-6" : "p-4"} hover={false}>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-green-400 to-emerald-500 shadow">
+            <BookOpen className="h-5 w-5 text-white" />
+          </div>
+          <div>
+            <h2 className={`font-semibold text-green-900 ${spotlight ? "text-lg md:text-2xl" : "text-base md:text-lg"}`}>
+              Libreta de Campo
+            </h2>
+            <p className="text-xs md:text-sm text-green-600">
+              {pendingCount > 0
+                ? `${pendingCount} actividad${pendingCount === 1 ? "" : "es"} por realizar · ${counts.completada ?? 0} realizada${(counts.completada ?? 0) === 1 ? "" : "s"}`
+                : `${counts.completada ?? 0} actividad${(counts.completada ?? 0) === 1 ? "" : "es"} realizada${(counts.completada ?? 0) === 1 ? "" : "s"}`}
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={onGo}
+          className="flex items-center gap-1.5 rounded-full bg-green-600 px-4 py-2 text-sm font-medium text-white shadow transition hover:bg-green-700"
+        >
+          Ir a la libreta <ArrowRight className="h-4 w-4" />
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex h-24 items-center justify-center text-green-600">
+          <RefreshCw className="mr-2 h-5 w-5 animate-spin" /> Cargando actividades...
+        </div>
+      ) : (
+        <div className={`grid gap-4 ${spotlight ? "lg:grid-cols-2" : "md:grid-cols-2"}`}>
+          {/* Por realizar */}
+          <div>
+            <h3 className="mb-2 flex items-center gap-1.5 text-sm font-bold text-green-800">
+              <CalendarIcon className="h-4 w-4" /> Por realizar
+              {pendingCount > 0 && (
+                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-bold text-blue-700">{pendingCount}</span>
+              )}
+            </h3>
+            {shownPending.length > 0 ? (
+              <div className={`space-y-2 ${spotlight ? "max-h-[380px]" : "max-h-[260px]"} overflow-y-auto pr-1`}>
+                {shownPending.map((a) => (
+                  <ActivityRow key={a.id} activity={a} today={today} />
+                ))}
+              </div>
+            ) : (
+              <p className="rounded-2xl border border-dashed border-green-200 p-4 text-center text-sm text-green-500">
+                No hay actividades pendientes 🎉
+              </p>
+            )}
+          </div>
+
+          {/* Realizadas */}
+          <div>
+            <h3 className="mb-2 flex items-center gap-1.5 text-sm font-bold text-green-800">
+              <CheckCircle className="h-4 w-4" /> Realizadas recientemente
+            </h3>
+            {shownRecent.length > 0 ? (
+              <div className={`space-y-2 ${spotlight ? "max-h-[380px]" : "max-h-[260px]"} overflow-y-auto pr-1`}>
+                {shownRecent.map((a) => (
+                  <ActivityRow key={a.id} activity={a} today={today} done />
+                ))}
+              </div>
+            ) : (
+              <p className="rounded-2xl border border-dashed border-green-200 p-4 text-center text-sm text-green-500">
+                Aún no hay actividades completadas
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </GlassCard>
   );
 }

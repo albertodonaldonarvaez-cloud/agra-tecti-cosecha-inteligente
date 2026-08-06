@@ -42,7 +42,11 @@ import com.agratec.fieldapp.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NotesListScreen(onCreateNote: () -> Unit, onLogout: () -> Unit) {
+fun NotesListScreen(
+    onCreateNote: () -> Unit,
+    onLogout: () -> Unit,
+    onOpenNotebook: (() -> Unit)? = null,
+) {
     val context = LocalContext.current
     val repository = remember { FieldNoteRepository(context) }
     val notes by repository.getAllNotes().collectAsState(initial = emptyList())
@@ -414,6 +418,9 @@ fun NotesListScreen(onCreateNote: () -> Unit, onLogout: () -> Unit) {
             onSync = { SyncWorker.enqueueImmediateSync(context) },
             onCreateNote = onCreateNote,
             onLogout = { showLogoutDialog = true },
+            switchLabel = "Libreta",
+            switchIcon = if (onOpenNotebook != null) Icons.Default.MenuBook else null,
+            onSwitch = onOpenNotebook,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }

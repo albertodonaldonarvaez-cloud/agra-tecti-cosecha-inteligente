@@ -11,6 +11,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.agratec.fieldapp.data.repository.AuthRepository
+import com.agratec.fieldapp.ui.screens.ActivitiesListScreen
+import com.agratec.fieldapp.ui.screens.CreateActivityScreen
 import com.agratec.fieldapp.ui.screens.CreateNoteScreen
 import com.agratec.fieldapp.ui.screens.LoginScreen
 import com.agratec.fieldapp.ui.screens.NotesListScreen
@@ -19,6 +21,7 @@ import com.agratec.fieldapp.ui.theme.AgraFieldTheme
 /**
  * Activity principal con navegación simple entre:
  * - Login → Notas → Crear Nota
+ * - Notas ↔ Libreta de Campo (actividades) → Crear Actividad
  *
  * Usa navegación basada en estado (sin Navigation Component)
  * para mantener la simplicidad del scaffolding.
@@ -40,7 +43,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-enum class Screen { Login, NotesList, CreateNote }
+enum class Screen { Login, NotesList, CreateNote, ActivitiesList, CreateActivity }
 
 @Composable
 fun AppNavigation() {
@@ -59,10 +62,19 @@ fun AppNavigation() {
         transitionSpec = {
             when (targetState) {
                 Screen.Login -> fadeIn() togetherWith fadeOut()
-                Screen.CreateNote -> slideInHorizontally { it } + fadeIn() togetherWith
-                        slideOutHorizontally { -it / 3 } + fadeOut()
+                Screen.CreateNote, Screen.CreateActivity ->
+                    slideInHorizontally { it } + fadeIn() togetherWith
+                            slideOutHorizontally { -it / 3 } + fadeOut()
                 Screen.NotesList -> {
                     if (initialState == Screen.CreateNote) {
+                        slideInHorizontally { -it / 3 } + fadeIn() togetherWith
+                                slideOutHorizontally { it } + fadeOut()
+                    } else {
+                        fadeIn() togetherWith fadeOut()
+                    }
+                }
+                Screen.ActivitiesList -> {
+                    if (initialState == Screen.CreateActivity) {
                         slideInHorizontally { -it / 3 } + fadeIn() togetherWith
                                 slideOutHorizontally { it } + fadeOut()
                     } else {
@@ -79,6 +91,7 @@ fun AppNavigation() {
             )
             Screen.NotesList -> NotesListScreen(
                 onCreateNote = { currentScreen = Screen.CreateNote },
+                onOpenNotebook = { currentScreen = Screen.ActivitiesList },
                 onLogout = {
                     authRepository.logout()
                     currentScreen = Screen.Login
@@ -86,6 +99,17 @@ fun AppNavigation() {
             )
             Screen.CreateNote -> CreateNoteScreen(
                 onBack = { currentScreen = Screen.NotesList }
+            )
+            Screen.ActivitiesList -> ActivitiesListScreen(
+                onCreateActivity = { currentScreen = Screen.CreateActivity },
+                onBackToNotes = { currentScreen = Screen.NotesList },
+                onLogout = {
+                    authRepository.logout()
+                    currentScreen = Screen.Login
+                },
+            )
+            Screen.CreateActivity -> CreateActivityScreen(
+                onBack = { currentScreen = Screen.ActivitiesList }
             )
         }
     }

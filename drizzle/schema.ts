@@ -30,6 +30,8 @@ export const users = mysqlTable("users", {
   canViewWarehouse: boolean("canViewWarehouse").default(true).notNull(),
   canViewCollaborators: boolean("canViewCollaborators").default(false).notNull(),
   canViewLabels: boolean("canViewLabels").default(false).notNull(),
+  canViewCycles: boolean("canViewCycles").default(true).notNull(),
+  canViewReports: boolean("canViewReports").default(true).notNull(),
   // Campos de personalización de perfil
   avatarColor: varchar("avatarColor", { length: 32 }).default("#16a34a"),
   avatarEmoji: varchar("avatarEmoji", { length: 16 }).default("🌿"),
@@ -320,6 +322,26 @@ export const parcelNotes = mysqlTable("parcelNotes", {
 export type ParcelNote = typeof parcelNotes.$inferSelect;
 export type InsertParcelNote = typeof parcelNotes.$inferInsert;
 
+// ===== CICLOS DE PRODUCCIÓN =====
+// El higo se maneja por ciclos: cada ciclo inicia con la poda / dormancia
+// y termina después de la cosecha. Las fechas son "YYYY-MM-DD" (mode string)
+// para comparar directo contra DATE(submissionTime) y activityDate.
+export const productionCycles = mysqlTable("productionCycles", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(), // Ej: "Ciclo 2026-2027"
+  startDate: date("startDate", { mode: "string" }).notNull(), // Inicio del ciclo (poda / dormancia)
+  harvestStartDate: date("harvestStartDate", { mode: "string" }), // Opcional; si es null se detecta con la primera caja del ciclo
+  harvestEndDate: date("harvestEndDate", { mode: "string" }), // Finalización de cosecha
+  endDate: date("endDate", { mode: "string" }), // Finalización del ciclo (null = ciclo abierto)
+  notes: text("notes"),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ProductionCycle = typeof productionCycles.$inferSelect;
+export type InsertProductionCycle = typeof productionCycles.$inferInsert;
+
 // ===== LIBRETA DE CAMPO =====
 
 // Tabla principal de actividades de campo
@@ -339,6 +361,9 @@ export const fieldActivities = mysqlTable("fieldActivities", {
   weatherCondition: varchar("weatherCondition", { length: 128 }),
   temperature: varchar("temperature", { length: 16 }),
   status: mysqlEnum("status", ["planificada", "en_progreso", "completada", "cancelada"]).default("planificada").notNull(),
+  // UUID generado por la app móvil: clave de idempotencia para sync offline
+  // (null en actividades creadas desde la web)
+  clientUuid: varchar("clientUuid", { length: 64 }).unique(),
   createdByUserId: int("createdByUserId").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

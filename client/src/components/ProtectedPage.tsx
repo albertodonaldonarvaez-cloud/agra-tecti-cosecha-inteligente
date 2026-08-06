@@ -21,7 +21,10 @@ type ViewPermission =
   | "canViewFieldNotes"
   | "canViewFieldNotebook"
   | "canViewWarehouse"
-  | "canViewCollaborators";
+  | "canViewCollaborators"
+  | "canViewLabels"
+  | "canViewCycles"
+  | "canViewReports";
 
 interface ProtectedPageProps {
   children: React.ReactNode;
