@@ -11,9 +11,11 @@ import {
 } from "lucide-react";
 
 // ===== CONSTANTES =====
+// Respaldo por si el catálogo del servidor aún no responde.
+// El catálogo real vive en collaboratorRoles y lo comparten la web y la app.
 const ROLES_SUGERIDOS = [
   "Jornalero", "Caporal", "Operador de maquinaria", "Regador",
-  "Fumigador", "Podador", "Supervisor", "Chofer", "Otro",
+  "Fumigador", "Podador", "Supervisor", "Chofer",
 ];
 
 const STATUS_LABELS: Record<string, { label: string; color: string; icon: any }> = {
@@ -43,17 +45,25 @@ function CollaboratorsContent() {
   const [formName, setFormName] = useState("");
   const [formPhone, setFormPhone] = useState("");
   const [formRole, setFormRole] = useState("");
+  const [customRole, setCustomRole] = useState(false); // opción "Otro"
 
   // Queries
   const collabQuery = trpc.collaborators.list.useQuery();
+  // Catálogo de puestos compartido con la app móvil
+  const rolesQuery = trpc.collaborators.listRoles.useQuery(undefined, { staleTime: 300_000 });
+  const roleOptions = useMemo(() => {
+    const fromServer = ((rolesQuery.data as any[]) || []).map(r => r.name);
+    // Unión con el respaldo local: si el catálogo aún no carga, hay opciones
+    return Array.from(new Set([...fromServer, ...ROLES_SUGERIDOS])).sort((a, b) => a.localeCompare(b, "es"));
+  }, [rolesQuery.data]);
 
   // Mutations
   const createMut = trpc.collaborators.create.useMutation({
-    onSuccess: () => { collabQuery.refetch(); toast.success("Colaborador agregado exitosamente"); resetForm(); },
+    onSuccess: () => { collabQuery.refetch(); rolesQuery.refetch(); toast.success("Colaborador agregado exitosamente"); resetForm(); },
     onError: (e) => toast.error(e.message),
   });
   const updateMut = trpc.collaborators.update.useMutation({
-    onSuccess: () => { collabQuery.refetch(); toast.success("Colaborador actualizado"); resetForm(); },
+    onSuccess: () => { collabQuery.refetch(); rolesQuery.refetch(); toast.success("Colaborador actualizado"); resetForm(); },
     onError: (e) => toast.error(e.message),
   });
   const deleteMut = trpc.collaborators.delete.useMutation({
@@ -92,7 +102,7 @@ function CollaboratorsContent() {
   }, [collabQuery.data]);
 
   function resetForm() {
-    setFormName(""); setFormPhone(""); setFormRole("");
+    setFormName(""); setFormPhone(""); setFormRole(""); setCustomRole(false);
     setShowForm(false); setEditingId(null);
   }
 
@@ -100,6 +110,8 @@ function CollaboratorsContent() {
     setFormName(collab.name);
     setFormPhone(collab.phone || "");
     setFormRole(collab.role || "");
+    // Un puesto que no está en el catálogo se edita como texto libre
+    setCustomRole(!!collab.role && !roleOptions.includes(collab.role));
     setEditingId(collab.id);
     setShowForm(true);
   }
@@ -228,13 +240,32 @@ function CollaboratorsContent() {
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Rol / Puesto</label>
                   <select
-                    value={formRole}
-                    onChange={(e) => setFormRole(e.target.value)}
+                    value={customRole ? "__otro__" : formRole}
+                    onChange={(e) => {
+                      if (e.target.value === "__otro__") { setCustomRole(true); setFormRole(""); }
+                      else { setCustomRole(false); setFormRole(e.target.value); }
+                    }}
                     className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white/70 focus:ring-2 focus:ring-green-300 outline-none text-sm"
                   >
                     <option value="">Seleccionar rol...</option>
-                    {ROLES_SUGERIDOS.map(r => <option key={r} value={r}>{r}</option>)}
+                    {roleOptions.map(r => <option key={r} value={r}>{r}</option>)}
+                    <option value="__otro__">Otro (escribirlo)…</option>
                   </select>
+                  {customRole && (
+                    <input
+                      type="text"
+                      value={formRole}
+                      onChange={(e) => setFormRole(e.target.value.slice(0, 128))}
+                      placeholder="Escribe el puesto"
+                      autoFocus
+                      className="mt-2 w-full px-4 py-2.5 rounded-xl border border-green-200 bg-white/70 focus:ring-2 focus:ring-green-300 outline-none text-sm"
+                    />
+                  )}
+                  {customRole && (
+                    <p className="mt-1 text-[11px] text-gray-400">
+                      El puesto nuevo queda en el catálogo y aparecerá también en la app.
+                    </p>
+                  )}
                 </div>
                 <div className="flex gap-3 pt-2">
                   <button

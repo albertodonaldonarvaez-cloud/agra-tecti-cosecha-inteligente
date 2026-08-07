@@ -16,32 +16,33 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
+import com.agratec.fieldapp.data.local.entity.ActivityProduct
 import com.agratec.fieldapp.data.local.entity.CollaboratorEntity
 import com.agratec.fieldapp.data.local.entity.ParcelEntity
+import com.agratec.fieldapp.data.local.entity.ProductEntity
 import com.agratec.fieldapp.data.local.entity.WorkSession
 import com.agratec.fieldapp.data.repository.AuthRepository
 import com.agratec.fieldapp.data.repository.CollaboratorRepository
 import com.agratec.fieldapp.data.repository.FieldActivityRepository
 import com.agratec.fieldapp.data.repository.ParcelRepository
-import com.agratec.fieldapp.ui.components.GlassCard
+import com.agratec.fieldapp.data.repository.ProductRepository
+import com.agratec.fieldapp.ui.components.*
 import com.agratec.fieldapp.ui.theme.*
 import kotlinx.coroutines.launch
 import java.io.File
@@ -54,8 +55,9 @@ import java.util.TimeZone
  * Crear una actividad de la libreta de campo (offline-first).
  * - Estado: realizada / en proceso / planificada
  * - Horas del día trabajado, o varias jornadas si tomó más de un día
- * - Colaboradores de campo (alta rápida incluida) para saber quién la hizo
- * - Varias fotos (varios ángulos de la parcela)
+ * - Personal de campo (alta rápida incluida) para saber quién la hizo
+ * - Productos del almacén: cuánto se planea usar y cuánto se usó
+ * - Varias fotos, siempre con la cámara en vivo
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -65,8 +67,10 @@ fun CreateActivityScreen(onBack: () -> Unit) {
     val repository = remember { FieldActivityRepository(context) }
     val parcelRepository = remember { ParcelRepository(context) }
     val collaboratorRepository = remember { CollaboratorRepository(context) }
+    val productRepository = remember { ProductRepository(context) }
     val parcels by parcelRepository.getAllParcels().collectAsState(initial = emptyList())
     val collaborators by collaboratorRepository.getAll().collectAsState(initial = emptyList())
+    val warehouse by productRepository.getAll().collectAsState(initial = emptyList())
 
     var selectedType by remember { mutableStateOf("") }
     var selectedSubtype by remember { mutableStateOf("") }
@@ -86,12 +90,16 @@ fun CreateActivityScreen(onBack: () -> Unit) {
     var multiDay by remember { mutableStateOf(false) }
     var sessions by remember { mutableStateOf<List<WorkSession>>(emptyList()) }
 
+    // Productos del almacén consumidos en la actividad
+    var products by remember { mutableStateOf<List<ActivityProduct>>(emptyList()) }
+    var showProductPicker by remember { mutableStateOf(false) }
+
     // Fotos tomadas (rutas reales en el almacenamiento de la app)
     // rememberSaveable: la cámara puede matar el proceso; sin esto las fotos se perderían
-    var photoPaths by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
-    var pendingPhotoPath by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    var photoPaths by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
+    var pendingPhotoPath by rememberSaveable { mutableStateOf<String?>(null) }
 
-    // Alta rápida de colaborador
+    // Alta rápida de personal
     var showNewCollabDialog by remember { mutableStateOf(false) }
     var newCollabName by remember { mutableStateOf("") }
     var newCollabRole by remember { mutableStateOf("") }
@@ -99,6 +107,12 @@ fun CreateActivityScreen(onBack: () -> Unit) {
     // ── Selección de fechas/horas con diálogos ──
     var datePickerTarget by remember { mutableStateOf<String?>(null) } // "main" o índice de jornada
     var timePickerTarget by remember { mutableStateOf<Pair<String, String>?>(null) } // (target, "start"/"end")
+
+    LaunchedEffect(Unit) {
+        // Traer catálogos frescos: personal y almacén dados de alta en otro lado
+        collaboratorRepository.pullFromServer()
+        productRepository.pullFromServer()
+    }
 
     fun createImageFile(): Pair<Uri, String> {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
@@ -194,24 +208,39 @@ fun CreateActivityScreen(onBack: () -> Unit) {
         )
     }
 
-    // ── Diálogo de alta rápida de colaborador ──
+    // ── Alta rápida de personal ──
     if (showNewCollabDialog) {
+        val roles = remember { collaboratorRepository.roles() }
         AlertDialog(
             onDismissRequest = { showNewCollabDialog = false },
-            title = { Text("Nuevo colaborador de campo", color = TextPrimary, fontWeight = FontWeight.Bold) },
+            title = { Text("Nuevo personal de campo", color = TextPrimary, fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                ) {
+                    AgraTextField(
                         value = newCollabName,
                         onValueChange = { newCollabName = it.take(255) },
-                        label = { Text("Nombre *") },
-                        singleLine = true,
+                        label = "Nombre *",
                     )
-                    OutlinedTextField(
+                    Text("Puesto", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        roles.forEach { role ->
+                            AgraChip(
+                                label = role,
+                                selected = newCollabRole == role,
+                                onClick = { newCollabRole = if (newCollabRole == role) "" else role },
+                            )
+                        }
+                    }
+                    AgraTextField(
                         value = newCollabRole,
                         onValueChange = { newCollabRole = it.take(128) },
-                        label = { Text("Rol (ej. Jornalero, Encargado de riego)") },
-                        singleLine = true,
+                        label = "O escribe otro puesto",
                     )
                 }
             },
@@ -237,37 +266,31 @@ fun CreateActivityScreen(onBack: () -> Unit) {
         )
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                brush = Brush.linearGradient(
-                    colors = listOf(AgraGreenSurface, AgraEmerald50, AgraTeal50),
-                    start = Offset(0f, 0f),
-                    end = Offset(1000f, 2000f),
+    // ── Selector de producto del almacén ──
+    if (showProductPicker) {
+        ProductPickerDialog(
+            warehouse = warehouse.filter { w -> products.none { it.productUuid == w.clientUuid } },
+            onDismiss = { showProductPicker = false },
+            onPick = { product ->
+                // Al elegir el producto se carga sola su unidad de medida
+                products = products + ActivityProduct(
+                    productUuid = product.clientUuid,
+                    serverId = product.serverId,
+                    name = product.displayName(),
+                    unit = product.unit,
                 )
-            ),
-    ) {
+                showProductPicker = false
+            },
+        )
+    }
+
+    AgraScreen {
         Column(Modifier.fillMaxSize()) {
-            // ── Header ──
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .shadow(elevation = 2.dp, shape = RoundedCornerShape(0.dp), ambientColor = Color.Black.copy(alpha = 0.04f))
-                    .background(Color.White.copy(alpha = 0.88f))
-                    .statusBarsPadding()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver", tint = TextPrimary)
-                    }
-                    Column {
-                        Text("Nueva Actividad", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                        Text("Libreta de campo", color = TextSecondary, fontSize = 12.sp)
-                    }
-                }
-            }
+            AgraHeader(
+                title = "Nueva Actividad",
+                subtitle = "Libreta de campo",
+                onBack = onBack,
+            )
 
             Column(
                 modifier = Modifier
@@ -277,29 +300,24 @@ fun CreateActivityScreen(onBack: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 // ── Tipo de actividad ──
-                GlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Text("Tipo de actividad *", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
+                AgraSection(title = "Tipo de actividad *") {
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         ACTIVITY_TYPES_UI.forEach { type ->
-                            FilterChip(
+                            AgraChip(
+                                label = "${type.emoji} ${type.label}",
                                 selected = selectedType == type.value,
                                 onClick = { selectedType = type.value; selectedSubtype = "" },
-                                label = { Text("${type.emoji} ${type.label}", fontSize = 12.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = type.color.copy(alpha = 0.9f),
-                                    selectedLabelColor = Color.White,
-                                ),
+                                color = type.color,
                             )
                         }
                     }
 
                     val subtypes = ACTIVITY_SUBTYPES_UI[selectedType].orEmpty()
                     if (subtypes.isNotEmpty()) {
-                        Spacer(Modifier.height(10.dp))
+                        Spacer(Modifier.height(12.dp))
                         Text("Subtipo (opcional)", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                         Spacer(Modifier.height(6.dp))
                         FlowRow(
@@ -307,14 +325,10 @@ fun CreateActivityScreen(onBack: () -> Unit) {
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             subtypes.forEach { sub ->
-                                FilterChip(
+                                AgraChip(
+                                    label = sub,
                                     selected = selectedSubtype == sub,
                                     onClick = { selectedSubtype = if (selectedSubtype == sub) "" else sub },
-                                    label = { Text(sub, fontSize = 11.sp) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = AgraGreen,
-                                        selectedLabelColor = Color.White,
-                                    ),
                                 )
                             }
                         }
@@ -322,33 +336,15 @@ fun CreateActivityScreen(onBack: () -> Unit) {
                 }
 
                 // ── Estado, fecha y horas ──
-                GlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Text("Estado y tiempo", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        FilterChip(
-                            selected = statusChoice == "completada",
-                            onClick = { statusChoice = "completada" },
-                            label = { Text("✅ Realizada", fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = StatusResolved, selectedLabelColor = Color.White),
-                        )
-                        FilterChip(
-                            selected = statusChoice == "en_progreso",
-                            onClick = { statusChoice = "en_progreso" },
-                            label = { Text("⏳ En proceso", fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = SyncPending, selectedLabelColor = Color.White),
-                        )
-                        FilterChip(
-                            selected = statusChoice == "planificada",
-                            onClick = { statusChoice = "planificada" },
-                            label = { Text("🗓️ Planificada", fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = StatusInProgress, selectedLabelColor = Color.White),
-                        )
+                AgraSection(title = "Estado y tiempo") {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        AgraChip("✅ Realizada", statusChoice == "completada", { statusChoice = "completada" }, color = StatusResolved)
+                        AgraChip("⏳ En proceso", statusChoice == "en_progreso", { statusChoice = "en_progreso" }, color = SyncPending)
+                        AgraChip("🗓️ Planificada", statusChoice == "planificada", { statusChoice = "planificada" }, color = StatusInProgress)
                     }
 
                     Spacer(Modifier.height(12.dp))
 
-                    // Fecha + toggle multi-día
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         PickerField(
                             label = if (multiDay) "Primer día" else "Fecha",
@@ -376,7 +372,6 @@ fun CreateActivityScreen(onBack: () -> Unit) {
                     Spacer(Modifier.height(10.dp))
 
                     if (!multiDay) {
-                        // Horas del día (de qué hora a qué hora)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             PickerField(
                                 label = "Desde",
@@ -398,7 +393,6 @@ fun CreateActivityScreen(onBack: () -> Unit) {
                             Text(it, color = AgraGreen, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                     } else {
-                        // Jornadas: un renglón por día con sus horas
                         sessions.forEachIndexed { idx, s ->
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -406,30 +400,21 @@ fun CreateActivityScreen(onBack: () -> Unit) {
                             ) {
                                 Text("Día ${idx + 1}", color = AgraGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(40.dp))
                                 PickerField(
-                                    label = null,
-                                    value = s.workDate,
-                                    icon = Icons.Default.CalendarMonth,
+                                    label = null, value = s.workDate, icon = Icons.Default.CalendarMonth,
                                     onClick = { datePickerTarget = idx.toString() },
-                                    modifier = Modifier.weight(1.3f),
-                                    compact = true,
+                                    modifier = Modifier.weight(1.3f), compact = true,
                                 )
                                 Spacer(Modifier.width(6.dp))
                                 PickerField(
-                                    label = null,
-                                    value = s.startTime ?: "--:--",
-                                    icon = null,
+                                    label = null, value = s.startTime ?: "--:--", icon = null,
                                     onClick = { timePickerTarget = idx.toString() to "start" },
-                                    modifier = Modifier.weight(1f),
-                                    compact = true,
+                                    modifier = Modifier.weight(1f), compact = true,
                                 )
                                 Spacer(Modifier.width(6.dp))
                                 PickerField(
-                                    label = null,
-                                    value = s.endTime ?: "--:--",
-                                    icon = null,
+                                    label = null, value = s.endTime ?: "--:--", icon = null,
                                     onClick = { timePickerTarget = idx.toString() to "end" },
-                                    modifier = Modifier.weight(1f),
-                                    compact = true,
+                                    modifier = Modifier.weight(1f), compact = true,
                                 )
                                 IconButton(onClick = { sessions = sessions.filterIndexed { i, _ -> i != idx } }) {
                                     Icon(Icons.Default.Close, contentDescription = "Quitar día", tint = SyncError, modifier = Modifier.size(16.dp))
@@ -458,18 +443,15 @@ fun CreateActivityScreen(onBack: () -> Unit) {
                     }
                 }
 
-                // ── Colaboradores (quién lo hizo) ──
-                GlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("¿Quién la realiza?", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { showNewCollabDialog = true }) {
-                            Text("+ Nuevo", color = AgraGreen, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
+                // ── Personal (quién lo hizo) ──
+                AgraSection(
+                    title = "¿Quién la realiza?",
+                    actionLabel = "+ Nuevo",
+                    onAction = { showNewCollabDialog = true },
+                ) {
                     if (collaborators.isEmpty()) {
                         Text(
-                            "Da de alta a tu gente de campo con \"+ Nuevo\" para llevar control de quién hizo cada actividad",
+                            "Da de alta a tu gente en la sección Personal (o con \"+ Nuevo\") para llevar control de quién hizo cada actividad",
                             color = TextTertiary, fontSize = 12.sp,
                         )
                     } else {
@@ -478,70 +460,77 @@ fun CreateActivityScreen(onBack: () -> Unit) {
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             collaborators.forEach { collab: CollaboratorEntity ->
-                                FilterChip(
+                                AgraChip(
+                                    label = collab.name + (collab.role?.let { " · $it" } ?: "") + (if (!collab.isSynced) " ⏳" else ""),
                                     selected = selectedCollabUuids.contains(collab.clientUuid),
                                     onClick = {
                                         selectedCollabUuids = if (selectedCollabUuids.contains(collab.clientUuid))
                                             selectedCollabUuids - collab.clientUuid else selectedCollabUuids + collab.clientUuid
                                     },
-                                    label = {
-                                        Text(
-                                            collab.name + (collab.role?.let { " · $it" } ?: "") + (if (!collab.isSynced) " ⏳" else ""),
-                                            fontSize = 11.sp,
-                                        )
-                                    },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = AgraGreen,
-                                        selectedLabelColor = Color.White,
-                                    ),
                                 )
                             }
                         }
                     }
                     if (selectedCollabUuids.isEmpty()) {
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedTextField(
+                        Spacer(Modifier.height(10.dp))
+                        AgraTextField(
                             value = manualPerformedBy,
                             onValueChange = { manualPerformedBy = it.take(255) },
-                            label = { Text("O escribe quién la realiza") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = AgraGreen,
-                                unfocusedBorderColor = CardBorder,
-                            ),
+                            label = "O escribe quién la realiza",
                         )
                     }
                 }
 
+                // ── Productos del almacén ──
+                AgraSection(
+                    title = "Productos del almacén",
+                    hint = "Anota lo que planeas usar; al completarla registras lo que realmente se usó.",
+                    actionLabel = "+ Agregar",
+                    onAction = { showProductPicker = true },
+                ) {
+                    if (products.isEmpty()) {
+                        Text(
+                            if (warehouse.isEmpty())
+                                "Aún no hay productos en el almacén. Agrégalos en la sección Almacén."
+                            else "Sin productos. Toca \"+ Agregar\" para elegirlos del almacén.",
+                            color = TextTertiary, fontSize = 12.sp,
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            products.forEachIndexed { idx, product ->
+                                ProductRow(
+                                    product = product,
+                                    onPlannedChange = { value ->
+                                        products = products.mapIndexed { i, p -> if (i == idx) p.copy(planned = value) else p }
+                                    },
+                                    onUsedChange = { value ->
+                                        products = products.mapIndexed { i, p -> if (i == idx) p.copy(used = value) else p }
+                                    },
+                                    onRemove = { products = products.filterIndexed { i, _ -> i != idx } },
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // ── Descripción ──
-                GlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Text("Descripción *", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
+                AgraSection(title = "Descripción *") {
+                    AgraTextField(
                         value = description,
                         onValueChange = { description = it },
-                        label = { Text("¿Qué se hizo / se hará?") },
+                        label = "¿Qué se hizo / se hará?",
+                        singleLine = false,
                         minLines = 3,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AgraGreen,
-                            unfocusedBorderColor = CardBorder,
-                        ),
                     )
                 }
 
                 // ── Fotos (varios ángulos) ──
-                GlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Fotos (${photoPaths.size})", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) }) {
-                            Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = AgraGreen, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Tomar foto", color = AgraGreen, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
+                AgraSection(
+                    title = "Fotos (${photoPaths.size})",
+                    hint = "Solo cámara: la evidencia se toma en el momento.",
+                    actionLabel = "📷 Tomar foto",
+                    onAction = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) },
+                ) {
                     if (photoPaths.isEmpty()) {
                         Text("Toma varios ángulos de la parcela o del trabajo realizado", color = TextTertiary, fontSize = 12.sp)
                     } else {
@@ -575,9 +564,7 @@ fun CreateActivityScreen(onBack: () -> Unit) {
                 }
 
                 // ── Parcelas ──
-                GlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Text("Parcelas (opcional)", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
+                AgraSection(title = "Parcelas (opcional)") {
                     if (parcels.isEmpty()) {
                         Text("Sin parcelas en el dispositivo — se descargan al sincronizar", color = TextTertiary, fontSize = 12.sp)
                     } else {
@@ -587,16 +574,12 @@ fun CreateActivityScreen(onBack: () -> Unit) {
                         ) {
                             parcels.forEach { parcel: ParcelEntity ->
                                 val id = parcel.serverId
-                                FilterChip(
+                                AgraChip(
+                                    label = parcel.name,
                                     selected = selectedParcels.contains(id),
                                     onClick = {
                                         selectedParcels = if (selectedParcels.contains(id)) selectedParcels - id else selectedParcels + id
                                     },
-                                    label = { Text(parcel.name, fontSize = 11.sp) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = AgraGreen,
-                                        selectedLabelColor = Color.White,
-                                    ),
                                 )
                             }
                         }
@@ -615,8 +598,12 @@ fun CreateActivityScreen(onBack: () -> Unit) {
                 .padding(16.dp)
                 .navigationBarsPadding(),
         ) {
-            val canSave = selectedType.isNotBlank() && description.isNotBlank() && !isSaving
-            Button(
+            AgraPrimaryButton(
+                text = "Guardar Actividad",
+                icon = Icons.Default.Save,
+                enabled = selectedType.isNotBlank() && description.isNotBlank(),
+                loading = isSaving,
+                modifier = Modifier.fillMaxWidth(),
                 onClick = {
                     scope.launch {
                         isSaving = true
@@ -641,6 +628,7 @@ fun CreateActivityScreen(onBack: () -> Unit) {
                                 workSessions = effectiveSessions,
                                 collaboratorUuids = selectedCollabUuids.toList(),
                                 photoFilePaths = photoPaths,
+                                products = products,
                             )
                             Toast.makeText(context, "Actividad guardada ✅", Toast.LENGTH_SHORT).show()
                             onBack()
@@ -649,26 +637,109 @@ fun CreateActivityScreen(onBack: () -> Unit) {
                         }
                     }
                 },
-                enabled = canSave,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-                shape = RoundedCornerShape(50),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AgraGreen,
-                    disabledContainerColor = AgraGreen.copy(alpha = 0.4f),
-                ),
-            ) {
-                if (isSaving) {
-                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Default.Save, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Guardar Actividad", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                }
-            }
+            )
         }
     }
+}
+
+/** Renglón de un producto consumido: unidad fija del catálogo, planeado y usado */
+@Composable
+private fun ProductRow(
+    product: ActivityProduct,
+    onPlannedChange: (String) -> Unit,
+    onUsedChange: (String) -> Unit,
+    onRemove: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color.White.copy(alpha = 0.6f))
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("🧪", fontSize = 15.sp)
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(product.name, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(
+                    "Se mide en ${ProductRepository.unitLabel(product.unit).lowercase()}",
+                    color = TextTertiary, fontSize = 11.sp,
+                )
+            }
+            IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Default.Close, contentDescription = "Quitar producto", tint = SyncError, modifier = Modifier.size(15.dp))
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AgraTextField(
+                value = product.planned ?: "",
+                onValueChange = { onPlannedChange(it.take(32)) },
+                label = "Planeada (${product.unit})",
+                keyboardType = KeyboardType.Decimal,
+                modifier = Modifier.weight(1f),
+            )
+            AgraTextField(
+                value = product.used ?: "",
+                onValueChange = { onUsedChange(it.take(32)) },
+                label = "Utilizada (${product.unit})",
+                keyboardType = KeyboardType.Decimal,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+/** Elegir un producto del almacén; su unidad de medida se copia sola */
+@Composable
+private fun ProductPickerDialog(
+    warehouse: List<ProductEntity>,
+    onDismiss: () -> Unit,
+    onPick: (ProductEntity) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Elegir del almacén", color = TextPrimary, fontWeight = FontWeight.Bold) },
+        text = {
+            if (warehouse.isEmpty()) {
+                Text(
+                    "No hay más productos disponibles. Puedes darlos de alta en la sección Almacén, incluso sin internet.",
+                    color = TextSecondary, fontSize = 13.sp,
+                )
+            } else {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                ) {
+                    warehouse.forEach { product ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onPick(product) }
+                                .padding(horizontal = 10.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(product.displayName(), color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                                Text(
+                                    ProductRepository.categoryLabel(product.category),
+                                    color = TextTertiary, fontSize = 11.sp,
+                                )
+                            }
+                            StatusBadge(text = ProductRepository.unitLabel(product.unit), color = StatusInProgress)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Cerrar", color = TextTertiary) }
+        },
+        containerColor = Color.White,
+        shape = RoundedCornerShape(20.dp),
+    )
 }
 
 /** Campo de solo lectura que abre un selector (fecha u hora) al tocarlo */

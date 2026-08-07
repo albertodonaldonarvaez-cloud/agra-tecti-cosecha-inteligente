@@ -69,6 +69,13 @@ data class FieldActivityEntity(
     @ColumnInfo(defaultValue = "")
     val collaboratorUuidsCsv: String = "",
 
+    /**
+     * Productos del almacén consumidos, como JSON:
+     * [{"productUuid":"…","serverId":4,"name":"Urea","unit":"kg","planned":"20","used":"18"}, …]
+     */
+    @ColumnInfo(defaultValue = "[]")
+    val productsJson: String = "[]",
+
     /** Flag de sincronización: false = hay cambios locales pendientes de subir */
     val isSynced: Boolean = false,
 
@@ -104,6 +111,26 @@ data class FieldActivityEntity(
         emptyList()
     }
 
+    /** Productos consumidos decodificados del JSON */
+    fun products(): List<ActivityProduct> = try {
+        val arr = JSONArray(productsJson)
+        (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val name = o.optString("name", "")
+            if (name.isBlank()) return@mapNotNull null
+            ActivityProduct(
+                productUuid = o.optString("productUuid", "").takeIf { it.isNotBlank() },
+                serverId = o.optInt("serverId", -1).takeIf { it >= 0 },
+                name = name,
+                unit = o.optString("unit", "kg").ifBlank { "kg" },
+                planned = o.optString("planned", "").takeIf { it.isNotBlank() },
+                used = o.optString("used", "").takeIf { it.isNotBlank() },
+            )
+        }
+    } catch (e: Exception) {
+        emptyList()
+    }
+
     companion object {
         fun encodeSessions(sessions: List<WorkSession>): String {
             val arr = JSONArray()
@@ -116,6 +143,21 @@ data class FieldActivityEntity(
             }
             return arr.toString()
         }
+
+        fun encodeProducts(products: List<ActivityProduct>): String {
+            val arr = JSONArray()
+            for (p in products) {
+                val o = JSONObject()
+                o.put("name", p.name)
+                o.put("unit", p.unit)
+                if (!p.productUuid.isNullOrBlank()) o.put("productUuid", p.productUuid)
+                if (p.serverId != null) o.put("serverId", p.serverId)
+                if (!p.planned.isNullOrBlank()) o.put("planned", p.planned)
+                if (!p.used.isNullOrBlank()) o.put("used", p.used)
+                arr.put(o)
+            }
+            return arr.toString()
+        }
     }
 }
 
@@ -124,4 +166,23 @@ data class WorkSession(
     val workDate: String,
     val startTime: String? = null,
     val endTime: String? = null,
+)
+
+/**
+ * Producto del almacén consumido en una actividad.
+ *
+ * [productUuid] apunta al producto local (que puede estar aún sin subir);
+ * [serverId] es su id en el almacén cuando ya sincronizó. La unidad se copia
+ * del producto al seleccionarlo, para que quede registrada aunque después
+ * cambie en el catálogo.
+ */
+data class ActivityProduct(
+    val productUuid: String? = null,
+    val serverId: Int? = null,
+    val name: String,
+    val unit: String = "kg",
+    /** Cantidad planeada */
+    val planned: String? = null,
+    /** Cantidad realmente utilizada */
+    val used: String? = null,
 )

@@ -332,3 +332,124 @@ mensaje claro (*"se quedó sin espacio para responder"*) en vez de un error gen�
 ## Despliegue
 Servidor y web: `git pull && docker-compose up -d --build` (sin migraciones).
 App: compilar **1.5.0 (versionCode 6)** y publicarla en Configuración → App Móvil.
+
+---
+
+# Séptima entrega: IA por ciclo, Personal y Almacén en la app, y evidencia desde la web
+
+## 1. La IA solo analiza el ciclo actual
+
+El resumen que aparece en el Dashboard mezclaba la libreta de todos los ciclos:
+labores de hace un año seguían apareciendo como "atrasadas" y ensuciaban el
+diagnóstico. Ahora **todo el análisis se acota al ciclo de producción activo**:
+
+- Actividades de la semana, atrasadas y próximas: solo las que caen dentro del
+  ciclo actual.
+- **Notas de campo**: se agregaron al análisis, también solo las del ciclo actual
+  (antes la IA ni siquiera las veía).
+- El prompt empieza declarando el alcance: *"solo se incluye información del
+  CICLO ACTUAL … los ciclos anteriores NO forman parte de este análisis"*.
+
+Si todavía no hay ciclos registrados, se comporta como antes (toma toda la
+libreta), para no dejar al productor sin resumen.
+
+### Una parcela sin poda NO va atrasada
+
+El ciclo del higo arranca con la poda. Si una parcela aún no la registra, es que
+**apenas le va a tocar**, no que vaya retrasada. El prompt ahora incluye:
+
+- El estado de la poda parcela por parcela dentro del ciclo (con su fecha).
+- La lista de **parcelas sin poda registrada en este ciclo** y una regla
+  obligatoria para la IA: *"en estas parcelas la labor APENAS VA A COMENZAR.
+  NO las califiques como atrasadas…"*.
+
+Verificado con datos de prueba: el prompt excluye las labores y notas del ciclo
+anterior, incluye las del actual, y lista correctamente la parcela sin poda con
+su instrucción.
+
+## 2. Módulo de Personal en la app
+
+Sección propia **Personal** en la app, con la misma lógica offline/online que ya
+se usa para todo:
+
+- Con internet **baja la lista del servidor**, así alguien dado de alta en otro
+  teléfono o en la web aparece en todos los dispositivos.
+- Sin internet **se puede dar de alta y editar**; sube solo al recuperar señal.
+- **Puestos desde el catálogo del servidor** (`collaboratorRoles`). Si eliges
+  **"Otro"** escribes el puesto a mano: queda en el catálogo del teléfono al
+  instante y se registra en el servidor al sincronizar, de modo que aparece
+  después en la web y en los demás teléfonos.
+- El mismo catálogo se usa ahora en la página de Colaboradores de la web.
+
+## 3. Módulo de Almacén en la app
+
+Sección **Almacén** con exactamente la misma mecánica que Personal:
+
+- Catálogo de productos que baja del servidor y permite altas offline.
+- Cada producto guarda su **unidad de medida** (kg, g, lt, ml, ton, oz, lb, gal,
+  bulto, saco, unidad).
+
+### Consumo de productos en las actividades
+
+Al crear una actividad en la app se pueden asociar productos del almacén y
+registrar **cantidad planeada** y **cantidad utilizada**. Al elegir el producto,
+**su unidad de medida se carga sola**. En la libreta, una actividad con productos
+ofrece la acción *"Registrar lo que se usó"* para capturar el consumo real
+comparándolo con lo planeado.
+
+En la web se agregaron los dos campos (Planeada / Utilizada) al formulario de la
+libreta y ambos se muestran en el detalle de la actividad.
+
+> No se lleva control de existencias ni de stock mínimo desde la app: solo el
+> registro de lo planeado contra lo usado.
+
+**Cuidado tomado:** cuando el teléfono reporta el consumo de una actividad que ya
+existía, el servidor **solo actualiza las cantidades**; la dosis por hectárea, el
+método de aplicación y las notas capturadas en la web se conservan intactas.
+
+## 4. Evidencia fotográfica desde la web
+
+- **App:** se mantiene la restricción de **cámara en vivo** (sin galería): la
+  evidencia de campo debe tomarse en el momento.
+- **Web:** en el detalle de cada actividad hay un botón **"Subir fotos"** que
+  acepta archivos locales (hasta 10 por vez, 50 MB cada una), con selector de
+  tipo (antes / durante / después / producto) y opción de eliminar. Sirve para
+  regularizar la evidencia que no se subió desde el teléfono.
+
+## 5. La app se siente una sola cosa
+
+Se unificó el diseño de todas las pantallas con piezas compartidas
+(`AgraScaffold.kt`): mismo fondo, mismo encabezado, mismas tarjetas, chips,
+campos, botones y estados vacíos.
+
+- **Barra de navegación única** con las cuatro secciones: Notas · Libreta ·
+  Personal · Almacén, siempre visible.
+- **Botón de crear** flotante que cambia según la sección donde estés.
+- **Sincronizar** y **Ajustes** viven en el encabezado, iguales en todas partes.
+- **Ajustes** concentra ahora las fotos con datos móviles, la versión instalada
+  con "Buscar actualización" y **cerrar sesión**.
+
+## Cambios en la base de datos (automáticos)
+
+`migrate.cjs` corre solo al arrancar Docker y es idempotente:
+
+- Tabla nueva `collaboratorRoles`, sembrada con los puestos habituales y con los
+  que ya se usaban en los colaboradores existentes.
+- `warehouseProducts.clientUuid` (+ índice único) para las altas desde la app.
+- `fieldActivityProducts.productId` y `plannedQuantity`.
+- Unidades nuevas (oz, lb, gal) agregadas **al final** del ENUM, de modo que los
+  valores ya guardados no cambian de significado.
+
+La base local de la app sube a la **versión 5** con una migración real (no
+destructiva): nada de lo capturado en el campo se pierde.
+
+## Despliegue
+
+Servidor y web:
+
+```bash
+git pull && docker-compose up -d --build
+```
+
+App: publicar **1.6.0 (versionCode 7)** en Configuración → App Móvil. Los
+teléfonos la ofrecerán al abrir la app.

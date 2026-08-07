@@ -209,6 +209,71 @@ async function migrate() {
       "ALTER TABLE collaborators ADD COLUMN clientUuid VARCHAR(64) NULL");
     await ensureIndex('collaborators', 'collaborators_clientUuid_unique',
       "ALTER TABLE collaborators ADD UNIQUE INDEX collaborators_clientUuid_unique (clientUuid)");
+
+    // ── Personal de campo y almacén desde la app (0021) ──────────
+    // Catálogo de puestos: la app lo consume y crece solo cuando alguien
+    // captura un puesto nuevo con la opción "Otro"
+    await conn.query(`CREATE TABLE IF NOT EXISTS collaboratorRoles (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(128) NOT NULL,
+      isActive BOOLEAN NOT NULL DEFAULT TRUE,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY collaboratorRoles_name_unique (name)
+    )`);
+    console.log('[Migration] collaboratorRoles OK');
+
+    // Siembra de los puestos habituales (INSERT IGNORE = idempotente)
+    const DEFAULT_ROLES = [
+      'Jornalero', 'Encargado de riego', 'Podador', 'Cosechador',
+      'Aplicador de agroquímicos', 'Tractorista', 'Supervisor de campo',
+      'Ingeniero agrónomo', 'Almacenista', 'Chofer',
+    ];
+    for (const role of DEFAULT_ROLES) {
+      await conn.query('INSERT IGNORE INTO collaboratorRoles (name) VALUES (?)', [role]);
+    }
+    // Adoptar los puestos que ya se usaban en colaboradores existentes.
+    // Va aparte: en una base recién creada la tabla puede no existir todavía y
+    // no debe impedir el resto de la migración.
+    try {
+      await conn.query(
+        "INSERT IGNORE INTO collaboratorRoles (name) SELECT DISTINCT TRIM(role) FROM collaborators WHERE role IS NOT NULL AND TRIM(role) <> ''"
+      );
+    } catch (e) {
+      console.log('[Migration] Puestos existentes no adoptados:', e.message);
+    }
+
+    // Productos del almacén dados de alta desde la app (idempotencia por UUID)
+    await ensureColumn('warehouseProducts', 'clientUuid',
+      "ALTER TABLE warehouseProducts ADD COLUMN clientUuid VARCHAR(64) NULL");
+    await ensureIndex('warehouseProducts', 'warehouseProducts_clientUuid_unique',
+      "ALTER TABLE warehouseProducts ADD UNIQUE INDEX warehouseProducts_clientUuid_unique (clientUuid)");
+
+    // Consumo de productos en actividades: producto del catálogo + cantidad planeada
+    await ensureColumn('fieldActivityProducts', 'productId',
+      "ALTER TABLE fieldActivityProducts ADD COLUMN productId INT NULL");
+    await ensureColumn('fieldActivityProducts', 'plannedQuantity',
+      "ALTER TABLE fieldActivityProducts ADD COLUMN plannedQuantity VARCHAR(32) NULL");
+
+    // Unidades de medida nuevas (onzas, libras, galones). Solo se AGREGAN
+    // valores al ENUM: los existentes no se tocan, así ninguna fila se invalida.
+    const ensureEnumValue = async (table, col, sampleValue, ddl) => {
+      const [rows] = await conn.query(
+        "SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+        [table, col]
+      );
+      if (rows.length === 0) return; // la tabla/columna no existe todavía
+      if (!String(rows[0].COLUMN_TYPE).includes(`'${sampleValue}'`)) {
+        await conn.query(ddl);
+        console.log(`[Migration] ~ ENUM ampliado ${table}.${col}`);
+      }
+    };
+    // Las nuevas van al FINAL: MySQL guarda los ENUM por índice y así ningún
+    // valor ya almacenado cambia de significado.
+    const UNITS_SQL = "'kg','g','lt','ml','ton','bulto','saco','unidad','otro','oz','lb','gal'";
+    await ensureEnumValue('warehouseProducts', 'unit', 'oz',
+      `ALTER TABLE warehouseProducts MODIFY COLUMN unit ENUM(${UNITS_SQL}) NOT NULL DEFAULT 'kg'`);
+    await ensureEnumValue('fieldActivityProducts', 'unit', 'oz',
+      `ALTER TABLE fieldActivityProducts MODIFY COLUMN unit ENUM(${UNITS_SQL}) NULL DEFAULT 'kg'`);
   } catch (err) {
     console.error('[Migration] Error:', err.message);
   } finally {

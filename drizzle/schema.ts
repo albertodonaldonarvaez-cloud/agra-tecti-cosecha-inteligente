@@ -396,10 +396,20 @@ export const fieldActivityParcels = mysqlTable("fieldActivityParcels", {
 
 export type FieldActivityParcel = typeof fieldActivityParcels.$inferSelect;
 
+// Unidades de medida compartidas por el almacén y el consumo en actividades.
+// ORDEN IMPORTANTE: las unidades nuevas (oz, lb, gal) van al FINAL. MySQL guarda
+// los ENUM por índice, así que agregarlas al final deja intactos los valores ya
+// almacenados en producción.
+export const PRODUCT_UNITS = [
+  "kg", "g", "lt", "ml", "ton", "bulto", "saco", "unidad", "otro", "oz", "lb", "gal",
+] as const;
+
 // Productos utilizados en una actividad
 export const fieldActivityProducts = mysqlTable("fieldActivityProducts", {
   id: int("id").autoincrement().primaryKey(),
   activityId: int("activityId").notNull(),
+  // Producto del almacén cuando se eligió del catálogo (null si se escribió a mano)
+  productId: int("productId"),
   productName: varchar("productName", { length: 255 }).notNull(),
   productType: mysqlEnum("productType", [
     "fertilizante_granular", "fertilizante_liquido", "fertilizante_foliar", "fertilizante_organico",
@@ -408,8 +418,11 @@ export const fieldActivityProducts = mysqlTable("fieldActivityProducts", {
     "regulador_crecimiento", "bioestimulante", "enmienda_suelo", "nutriente_foliar",
     "agua", "otro"
   ]).default("otro").notNull(),
+  // Cantidad que se planeó aplicar (se captura al programar la actividad)
+  plannedQuantity: varchar("plannedQuantity", { length: 32 }),
+  // Cantidad realmente utilizada
   quantity: varchar("quantity", { length: 32 }),
-  unit: mysqlEnum("unit", ["kg", "g", "lt", "ml", "ton", "bulto", "saco", "unidad", "otro"]).default("kg"),
+  unit: mysqlEnum("unit", PRODUCT_UNITS).default("kg"),
   dosisPerHectare: varchar("dosisPerHectare", { length: 64 }),
   applicationMethod: varchar("applicationMethod", { length: 128 }),
   notes: text("notes"),
@@ -498,7 +511,10 @@ export const warehouseProducts = mysqlTable("warehouseProducts", {
   activeIngredient: varchar("activeIngredient", { length: 255 }),
   concentration: varchar("concentration", { length: 128 }),
   presentation: varchar("presentation", { length: 128 }),
-  unit: mysqlEnum("unit", ["kg", "g", "lt", "ml", "ton", "bulto", "saco", "unidad", "otro"]).default("kg").notNull(),
+  unit: mysqlEnum("unit", PRODUCT_UNITS).default("kg").notNull(),
+  // UUID de la app móvil cuando el producto se dio de alta desde el campo
+  // (clave de idempotencia del sync offline)
+  clientUuid: varchar("clientUuid", { length: 64 }).unique(),
   currentStock: decimal("currentStock", { precision: 12, scale: 2 }).default("0").notNull(),
   minimumStock: decimal("minimumStock", { precision: 12, scale: 2 }).default("0"),
   costPerUnit: decimal("costPerUnit", { precision: 12, scale: 2 }),
@@ -662,6 +678,18 @@ export const collaborators = mysqlTable("collaborators", {
 });
 export type Collaborator = typeof collaborators.$inferSelect;
 export type InsertCollaborator = typeof collaborators.$inferInsert;
+
+// Catálogo de puestos del personal de campo.
+// Se siembra con los puestos habituales y crece solo: cuando alguien captura
+// un puesto nuevo con la opción "Otro" (en la app o en la web), queda dado de
+// alta aquí y aparece en el catálogo de todos los dispositivos.
+export const collaboratorRoles = mysqlTable("collaboratorRoles", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 128 }).notNull().unique(),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CollaboratorRole = typeof collaboratorRoles.$inferSelect;
 
 // Códigos de vinculación de Telegram para colaboradores
 export const collaboratorLinkCodes = mysqlTable("collaboratorLinkCodes", {

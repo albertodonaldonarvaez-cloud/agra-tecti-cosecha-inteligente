@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.agratec.fieldapp.data.local.AppDatabase
 import com.agratec.fieldapp.data.local.entity.ActivityPhotoEntity
+import com.agratec.fieldapp.data.local.entity.ActivityProduct
 import com.agratec.fieldapp.data.local.entity.FieldActivityEntity
 import com.agratec.fieldapp.data.local.entity.WorkSession
 import com.agratec.fieldapp.data.remote.RetrofitClient
@@ -50,6 +51,7 @@ class FieldActivityRepository(private val context: Context) {
         workSessions: List<WorkSession> = emptyList(),
         collaboratorUuids: List<String> = emptyList(),
         photoFilePaths: List<String> = emptyList(),
+        products: List<ActivityProduct> = emptyList(),
     ): FieldActivityEntity {
         val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(Date())
         val entity = FieldActivityEntity(
@@ -62,6 +64,7 @@ class FieldActivityRepository(private val context: Context) {
             startTime = startTime?.takeIf { it.isNotBlank() },
             endTime = endTime?.takeIf { it.isNotBlank() },
             workSessionsJson = FieldActivityEntity.encodeSessions(workSessions),
+            productsJson = FieldActivityEntity.encodeProducts(products),
             status = status,
             parcelIdsCsv = parcelIds.joinToString(","),
             collaboratorUuidsCsv = collaboratorUuids.joinToString(","),
@@ -110,12 +113,30 @@ class FieldActivityRepository(private val context: Context) {
         dao.resetFailedAttempts()
         db.activityPhotoDao().resetFailedAttempts()
         db.collaboratorDao().resetFailedAttempts()
+        db.productDao().resetFailedAttempts()
     }
 
     /** Cambiar el estado de una actividad (p. ej. marcarla completada) */
     suspend fun setStatus(clientUuid: String, status: String) {
         dao.updateStatus(clientUuid, status)
         Log.i(TAG, "Actividad $clientUuid -> $status (pendiente de sync)")
+        SyncWorker.enqueueImmediateSync(context)
+    }
+
+    /**
+     * Registrar lo que realmente se consumió al cerrar una actividad.
+     * Es lo que se compara contra la cantidad planeada.
+     */
+    suspend fun updateProducts(clientUuid: String, products: List<ActivityProduct>) {
+        val local = dao.getByUuid(clientUuid) ?: return
+        dao.update(
+            local.copy(
+                productsJson = FieldActivityEntity.encodeProducts(products),
+                isSynced = false,
+                syncAttempts = 0,
+                lastSyncError = null,
+            )
+        )
         SyncWorker.enqueueImmediateSync(context)
     }
 
@@ -157,6 +178,22 @@ class FieldActivityRepository(private val context: Context) {
                     }
                 )
 
+                // Productos consumidos: se resuelve el UUID local del producto
+                // para que el selector muestre el mismo del almacén del teléfono
+                val productDao = db.productDao()
+                val productsJson = FieldActivityEntity.encodeProducts(
+                    (remote.products ?: emptyList()).map { p ->
+                        ActivityProduct(
+                            productUuid = p.productId?.let { productDao.getByServerId(it)?.clientUuid },
+                            serverId = p.productId,
+                            name = p.productName,
+                            unit = p.unit ?: "kg",
+                            planned = p.plannedQuantity,
+                            used = p.usedQuantity,
+                        )
+                    }
+                )
+
                 if (local == null) {
                     // Actividad nueva (normalmente creada desde la web)
                     val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(Date())
@@ -172,6 +209,7 @@ class FieldActivityRepository(private val context: Context) {
                             startTime = remote.startTime,
                             endTime = remote.endTime,
                             workSessionsJson = sessionsJson,
+                            productsJson = productsJson,
                             status = remote.status,
                             parcelIdsCsv = (remote.parcelIds ?: emptyList()).joinToString(","),
                             collaboratorUuidsCsv = resolveCollabUuids(remote.collaboratorIds),
@@ -193,6 +231,7 @@ class FieldActivityRepository(private val context: Context) {
                             startTime = remote.startTime,
                             endTime = remote.endTime,
                             workSessionsJson = sessionsJson,
+                            productsJson = productsJson,
                             status = remote.status,
                             parcelIdsCsv = (remote.parcelIds ?: emptyList()).joinToString(","),
                             collaboratorUuidsCsv = resolveCollabUuids(remote.collaboratorIds),

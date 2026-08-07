@@ -11,35 +11,31 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import com.agratec.fieldapp.data.local.entity.ActivityProduct
 import com.agratec.fieldapp.data.local.entity.FieldActivityEntity
-import com.agratec.fieldapp.data.prefs.SyncPreferences
 import com.agratec.fieldapp.data.repository.FieldActivityRepository
-import com.agratec.fieldapp.sync.NetworkUtils
+import com.agratec.fieldapp.data.repository.ProductRepository
 import com.agratec.fieldapp.sync.SyncStatus
-import com.agratec.fieldapp.sync.SyncWorker
-import com.agratec.fieldapp.ui.components.PhotoPolicyDialog
-import com.agratec.fieldapp.ui.components.PhotoSettingsDialog
-import com.agratec.fieldapp.ui.components.AgraBottomBar
-import com.agratec.fieldapp.ui.components.GlassCard
+import com.agratec.fieldapp.ui.components.*
 import com.agratec.fieldapp.ui.theme.*
 import kotlinx.coroutines.launch
 import java.io.File
@@ -84,137 +80,33 @@ fun statusLabelUi(status: String): Pair<String, Color> = when (status) {
 }
 
 /**
- * Pantalla de la Libreta de Campo:
- * lista de actividades (planificadas desde la web o creadas en el campo),
- * con filtro por estado y acción rápida para marcarlas completadas.
+ * Libreta de Campo: actividades planificadas desde la web o creadas en el campo,
+ * con filtro por estado, evidencia fotográfica y registro de lo consumido.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ActivitiesListScreen(
-    onCreateActivity: () -> Unit,
-    onBackToNotes: () -> Unit,
-    onLogout: () -> Unit,
+    onSync: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repository = remember { FieldActivityRepository(context) }
     val activities by repository.getAll().collectAsState(initial = emptyList())
 
-    var filter by remember { mutableStateOf("pendientes") } // pendientes | realizadas | todas
+    var filter by rememberSaveable { mutableStateOf("pendientes") } // pendientes | realizadas | todas
     var unsyncedCount by remember { mutableIntStateOf(0) }
     var confirmActivity by remember { mutableStateOf<FieldActivityEntity?>(null) }
+    var consumptionActivity by remember { mutableStateOf<FieldActivityEntity?>(null) }
 
-    // Estado de la última sincronización (para que el usuario sepa qué pasó)
     val syncStatus by SyncStatus.state.collectAsState()
-    var showPhotoPolicyDialog by remember { mutableStateOf(false) }
-    var showPhotoSettings by remember { mutableStateOf(false) }
-    var uploadOnMobile by remember {
-        mutableStateOf(SyncPreferences.uploadPolicy(context) == SyncPreferences.Policy.ALLOW)
-    }
-    var downloadOnMobile by remember {
-        mutableStateOf(SyncPreferences.downloadPolicy(context) == SyncPreferences.Policy.ALLOW)
-    }
 
     LaunchedEffect(activities) {
         unsyncedCount = repository.getUnsyncedCount()
     }
 
-    // Al abrir: cargar estado previo, bajar datos frescos del servidor y
-    // preguntar por las fotos si estamos con datos móviles y nunca se preguntó
+    // Al abrir: bajar del servidor lo que haya cambiado
     LaunchedEffect(Unit) {
-        SyncStatus.load(context)
         repository.pullFromServer()
-        val onMobile = !NetworkUtils.isUnmetered(context) && NetworkUtils.isConnected(context)
-        if (onMobile && !SyncPreferences.hasBeenAsked(context)) {
-            showPhotoPolicyDialog = true
-        }
-    }
-
-    if (showPhotoPolicyDialog) {
-        PhotoPolicyDialog(
-            pendingPhotos = syncStatus?.photosWaitingForWifi ?: 0,
-            onDecide = { allowUpload, allowDownload ->
-                SyncPreferences.setUploadPolicy(context, if (allowUpload) SyncPreferences.Policy.ALLOW else SyncPreferences.Policy.WIFI_ONLY)
-                SyncPreferences.setDownloadPolicy(context, if (allowDownload) SyncPreferences.Policy.ALLOW else SyncPreferences.Policy.WIFI_ONLY)
-                SyncPreferences.markAsked(context)
-                uploadOnMobile = allowUpload
-                downloadOnMobile = allowDownload
-                showPhotoPolicyDialog = false
-                SyncWorker.enqueueImmediateSync(context)
-            },
-            onDismiss = {
-                SyncPreferences.markAsked(context)
-                showPhotoPolicyDialog = false
-            },
-        )
-    }
-
-    // ── Buscar actualizaciones a mano ──
-    val updateRepository = remember { com.agratec.fieldapp.data.repository.UpdateRepository(context) }
-    var checkingUpdate by remember { mutableStateOf(false) }
-    var updateFound by remember { mutableStateOf<com.agratec.fieldapp.data.repository.UpdateRepository.UpdateInfo?>(null) }
-
-    if (showPhotoSettings) {
-        PhotoSettingsDialog(
-            uploadOnMobile = uploadOnMobile,
-            downloadOnMobile = downloadOnMobile,
-            onChange = { up, down ->
-                SyncPreferences.setUploadPolicy(context, if (up) SyncPreferences.Policy.ALLOW else SyncPreferences.Policy.WIFI_ONLY)
-                SyncPreferences.setDownloadPolicy(context, if (down) SyncPreferences.Policy.ALLOW else SyncPreferences.Policy.WIFI_ONLY)
-                SyncPreferences.markAsked(context)
-                uploadOnMobile = up
-                downloadOnMobile = down
-            },
-            onDismiss = { showPhotoSettings = false },
-            appVersion = updateRepository.currentVersionLabel(),
-            checkingUpdate = checkingUpdate,
-            onCheckUpdate = {
-                scope.launch {
-                    checkingUpdate = true
-                    when (val result = updateRepository.check()) {
-                        is com.agratec.fieldapp.data.repository.UpdateRepository.CheckResult.Available -> {
-                            updateFound = result.info
-                            showPhotoSettings = false
-                        }
-                        is com.agratec.fieldapp.data.repository.UpdateRepository.CheckResult.UpToDate ->
-                            Toast.makeText(context, "Ya tienes la última versión (${result.currentVersion})", Toast.LENGTH_LONG).show()
-                        is com.agratec.fieldapp.data.repository.UpdateRepository.CheckResult.Error ->
-                            Toast.makeText(context, "No se pudo revisar: ${result.message}", Toast.LENGTH_LONG).show()
-                    }
-                    checkingUpdate = false
-                }
-            },
-        )
-    }
-
-    updateFound?.let { info ->
-        AlertDialog(
-            onDismissRequest = { updateFound = null },
-            title = { Text("🚀 Actualización disponible", color = TextPrimary, fontWeight = FontWeight.Bold) },
-            text = {
-                Text(
-                    buildString {
-                        append("Versión ${info.versionName}")
-                        info.fileSizeMb?.let { append(" (${String.format(Locale.US, "%.1f", it)} MB)") }
-                        append(".\n")
-                        if (!info.notes.isNullOrBlank()) append("\n${info.notes}\n")
-                        append("\nSe descargará con el navegador; al terminar, ábrela para instalarla.")
-                    },
-                    color = TextSecondary,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    updateRepository.openDownload(info)
-                    updateFound = null
-                }) { Text("Descargar", color = AgraGreen, fontWeight = FontWeight.SemiBold) }
-            },
-            dismissButton = {
-                TextButton(onClick = { updateFound = null }) { Text("Después", color = TextTertiary) }
-            },
-            containerColor = Color.White,
-            shape = RoundedCornerShape(20.dp),
-        )
     }
 
     val filtered = when (filter) {
@@ -225,10 +117,12 @@ fun ActivitiesListScreen(
     val pendingCount = activities.count { it.status == "planificada" || it.status == "en_progreso" }
     val doneCount = activities.count { it.status == "completada" }
 
-    // ── Cámara para agregar fotos a una actividad existente ──
+    // ── Cámara para agregar evidencia a una actividad existente ──
+    // Solo cámara en vivo: la evidencia de campo debe ser del momento
+    // (desde la web sí se pueden adjuntar archivos para regularizar).
     // rememberSaveable: la cámara puede matar el proceso; sin esto la foto se perdería
-    var photoTargetUuid by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
-    var pendingPhotoPath by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    var photoTargetUuid by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingPhotoPath by rememberSaveable { mutableStateOf<String?>(null) }
 
     fun createImageFile(): Pair<Uri, String> {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
@@ -268,32 +162,34 @@ fun ActivitiesListScreen(
         }
     }
 
-    // Diálogo de acciones sobre una actividad pendiente
+    // Diálogo de acciones sobre una actividad
     confirmActivity?.let { act ->
         val typeUi = activityTypeUi(act.activityType)
         AlertDialog(
             onDismissRequest = { confirmActivity = null },
             title = { Text("${typeUi.emoji} ${typeUi.label}", color = TextPrimary, fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("\"${act.description.take(120)}\"", color = TextSecondary)
-                    // Acciones secundarias dentro del cuerpo del diálogo
+                    Spacer(Modifier.height(4.dp))
                     if (act.status == "planificada") {
-                        TextButton(onClick = {
+                        DialogAction("⏳", "Iniciar (en proceso)", SyncPending) {
                             scope.launch {
                                 repository.setStatus(act.clientUuid, "en_progreso")
                                 confirmActivity = null
                             }
-                        }) {
-                            Text("⏳ Iniciar (en proceso)", color = SyncPending, fontWeight = FontWeight.SemiBold)
                         }
                     }
-                    TextButton(onClick = {
+                    DialogAction("📷", "Tomar foto de evidencia", StatusInProgress) {
                         photoTargetUuid = act.clientUuid
                         confirmActivity = null
                         cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                    }) {
-                        Text("📷 Tomar foto de evidencia", color = StatusInProgress, fontWeight = FontWeight.SemiBold)
+                    }
+                    if (act.products().isNotEmpty()) {
+                        DialogAction("🧪", "Registrar lo que se usó", AgraEmerald600) {
+                            consumptionActivity = act
+                            confirmActivity = null
+                        }
                     }
                 }
             },
@@ -308,217 +204,112 @@ fun ActivitiesListScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { confirmActivity = null }) {
-                    Text("Cancelar", color = TextTertiary)
-                }
+                TextButton(onClick = { confirmActivity = null }) { Text("Cancelar", color = TextTertiary) }
             },
             containerColor = Color.White,
             shape = RoundedCornerShape(20.dp),
         )
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                brush = Brush.linearGradient(
-                    colors = listOf(AgraGreenSurface, AgraEmerald50, AgraTeal50),
-                    start = Offset(0f, 0f),
-                    end = Offset(1000f, 2000f),
-                )
-            ),
-    ) {
-        Column(Modifier.fillMaxSize()) {
-            // ── Header ──
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .shadow(elevation = 2.dp, shape = RoundedCornerShape(0.dp), ambientColor = Color.Black.copy(alpha = 0.04f))
-                    .background(Color.White.copy(alpha = 0.88f))
-                    .statusBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Brush.horizontalGradient(listOf(AgraGreen, AgraEmerald600))),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("📖", fontSize = 20.sp)
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text("Libreta de Campo", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                        Text(
-                            "$pendingCount por realizar · $doneCount realizadas",
-                            color = TextSecondary,
-                            fontSize = 12.sp,
-                        )
-                    }
-                    Spacer(Modifier.weight(1f))
-                    if (unsyncedCount > 0) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(SyncPending.copy(alpha = 0.15f))
-                                .padding(horizontal = 10.dp, vertical = 4.dp),
-                        ) {
-                            Text("$unsyncedCount sin sync", color = SyncPending, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                    IconButton(onClick = { showPhotoSettings = true }) {
-                        Icon(Icons.Default.Settings, contentDescription = "Ajustes de fotos", tint = TextTertiary, modifier = Modifier.size(20.dp))
-                    }
+    // Captura de lo realmente consumido, contra lo planeado
+    consumptionActivity?.let { act ->
+        ConsumptionDialog(
+            products = act.products(),
+            onDismiss = { consumptionActivity = null },
+            onSave = { updated ->
+                scope.launch {
+                    repository.updateProducts(act.clientUuid, updated)
+                    Toast.makeText(context, "Consumo registrado ✅", Toast.LENGTH_SHORT).show()
+                    consumptionActivity = null
                 }
-            }
+            },
+        )
+    }
 
-            // ── Estado de la última sincronización ──
-            syncStatus?.let { status ->
-                val bg = if (status.ok) AgraGreenSurface else Color(0xFFFEF2F2)
-                val fg = if (status.ok) AgraEmerald600 else SyncError
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(bg)
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        if (status.ok) Icons.Default.CloudDone else Icons.Default.ErrorOutline,
-                        contentDescription = null,
-                        tint = fg,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("${status.message} · ${status.at}", color = fg, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                        if (status.photosWaitingForWifi > 0) {
-                            Text(
-                                "${status.photosWaitingForWifi} foto${if (status.photosWaitingForWifi == 1) "" else "s"} esperan WiFi · toca para cambiarlo",
-                                color = SyncPending,
-                                fontSize = 11.sp,
-                                modifier = Modifier.clickable { showPhotoSettings = true },
-                            )
-                        }
-                    }
-                }
-            }
+    Column(Modifier.fillMaxSize()) {
+        AgraHeader(
+            title = "Libreta de Campo",
+            subtitle = "$pendingCount por realizar · $doneCount realizadas",
+            emoji = "📖",
+            badge = if (unsyncedCount > 0) "$unsyncedCount sin subir" else null,
+            actions = {
+                AgraSyncAction(unsyncedCount = unsyncedCount, onClick = onSync)
+                AgraHeaderAction(Icons.Default.Settings, "Ajustes", onOpenSettings)
+            },
+        )
 
-            // ── Filtros ──
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+        syncStatus?.let { status ->
+            AgraSyncBanner(
+                message = status.message,
+                at = status.at,
+                ok = status.ok,
+                photosWaiting = status.photosWaitingForWifi,
+                onPhotosClick = onOpenSettings,
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            AgraChip("🗓️ Por realizar ($pendingCount)", filter == "pendientes", onClick = { filter = "pendientes" })
+            AgraChip("✅ Realizadas", filter == "realizadas", onClick = { filter = "realizadas" })
+            AgraChip("Todas", filter == "todas", onClick = { filter = "todas" })
+        }
+
+        if (filtered.isEmpty()) {
+            AgraEmptyState(
+                emoji = "📖",
+                title = when (filter) {
+                    "pendientes" -> "No hay actividades pendientes"
+                    "realizadas" -> "Aún no hay actividades realizadas"
+                    else -> "Aún no hay actividades"
+                },
+                message = "Registra riegos, fertilizaciones, podas y más con el botón Nueva actividad.",
+                modifier = Modifier.weight(1f),
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 160.dp, top = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                FilterChip(
-                    selected = filter == "pendientes",
-                    onClick = { filter = "pendientes" },
-                    label = { Text("🗓️ Por realizar ($pendingCount)") },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = AgraGreen,
-                        selectedLabelColor = Color.White,
-                    ),
-                )
-                FilterChip(
-                    selected = filter == "realizadas",
-                    onClick = { filter = "realizadas" },
-                    label = { Text("✅ Realizadas") },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = AgraGreen,
-                        selectedLabelColor = Color.White,
-                    ),
-                )
-                FilterChip(
-                    selected = filter == "todas",
-                    onClick = { filter = "todas" },
-                    label = { Text("Todas") },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = AgraGreen,
-                        selectedLabelColor = Color.White,
-                    ),
-                )
-            }
-
-            // ── Lista ──
-            if (filtered.isEmpty()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    Text("📖", fontSize = 44.sp)
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        when (filter) {
-                            "pendientes" -> "No hay actividades pendientes"
-                            "realizadas" -> "Aún no hay actividades realizadas"
-                            else -> "Aún no hay actividades"
+                items(filtered, key = { it.id }) { act ->
+                    ActivityCard(
+                        activity = act,
+                        onClick = {
+                            if (act.status != "completada" && act.status != "cancelada") {
+                                confirmActivity = act
+                            } else {
+                                // Completadas: permitir agregar más evidencia
+                                photoTargetUuid = act.clientUuid
+                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                            }
                         },
-                        color = TextSecondary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
                     )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Registra riegos, fertilizaciones, podas y más con el botón Nueva Actividad",
-                        color = TextTertiary,
-                        fontSize = 13.sp,
-                    )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 110.dp, top = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    items(filtered, key = { it.id }) { act ->
-                        ActivityCard(
-                            activity = act,
-                            onClick = {
-                                if (act.status != "completada" && act.status != "cancelada") {
-                                    confirmActivity = act
-                                } else {
-                                    // Completadas: permitir agregar foto de evidencia
-                                    photoTargetUuid = act.clientUuid
-                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                                }
-                            },
-                        )
-                    }
                 }
             }
         }
+    }
+}
 
-        AgraBottomBar(
-            unsyncedCount = unsyncedCount,
-            onSync = {
-                // Sync manual = intención explícita: dar otra oportunidad a los rechazados
-                scope.launch {
-                    repository.resetFailedSyncAttempts()
-                    SyncWorker.enqueueImmediateSync(context)
-                    val red = when (com.agratec.fieldapp.sync.NetworkUtils.currentType(context)) {
-                        com.agratec.fieldapp.sync.NetworkUtils.NetworkType.NONE -> "Sin conexión: se sincronizará al recuperar señal"
-                        com.agratec.fieldapp.sync.NetworkUtils.NetworkType.WIFI -> "Sincronizando por WiFi (datos y fotos)..."
-                        com.agratec.fieldapp.sync.NetworkUtils.NetworkType.MOBILE ->
-                            if (uploadOnMobile) "Sincronizando por datos (datos y fotos)..."
-                            else "Sincronizando datos... las fotos esperarán WiFi"
-                    }
-                    Toast.makeText(context, red, Toast.LENGTH_SHORT).show()
-                }
-            },
-            onCreateNote = onCreateActivity,
-            onLogout = onLogout,
-            createLabel = "Nueva Actividad",
-            switchLabel = "Notas",
-            switchIcon = Icons.Default.StickyNote2,
-            onSwitch = onBackToNotes,
-            modifier = Modifier.align(Alignment.BottomCenter),
-        )
+/** Acción secundaria dentro de un diálogo, con el mismo aire en toda la app */
+@Composable
+private fun DialogAction(emoji: String, label: String, color: Color, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(color.copy(alpha = 0.08f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(emoji, fontSize = 15.sp)
+        Spacer(Modifier.width(8.dp))
+        Text(label, color = color, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -526,6 +317,7 @@ fun ActivitiesListScreen(
 private fun ActivityCard(activity: FieldActivityEntity, onClick: () -> Unit) {
     val typeUi = activityTypeUi(activity.activityType)
     val (statusLabel, statusColor) = statusLabelUi(activity.status)
+    val products = activity.products()
 
     GlassCard(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -570,6 +362,19 @@ private fun ActivityCard(activity: FieldActivityEntity, onClick: () -> Unit) {
                         Text("  ·  👤 ${activity.performedBy}", color = TextTertiary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
+                if (products.isNotEmpty()) {
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        "🧪 " + products.joinToString(" · ") { p ->
+                            val cantidad = p.used ?: p.planned
+                            if (cantidad != null) "${p.name} ${cantidad}${p.unit}" else p.name
+                        },
+                        color = AgraEmerald600,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             Spacer(Modifier.width(8.dp))
             Column(horizontalAlignment = Alignment.End) {
@@ -581,14 +386,64 @@ private fun ActivityCard(activity: FieldActivityEntity, onClick: () -> Unit) {
                 ) {
                     Text(statusLabel, color = statusColor, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                 }
-                Spacer(Modifier.height(4.dp))
-                Icon(
-                    if (activity.isSynced) Icons.Default.CloudDone else Icons.Default.CloudUpload,
-                    contentDescription = null,
-                    tint = if (activity.isSynced) SyncOk else SyncPending,
-                    modifier = Modifier.size(15.dp),
-                )
+                Spacer(Modifier.height(6.dp))
+                AgraSyncDot(activity.isSynced)
             }
         }
     }
+}
+
+/**
+ * Captura de lo realmente utilizado, con lo planeado a la vista para comparar.
+ */
+@Composable
+private fun ConsumptionDialog(
+    products: List<ActivityProduct>,
+    onDismiss: () -> Unit,
+    onSave: (List<ActivityProduct>) -> Unit,
+) {
+    var edited by remember { mutableStateOf(products) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("¿Cuánto se usó?", color = TextPrimary, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+            ) {
+                edited.forEachIndexed { idx, product ->
+                    Column {
+                        Text(product.name, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Planeado: ${product.planned ?: "sin definir"} ${ProductRepository.unitLabel(product.unit).lowercase()}",
+                            color = TextTertiary,
+                            fontSize = 11.sp,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        AgraTextField(
+                            value = product.used ?: "",
+                            onValueChange = { value ->
+                                edited = edited.mapIndexed { i, p ->
+                                    if (i == idx) p.copy(used = value.take(32)) else p
+                                }
+                            },
+                            label = "Utilizado (${product.unit})",
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(edited) }) {
+                Text("Guardar", color = AgraGreen, fontWeight = FontWeight.SemiBold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancelar", color = TextTertiary) }
+        },
+        containerColor = Color.White,
+        shape = RoundedCornerShape(20.dp),
+    )
 }

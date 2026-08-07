@@ -1,42 +1,60 @@
 package com.agratec.fieldapp.ui
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.agratec.fieldapp.data.prefs.SyncPreferences
 import com.agratec.fieldapp.data.repository.AuthRepository
 import com.agratec.fieldapp.data.repository.UpdateRepository
-import com.agratec.fieldapp.ui.theme.AgraGreen
-import com.agratec.fieldapp.ui.theme.TextPrimary
-import com.agratec.fieldapp.ui.theme.TextSecondary
-import com.agratec.fieldapp.ui.theme.TextTertiary
+import com.agratec.fieldapp.sync.NetworkUtils
+import com.agratec.fieldapp.sync.SyncStatus
+import com.agratec.fieldapp.sync.SyncWorker
+import com.agratec.fieldapp.ui.components.AgraCreateButton
+import com.agratec.fieldapp.ui.components.AgraNavBar
+import com.agratec.fieldapp.ui.components.AgraScreen
+import com.agratec.fieldapp.ui.components.AgraTab
+import com.agratec.fieldapp.ui.components.PhotoPolicyDialog
+import com.agratec.fieldapp.ui.components.SettingsDialog
 import com.agratec.fieldapp.ui.screens.ActivitiesListScreen
 import com.agratec.fieldapp.ui.screens.CreateActivityScreen
 import com.agratec.fieldapp.ui.screens.CreateNoteScreen
 import com.agratec.fieldapp.ui.screens.LoginScreen
 import com.agratec.fieldapp.ui.screens.NotesListScreen
+import com.agratec.fieldapp.ui.screens.PersonnelScreen
+import com.agratec.fieldapp.ui.screens.WarehouseScreen
 import com.agratec.fieldapp.ui.theme.AgraFieldTheme
+import com.agratec.fieldapp.ui.theme.AgraGreen
+import com.agratec.fieldapp.ui.theme.TextPrimary
+import com.agratec.fieldapp.ui.theme.TextSecondary
+import com.agratec.fieldapp.ui.theme.TextTertiary
+import kotlinx.coroutines.launch
 
 /**
- * Activity principal con navegación simple entre:
- * - Login → Notas → Crear Nota
- * - Notas ↔ Libreta de Campo (actividades) → Crear Actividad
+ * Activity principal.
  *
- * Usa navegación basada en estado (sin Navigation Component)
- * para mantener la simplicidad del scaffolding.
+ * La app tiene cuatro secciones fijas —Notas, Libreta, Personal y Almacén—
+ * dentro de un mismo marco: fondo, encabezado y barra de navegación comunes.
+ * Las pantallas de captura (nueva nota / nueva actividad) entran encima.
+ *
+ * Lo transversal (sincronizar, ajustes, actualizaciones, sesión) vive aquí,
+ * para que se comporte igual en todas las secciones.
  */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,7 +64,7 @@ class MainActivity : ComponentActivity() {
             AgraFieldTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = androidx.compose.ui.graphics.Color.Transparent,
+                    color = Color.Transparent,
                 ) {
                     AppNavigation()
                 }
@@ -55,26 +73,51 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-enum class Screen { Login, NotesList, CreateNote, ActivitiesList, CreateActivity }
+enum class Screen { Login, Main, CreateNote, CreateActivity }
 
 @Composable
 fun AppNavigation() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val authRepository = remember { AuthRepository(context) }
     val updateRepository = remember { UpdateRepository(context) }
 
-    // Start at login or notes based on saved session.
     // rememberSaveable: sobrevivir rotación/muerte de proceso (común al abrir la cámara)
-    var currentScreen by androidx.compose.runtime.saveable.rememberSaveable {
-        mutableStateOf(
-            if (authRepository.isLoggedIn()) Screen.NotesList else Screen.Login
-        )
+    var currentScreen by rememberSaveable {
+        mutableStateOf(if (authRepository.isLoggedIn()) Screen.Main else Screen.Login)
     }
+    var currentTab by rememberSaveable { mutableStateOf(AgraTab.Libreta) }
 
-    // ── Auto-actualización: al arrancar (con internet) revisar si hay APK nuevo ──
+    // Alta de personal/producto: el estado vive aquí (no en la pantalla) para
+    // que cambiar de sección y volver no reabra el diálogo por su cuenta
+    var showPersonForm by remember { mutableStateOf(false) }
+    var showProductForm by remember { mutableStateOf(false) }
+
+    val syncStatus by SyncStatus.state.collectAsState()
+
+    // ── Ajustes (fotos, versión, cerrar sesión) ──
+    var showSettings by remember { mutableStateOf(false) }
+    var uploadOnMobile by remember {
+        mutableStateOf(SyncPreferences.uploadPolicy(context) == SyncPreferences.Policy.ALLOW)
+    }
+    var downloadOnMobile by remember {
+        mutableStateOf(SyncPreferences.downloadPolicy(context) == SyncPreferences.Policy.ALLOW)
+    }
+    var showPhotoPolicyDialog by remember { mutableStateOf(false) }
+    var checkingUpdate by remember { mutableStateOf(false) }
+
+    // ── Actualización de la app ──
     var updateInfo by remember { mutableStateOf<UpdateRepository.UpdateInfo?>(null) }
     LaunchedEffect(Unit) {
+        SyncStatus.load(context)
         updateInfo = updateRepository.checkForUpdate()
+    }
+
+    // Con datos móviles y sin haber preguntado nunca: definir qué hacer con las fotos
+    LaunchedEffect(currentScreen) {
+        if (currentScreen != Screen.Main) return@LaunchedEffect
+        val onMobile = !NetworkUtils.isUnmetered(context) && NetworkUtils.isConnected(context)
+        if (onMobile && !SyncPreferences.hasBeenAsked(context)) showPhotoPolicyDialog = true
     }
 
     // ── Sesión caducada: si ya no se pudo renovar sola, mandar al login ──
@@ -86,7 +129,6 @@ fun AppNavigation() {
             currentScreen = Screen.Login
         }
     }
-    // Revisar periódicamente mientras la app está abierta
     LaunchedEffect(Unit) {
         while (true) {
             kotlinx.coroutines.delay(30_000)
@@ -95,6 +137,82 @@ fun AppNavigation() {
                 currentScreen = Screen.Login
             }
         }
+    }
+
+    /** Sincronización manual: intención explícita del usuario */
+    val runManualSync: () -> Unit = {
+        scope.launch {
+            com.agratec.fieldapp.data.repository.FieldActivityRepository(context)
+                .resetFailedSyncAttempts()
+            SyncWorker.enqueueImmediateSync(context)
+            val mensaje = when (NetworkUtils.currentType(context)) {
+                NetworkUtils.NetworkType.NONE -> "Sin conexión: se sincronizará al recuperar señal"
+                NetworkUtils.NetworkType.WIFI -> "Sincronizando por WiFi (datos y fotos)..."
+                NetworkUtils.NetworkType.MOBILE ->
+                    if (uploadOnMobile) "Sincronizando por datos (datos y fotos)..."
+                    else "Sincronizando datos... las fotos esperarán WiFi"
+            }
+            Toast.makeText(context, mensaje, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // ── Diálogos transversales ──
+
+    if (showPhotoPolicyDialog) {
+        PhotoPolicyDialog(
+            pendingPhotos = syncStatus?.photosWaitingForWifi ?: 0,
+            onDecide = { allowUpload, allowDownload ->
+                SyncPreferences.setUploadPolicy(context, if (allowUpload) SyncPreferences.Policy.ALLOW else SyncPreferences.Policy.WIFI_ONLY)
+                SyncPreferences.setDownloadPolicy(context, if (allowDownload) SyncPreferences.Policy.ALLOW else SyncPreferences.Policy.WIFI_ONLY)
+                SyncPreferences.markAsked(context)
+                uploadOnMobile = allowUpload
+                downloadOnMobile = allowDownload
+                showPhotoPolicyDialog = false
+                SyncWorker.enqueueImmediateSync(context)
+            },
+            onDismiss = {
+                SyncPreferences.markAsked(context)
+                showPhotoPolicyDialog = false
+            },
+        )
+    }
+
+    if (showSettings) {
+        SettingsDialog(
+            uploadOnMobile = uploadOnMobile,
+            downloadOnMobile = downloadOnMobile,
+            onChange = { up, down ->
+                SyncPreferences.setUploadPolicy(context, if (up) SyncPreferences.Policy.ALLOW else SyncPreferences.Policy.WIFI_ONLY)
+                SyncPreferences.setDownloadPolicy(context, if (down) SyncPreferences.Policy.ALLOW else SyncPreferences.Policy.WIFI_ONLY)
+                SyncPreferences.markAsked(context)
+                uploadOnMobile = up
+                downloadOnMobile = down
+            },
+            onDismiss = { showSettings = false },
+            appVersion = updateRepository.currentVersionLabel(),
+            checkingUpdate = checkingUpdate,
+            onCheckUpdate = {
+                scope.launch {
+                    checkingUpdate = true
+                    when (val result = updateRepository.check()) {
+                        is UpdateRepository.CheckResult.Available -> {
+                            updateInfo = result.info
+                            showSettings = false
+                        }
+                        is UpdateRepository.CheckResult.UpToDate ->
+                            Toast.makeText(context, "Ya tienes la última versión (${result.currentVersion})", Toast.LENGTH_LONG).show()
+                        is UpdateRepository.CheckResult.Error ->
+                            Toast.makeText(context, "No se pudo revisar: ${result.message}", Toast.LENGTH_LONG).show()
+                    }
+                    checkingUpdate = false
+                }
+            },
+            onLogout = {
+                showSettings = false
+                authRepository.logout()
+                currentScreen = Screen.Login
+            },
+        )
     }
 
     if (sessionExpiredNotice) {
@@ -127,9 +245,7 @@ fun AppNavigation() {
     updateInfo?.let { info ->
         AlertDialog(
             onDismissRequest = { updateInfo = null },
-            title = {
-                Text("🚀 Nueva versión disponible", color = TextPrimary, fontWeight = FontWeight.Bold)
-            },
+            title = { Text("🚀 Nueva versión disponible", color = TextPrimary, fontWeight = FontWeight.Bold) },
             text = {
                 Text(
                     buildString {
@@ -151,68 +267,90 @@ fun AppNavigation() {
                 }
             },
             dismissButton = {
-                TextButton(onClick = { updateInfo = null }) {
-                    Text("Después", color = TextTertiary)
-                }
+                TextButton(onClick = { updateInfo = null }) { Text("Después", color = TextTertiary) }
             },
             containerColor = Color.White,
             shape = RoundedCornerShape(20.dp),
         )
     }
 
+    // ── Navegación ──
     AnimatedContent(
         targetState = currentScreen,
         transitionSpec = {
             when (targetState) {
-                Screen.Login -> fadeIn() togetherWith fadeOut()
+                // Las pantallas de captura entran desde la derecha; volver, al revés
                 Screen.CreateNote, Screen.CreateActivity ->
                     slideInHorizontally { it } + fadeIn() togetherWith
                             slideOutHorizontally { -it / 3 } + fadeOut()
-                Screen.NotesList -> {
-                    if (initialState == Screen.CreateNote) {
-                        slideInHorizontally { -it / 3 } + fadeIn() togetherWith
-                                slideOutHorizontally { it } + fadeOut()
-                    } else {
-                        fadeIn() togetherWith fadeOut()
-                    }
+                Screen.Main -> if (initialState == Screen.CreateNote || initialState == Screen.CreateActivity) {
+                    slideInHorizontally { -it / 3 } + fadeIn() togetherWith
+                            slideOutHorizontally { it } + fadeOut()
+                } else {
+                    fadeIn() togetherWith fadeOut()
                 }
-                Screen.ActivitiesList -> {
-                    if (initialState == Screen.CreateActivity) {
-                        slideInHorizontally { -it / 3 } + fadeIn() togetherWith
-                                slideOutHorizontally { it } + fadeOut()
-                    } else {
-                        fadeIn() togetherWith fadeOut()
-                    }
-                }
+                Screen.Login -> fadeIn() togetherWith fadeOut()
             }
         },
         label = "screenTransition",
     ) { screen ->
         when (screen) {
             Screen.Login -> LoginScreen(
-                onLoginSuccess = { currentScreen = Screen.NotesList }
+                onLoginSuccess = { currentScreen = Screen.Main }
             )
-            Screen.NotesList -> NotesListScreen(
-                onCreateNote = { currentScreen = Screen.CreateNote },
-                onOpenNotebook = { currentScreen = Screen.ActivitiesList },
-                onLogout = {
-                    authRepository.logout()
-                    currentScreen = Screen.Login
-                },
-            )
+
+            Screen.Main -> AgraScreen {
+                when (currentTab) {
+                    AgraTab.Notas -> NotesListScreen(
+                        onSync = runManualSync,
+                        onOpenSettings = { showSettings = true },
+                    )
+                    AgraTab.Libreta -> ActivitiesListScreen(
+                        onSync = runManualSync,
+                        onOpenSettings = { showSettings = true },
+                    )
+                    AgraTab.Personal -> PersonnelScreen(
+                        onSync = runManualSync,
+                        showCreateForm = showPersonForm,
+                        onCreateFormClosed = { showPersonForm = false },
+                    )
+                    AgraTab.Almacen -> WarehouseScreen(
+                        onSync = runManualSync,
+                        showCreateForm = showProductForm,
+                        onCreateFormClosed = { showProductForm = false },
+                    )
+                }
+
+                // Botón de crear de la sección actual, sobre la barra
+                AgraCreateButton(
+                    label = currentTab.createLabel,
+                    onClick = {
+                        when (currentTab) {
+                            AgraTab.Notas -> currentScreen = Screen.CreateNote
+                            AgraTab.Libreta -> currentScreen = Screen.CreateActivity
+                            AgraTab.Personal -> showPersonForm = true
+                            AgraTab.Almacen -> showProductForm = true
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 20.dp, bottom = 92.dp)
+                        .navigationBarsPadding(),
+                )
+
+                AgraNavBar(
+                    current = currentTab,
+                    onSelect = { currentTab = it },
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+            }
+
             Screen.CreateNote -> CreateNoteScreen(
-                onBack = { currentScreen = Screen.NotesList }
+                onBack = { currentScreen = Screen.Main }
             )
-            Screen.ActivitiesList -> ActivitiesListScreen(
-                onCreateActivity = { currentScreen = Screen.CreateActivity },
-                onBackToNotes = { currentScreen = Screen.NotesList },
-                onLogout = {
-                    authRepository.logout()
-                    currentScreen = Screen.Login
-                },
-            )
+
             Screen.CreateActivity -> CreateActivityScreen(
-                onBack = { currentScreen = Screen.ActivitiesList }
+                onBack = { currentScreen = Screen.Main }
             )
         }
     }

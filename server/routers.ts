@@ -8,7 +8,7 @@ import * as db from "./db";
 import * as dbExt from "./db_extended";
 import * as webodm from "./webodmService";
 import { getDb } from "./db";
-import { users, boxes, harvesters, parcels, parcelDetails, parcelAiAnalysis, crops, cropVarieties, productionCycles, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, fieldActivityWorkSessions, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos, telegramLinkCodes, collaborators, collaboratorLinkCodes, fieldActivityAssignments, labelPrintHistory, weeklySummaries, appReleases } from "../drizzle/schema";
+import { users, boxes, harvesters, parcels, parcelDetails, parcelAiAnalysis, crops, cropVarieties, productionCycles, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, fieldActivityWorkSessions, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos, telegramLinkCodes, collaborators, collaboratorRoles, collaboratorLinkCodes, fieldActivityAssignments, labelPrintHistory, weeklySummaries, appReleases, PRODUCT_UNITS } from "../drizzle/schema";
 import { eq, desc, asc, and, gte, lte, inArray, isNull, sql } from "drizzle-orm";
 
 // Fecha local de México "YYYY-MM-DD" (el negocio opera en America/Mexico_City)
@@ -36,6 +36,23 @@ function sumSessionMinutes(sessions: { startTime?: string | null; endTime?: stri
     total += dur;
   }
   return total;
+}
+
+/**
+ * Da de alta un puesto en el catálogo si es nuevo.
+ * Así la opción "Otro" de la app (o de la web) queda registrada en el servidor
+ * y aparece en el catálogo del resto de los dispositivos.
+ */
+async function registerCollaboratorRole(drizzle: any, role?: string | null): Promise<void> {
+  const name = role?.trim();
+  if (!name) return;
+  try {
+    await drizzle.insert(collaboratorRoles)
+      .values({ name: name.slice(0, 128) })
+      .onDuplicateKeyUpdate({ set: { isActive: true } });
+  } catch (e) {
+    console.error("[Roles] No se pudo registrar el puesto:", (e as any)?.message);
+  }
 }
 
 export const appRouter = router({
@@ -2626,9 +2643,11 @@ IMPORTANTE:
         status: z.string().optional(),
         parcelIds: z.array(z.number()).optional(),
         products: z.array(z.object({
+          productId: z.number().nullable().optional(), // producto del almacén
           productName: z.string(),
           productType: z.string().optional(),
-          quantity: z.string().optional(),
+          plannedQuantity: z.string().optional(), // cantidad planeada
+          quantity: z.string().optional(),        // cantidad utilizada
           unit: z.string().optional(),
           dosisPerHectare: z.string().optional(),
           applicationMethod: z.string().optional(),
@@ -2696,8 +2715,10 @@ IMPORTANTE:
           await drizzle.insert(fieldActivityProducts).values(
             input.products.map(p => ({
               activityId,
+              productId: p.productId ?? null,
               productName: p.productName,
               productType: (p.productType as any) || "otro",
+              plannedQuantity: p.plannedQuantity || null,
               quantity: p.quantity || null,
               unit: (p.unit as any) || "kg",
               dosisPerHectare: p.dosisPerHectare || null,
@@ -2771,9 +2792,11 @@ IMPORTANTE:
         status: z.string().optional(),
         parcelIds: z.array(z.number()).optional(),
         products: z.array(z.object({
+          productId: z.number().nullable().optional(), // producto del almacén
           productName: z.string(),
           productType: z.string().optional(),
-          quantity: z.string().optional(),
+          plannedQuantity: z.string().optional(), // cantidad planeada
+          quantity: z.string().optional(),        // cantidad utilizada
           unit: z.string().optional(),
           dosisPerHectare: z.string().optional(),
           applicationMethod: z.string().optional(),
@@ -2855,8 +2878,10 @@ IMPORTANTE:
             await drizzle.insert(fieldActivityProducts).values(
               input.products.map(p => ({
                 activityId: input.id,
+                productId: p.productId ?? null,
                 productName: p.productName,
                 productType: (p.productType as any) || "otro",
+                plannedQuantity: p.plannedQuantity || null,
                 quantity: p.quantity || null,
                 unit: (p.unit as any) || "kg",
                 dosisPerHectare: p.dosisPerHectare || null,
@@ -4005,6 +4030,18 @@ IMPORTANTE:
       return result;
     }),
 
+    // Catálogo de puestos (mismo que consume la app; la opción "Otro" lo alimenta)
+    listRoles: protectedProcedure.query(async () => {
+      const drizzle = await getDb();
+      if (!drizzle) throw new Error("Base de datos no disponible");
+      const rows = await drizzle
+        .select({ id: collaboratorRoles.id, name: collaboratorRoles.name })
+        .from(collaboratorRoles)
+        .where(eq(collaboratorRoles.isActive, true))
+        .orderBy(asc(collaboratorRoles.name));
+      return rows;
+    }),
+
     // Crear colaborador
     create: protectedProcedure
       .input(z.object({
@@ -4022,6 +4059,7 @@ IMPORTANTE:
           role: input.role || null,
           createdByUserId: userId,
         });
+        await registerCollaboratorRole(drizzle, input.role);
         return { success: true, id: result.insertId };
       }),
 
@@ -4041,6 +4079,7 @@ IMPORTANTE:
         if (input.role !== undefined) updateData.role = input.role || null;
         if (input.isActive !== undefined) updateData.isActive = input.isActive;
         await drizzle.update(collaborators).set(updateData).where(eq(collaborators.id, input.id));
+        await registerCollaboratorRole(drizzle, input.role);
         return { success: true };
       }),
 
@@ -4321,6 +4360,14 @@ IMPORTANTE:
             startTime: z.string().max(8).optional(),
             endTime: z.string().max(8).optional(),
           })).optional(),
+          // Productos del almacén consumidos: lo planeado y lo realmente usado
+          products: z.array(z.object({
+            productId: z.number().optional(), // null si se escribió a mano
+            productName: z.string().min(1).max(255),
+            unit: z.enum(PRODUCT_UNITS).optional(),
+            plannedQuantity: z.string().max(32).optional(),
+            usedQuantity: z.string().max(32).optional(),
+          })).optional(),
         })),
       }))
       .mutation(async ({ input, ctx }) => {
@@ -4432,6 +4479,58 @@ IMPORTANTE:
               }
             }
 
+            // Productos consumidos.
+            //
+            // Al CREAR la actividad se insertan tal cual (no hay nada que perder).
+            // Al ACTUALIZAR solo se tocan las cantidades del producto que coincide:
+            // la dosis/ha, el método y las notas se capturan en la web y el
+            // teléfono no las conoce — borrar y reinsertar las perdería.
+            if (rowId && act.products !== undefined && act.products.length > 0) {
+              if (isNew) {
+                for (const p of act.products) {
+                  await drizzle.insert(fieldActivityProducts).values({
+                    activityId: rowId,
+                    productId: p.productId ?? null,
+                    productName: p.productName,
+                    plannedQuantity: p.plannedQuantity || null,
+                    quantity: p.usedQuantity || null,
+                    unit: (p.unit || "kg") as any,
+                  });
+                }
+              } else {
+                const existingProducts = await drizzle.select()
+                  .from(fieldActivityProducts)
+                  .where(eq(fieldActivityProducts.activityId, rowId));
+                for (const p of act.products) {
+                  // Se empareja por producto del almacén y, si no, por nombre
+                  const match = existingProducts.find(e =>
+                    (p.productId != null && e.productId === p.productId) ||
+                    e.productName === p.productName
+                  );
+                  if (match) {
+                    const upd: Record<string, unknown> = {};
+                    if (p.plannedQuantity !== undefined) upd.plannedQuantity = p.plannedQuantity || null;
+                    if (p.usedQuantity !== undefined) upd.quantity = p.usedQuantity || null;
+                    if (Object.keys(upd).length > 0) {
+                      await drizzle.update(fieldActivityProducts)
+                        .set(upd)
+                        .where(eq(fieldActivityProducts.id, match.id));
+                    }
+                  } else {
+                    // Producto agregado desde el campo a una actividad ya existente
+                    await drizzle.insert(fieldActivityProducts).values({
+                      activityId: rowId,
+                      productId: p.productId ?? null,
+                      productName: p.productName,
+                      plannedQuantity: p.plannedQuantity || null,
+                      quantity: p.usedQuantity || null,
+                      unit: (p.unit || "kg") as any,
+                    });
+                  }
+                }
+              }
+            }
+
             results.push({ clientUuid: act.clientUuid, serverId: rowId, status: isNew ? "created" : "updated" });
           } catch (error: any) {
             console.error(`[OfflineSync] Error syncing actividad ${act.clientUuid}:`, error.message);
@@ -4481,6 +4580,10 @@ IMPORTANTE:
         const parcelsByActivity: Record<number, number[]> = {};
         const sessionsByActivity: Record<number, { workDate: string; startTime: string | null; endTime: string | null }[]> = {};
         const collabsByActivity: Record<number, number[]> = {};
+        const productsByActivity: Record<number, {
+          productId: number | null; productName: string; unit: string | null;
+          plannedQuantity: string | null; usedQuantity: string | null;
+        }[]> = {};
         if (ids.length > 0) {
           const links = await drizzle
             .select({ activityId: fieldActivityParcels.activityId, parcelId: fieldActivityParcels.parcelId })
@@ -4511,6 +4614,21 @@ IMPORTANTE:
             if (!collabsByActivity[a.activityId]) collabsByActivity[a.activityId] = [];
             collabsByActivity[a.activityId].push(a.collaboratorId);
           }
+          const prods = await drizzle
+            .select()
+            .from(fieldActivityProducts)
+            .where(inArray(fieldActivityProducts.activityId, ids))
+            .orderBy(asc(fieldActivityProducts.id));
+          for (const p of prods) {
+            if (!productsByActivity[p.activityId]) productsByActivity[p.activityId] = [];
+            productsByActivity[p.activityId].push({
+              productId: p.productId,
+              productName: p.productName,
+              unit: p.unit,
+              plannedQuantity: p.plannedQuantity,
+              usedQuantity: p.quantity,
+            });
+          }
         }
 
         return activities.map((a) => ({
@@ -4529,19 +4647,39 @@ IMPORTANTE:
           parcelIds: parcelsByActivity[a.id] ?? [],
           collaboratorIds: collabsByActivity[a.id] ?? [],
           workSessions: sessionsByActivity[a.id] ?? [],
+          products: productsByActivity[a.id] ?? [],
           updatedAt: a.updatedAt,
         }));
       }),
 
-    // Colaboradores de campo para la app (selector de "quién lo hizo")
+    // Colaboradores de campo para la app (módulo de Personal)
     getCollaborators: protectedProcedure.query(async () => {
       const drizzle = await getDb();
       if (!drizzle) throw new Error("Base de datos no disponible");
       const rows = await drizzle
-        .select({ id: collaborators.id, name: collaborators.name, role: collaborators.role, isActive: collaborators.isActive })
+        .select({
+          id: collaborators.id,
+          name: collaborators.name,
+          role: collaborators.role,
+          phone: collaborators.phone,
+          isActive: collaborators.isActive,
+        })
         .from(collaborators)
         .where(eq(collaborators.isActive, true))
         .orderBy(collaborators.name);
+      return rows;
+    }),
+
+    // Catálogo de puestos para el selector de la app.
+    // Incluye los sembrados y los que se hayan capturado con la opción "Otro".
+    getCollaboratorRoles: protectedProcedure.query(async () => {
+      const drizzle = await getDb();
+      if (!drizzle) throw new Error("Base de datos no disponible");
+      const rows = await drizzle
+        .select({ id: collaboratorRoles.id, name: collaboratorRoles.name })
+        .from(collaboratorRoles)
+        .where(eq(collaboratorRoles.isActive, true))
+        .orderBy(asc(collaboratorRoles.name));
       return rows;
     }),
 
@@ -4582,6 +4720,9 @@ IMPORTANTE:
                 .where(eq(collaborators.id, existing.id));
             }
 
+            // Puesto capturado con "Otro": queda en el catálogo del servidor
+            await registerCollaboratorRole(drizzle, col.role);
+
             const [row] = await drizzle.select({ id: collaborators.id })
               .from(collaborators)
               .where(eq(collaborators.clientUuid, col.clientUuid))
@@ -4590,6 +4731,98 @@ IMPORTANTE:
           } catch (error: any) {
             console.error(`[OfflineSync] Error syncing colaborador ${col.clientUuid}:`, error.message);
             results.push({ clientUuid: col.clientUuid, status: "error", error: error.message });
+          }
+        }
+
+        return { success: true, results, syncedCount: results.filter(r => r.status !== "error").length };
+      }),
+
+    // ── ALMACÉN: catálogo de productos para la app ──
+    // Misma lógica offline/online que el personal: la app baja el catálogo
+    // cuando hay red y puede dar de alta productos sin señal.
+
+    /** Productos activos del almacén (selector de consumo en actividades) */
+    getProducts: protectedProcedure.query(async () => {
+      const drizzle = await getDb();
+      if (!drizzle) throw new Error("Base de datos no disponible");
+      const rows = await drizzle
+        .select({
+          id: warehouseProducts.id,
+          name: warehouseProducts.name,
+          brand: warehouseProducts.brand,
+          category: warehouseProducts.category,
+          unit: warehouseProducts.unit,
+          presentation: warehouseProducts.presentation,
+        })
+        .from(warehouseProducts)
+        .where(eq(warehouseProducts.isActive, true))
+        .orderBy(asc(warehouseProducts.name));
+      return rows;
+    }),
+
+    /** Alta de productos desde la app móvil (idempotente por clientUuid) */
+    syncProducts: protectedProcedure
+      .input(z.object({
+        products: z.array(z.object({
+          clientUuid: z.string().uuid(),
+          name: z.string().min(1).max(255),
+          brand: z.string().max(255).optional(),
+          category: z.string().max(64).optional(),
+          unit: z.enum(PRODUCT_UNITS).optional(),
+          description: z.string().max(1000).optional(),
+        })),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new Error("Base de datos no disponible");
+        const userId = (ctx as any).user?.id || 0;
+        const results: { clientUuid: string; serverId?: number; status: "created" | "updated" | "error"; error?: string }[] = [];
+
+        // Categorías válidas del catálogo; cualquier otra cae en "otro"
+        const validCategories = new Set(warehouseProducts.category.enumValues as string[]);
+
+        for (const p of input.products) {
+          try {
+            const [existing] = await drizzle.select({ id: warehouseProducts.id })
+              .from(warehouseProducts)
+              .where(eq(warehouseProducts.clientUuid, p.clientUuid))
+              .limit(1);
+
+            const category = (p.category && validCategories.has(p.category) ? p.category : "otro") as any;
+
+            if (!existing) {
+              await drizzle.insert(warehouseProducts).values({
+                clientUuid: p.clientUuid,
+                name: p.name,
+                brand: p.brand || null,
+                category,
+                unit: (p.unit || "kg") as any,
+                // description es obligatoria en el esquema; sin captura en campo
+                // se deja una nota trazable en vez de texto vacío
+                description: p.description || "Alta desde la app de campo",
+                createdByUserId: userId,
+              }).onDuplicateKeyUpdate({ set: { name: p.name } });
+            } else {
+              // El servidor manda en stock/costos: desde el campo solo se
+              // corrigen los datos básicos del producto
+              await drizzle.update(warehouseProducts)
+                .set({
+                  name: p.name,
+                  brand: p.brand || null,
+                  category,
+                  unit: (p.unit || "kg") as any,
+                })
+                .where(eq(warehouseProducts.id, existing.id));
+            }
+
+            const [row] = await drizzle.select({ id: warehouseProducts.id })
+              .from(warehouseProducts)
+              .where(eq(warehouseProducts.clientUuid, p.clientUuid))
+              .limit(1);
+            results.push({ clientUuid: p.clientUuid, serverId: row?.id, status: existing ? "updated" : "created" });
+          } catch (error: any) {
+            console.error(`[OfflineSync] Error syncing producto ${p.clientUuid}:`, error.message);
+            results.push({ clientUuid: p.clientUuid, status: "error", error: error.message });
           }
         }
 

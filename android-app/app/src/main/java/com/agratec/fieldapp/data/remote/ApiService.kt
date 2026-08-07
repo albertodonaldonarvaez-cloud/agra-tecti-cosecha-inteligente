@@ -114,6 +114,24 @@ interface ApiService {
     @GET("api/trpc/offlineSync.getCollaborators")
     suspend fun getCollaborators(): Response<TrpcResponse<List<CollaboratorData>>>
 
+    /** Catálogo de puestos del servidor (para el selector, con opción "Otro") */
+    @GET("api/trpc/offlineSync.getCollaboratorRoles")
+    suspend fun getCollaboratorRoles(): Response<TrpcResponse<List<CollaboratorRoleData>>>
+
+    // ============================================
+    // OFFLINE SYNC — ALMACÉN DE PRODUCTOS
+    // ============================================
+
+    /** Subir productos dados de alta desde el teléfono (idempotente por clientUuid) */
+    @POST("api/trpc/offlineSync.syncProducts")
+    suspend fun syncProducts(
+        @Body body: TrpcMutationRequest<SyncProductsRequest>
+    ): Response<TrpcResponse<SyncProductsResponseData>>
+
+    /** Descargar el catálogo de productos activos del almacén */
+    @GET("api/trpc/offlineSync.getProducts")
+    suspend fun getProducts(): Response<TrpcResponse<List<ProductData>>>
+
     // ============================================
     // FOTOS DE ACTIVIDADES (multipart)
     // ============================================

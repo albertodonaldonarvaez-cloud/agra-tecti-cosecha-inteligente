@@ -4,7 +4,9 @@ import android.content.Context
 import android.util.Log
 import com.agratec.fieldapp.data.local.AppDatabase
 import com.agratec.fieldapp.data.local.entity.CollaboratorEntity
+import com.agratec.fieldapp.data.prefs.CatalogPreferences
 import com.agratec.fieldapp.data.remote.RetrofitClient
+import com.agratec.fieldapp.sync.SyncWorker
 import com.agratec.fieldapp.data.remote.dto.SyncCollaboratorItem
 import com.agratec.fieldapp.data.remote.dto.SyncCollaboratorsRequest
 import com.agratec.fieldapp.data.remote.dto.TrpcMutationRequest
@@ -27,17 +29,70 @@ class CollaboratorRepository(private val context: Context) {
 
     fun getAll(): Flow<List<CollaboratorEntity>> = dao.getAll()
 
+    suspend fun getUnsyncedCount(): Int = dao.getUnsyncedCount()
+
     /** Alta local de un colaborador (se sube en el siguiente sync) */
-    suspend fun addCollaborator(name: String, role: String?): CollaboratorEntity {
+    suspend fun addCollaborator(
+        name: String,
+        role: String?,
+        phone: String? = null,
+    ): CollaboratorEntity {
+        val cleanRole = role?.trim()?.takeIf { it.isNotBlank() }
         val entity = CollaboratorEntity(
             clientUuid = UUID.randomUUID().toString(),
             name = name.trim(),
-            role = role?.trim()?.takeIf { it.isNotBlank() },
+            role = cleanRole,
+            phone = phone?.trim()?.takeIf { it.isNotBlank() },
             isSynced = false,
         )
         dao.insert(entity)
+        // Un puesto capturado con "Otro" entra al catálogo local de inmediato,
+        // aunque no haya señal; el servidor lo registra al sincronizar
+        cleanRole?.let { CatalogPreferences.addRole(context, it) }
         Log.i(TAG, "Colaborador creado localmente: ${entity.name}")
+        SyncWorker.enqueueImmediateSync(context)
         return entity
+    }
+
+    /** Editar un colaborador local (queda pendiente de subir) */
+    suspend fun updateCollaborator(
+        clientUuid: String,
+        name: String,
+        role: String?,
+        phone: String?,
+    ) {
+        val local = dao.getByUuid(clientUuid) ?: return
+        val cleanRole = role?.trim()?.takeIf { it.isNotBlank() }
+        dao.update(
+            local.copy(
+                name = name.trim(),
+                role = cleanRole,
+                phone = phone?.trim()?.takeIf { it.isNotBlank() },
+                isSynced = false,
+                syncAttempts = 0,
+                lastSyncError = null,
+            )
+        )
+        cleanRole?.let { CatalogPreferences.addRole(context, it) }
+        SyncWorker.enqueueImmediateSync(context)
+    }
+
+    /** Catálogo de puestos disponible en el teléfono (offline incluido) */
+    fun roles(): List<String> = CatalogPreferences.roles(context)
+
+    /** Bajar el catálogo de puestos del servidor (no crítico: si falla se usa el local) */
+    suspend fun pullRoles(): Boolean {
+        return try {
+            val api = RetrofitClient.getApiService(context)
+            val response = api.getCollaboratorRoles()
+            if (!response.isSuccessful) return false
+            val roles = response.body()?.result?.data?.json ?: return false
+            CatalogPreferences.setRolesFromServer(context, roles.map { it.name })
+            true
+        } catch (e: Exception) {
+            Log.d(TAG, "Catálogo de puestos no disponible: ${e.message}")
+            false
+        }
     }
 
     /** Resultado de la subida, para que el worker pueda avisar al usuario */
@@ -111,13 +166,17 @@ class CollaboratorRepository(private val context: Context) {
                             serverId = r.id,
                             name = r.name,
                             role = r.role,
+                            phone = r.phone,
                             isSynced = true,
                         )
                     )
                 } else if (local.isSynced) {
-                    dao.update(local.copy(name = r.name, role = r.role))
+                    dao.update(local.copy(name = r.name, role = r.role, phone = r.phone))
                 }
             }
+
+            // Los puestos en uso también alimentan el selector
+            CatalogPreferences.setRolesFromServer(context, remote.mapNotNull { it.role })
 
             // Quitar del selector a los dados de baja/desactivados en la web
             // (solo los ya sincronizados; los pendientes locales no se tocan)

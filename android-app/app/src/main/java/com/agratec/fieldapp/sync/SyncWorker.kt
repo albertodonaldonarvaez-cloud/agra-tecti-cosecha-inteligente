@@ -6,6 +6,7 @@ import androidx.work.*
 import com.agratec.fieldapp.data.local.AppDatabase
 import com.agratec.fieldapp.data.prefs.SyncPreferences
 import com.agratec.fieldapp.data.remote.RetrofitClient
+import com.agratec.fieldapp.data.remote.dto.ActivityProductDto
 import com.agratec.fieldapp.data.remote.dto.SyncActivitiesRequest
 import com.agratec.fieldapp.data.remote.dto.SyncActivityItem
 import com.agratec.fieldapp.data.remote.dto.SyncNoteItem
@@ -135,16 +136,31 @@ class SyncWorker(
             problems.add("No se pudieron actualizar las parcelas")
         }
 
-        // ── Colaboradores (antes de actividades: resuelven las asignaciones) ──
+        // ── Personal de campo (antes de actividades: resuelven las asignaciones) ──
         try {
             val collabRepo = com.agratec.fieldapp.data.repository.CollaboratorRepository(applicationContext)
             val pushResult = collabRepo.pushUnsynced()
             if (pushResult.httpCode == 401) authFailed = true
             if (pushResult.problem != null) problems.add(pushResult.problem)
+            // Primero se sube lo local y después se baja: así el personal dado
+            // de alta en otro dispositivo aparece también en este
             collabRepo.pullFromServer()
+            collabRepo.pullRoles()
         } catch (e: Exception) {
-            Log.w(TAG, "Error sincronizando colaboradores", e)
-            problems.add("No se pudieron sincronizar los colaboradores")
+            Log.w(TAG, "Error sincronizando el personal", e)
+            problems.add("No se pudo sincronizar el personal")
+        }
+
+        // ── Almacén de productos (antes de actividades: resuelven el consumo) ──
+        try {
+            val productRepo = com.agratec.fieldapp.data.repository.ProductRepository(applicationContext)
+            val pushResult = productRepo.pushUnsynced()
+            if (pushResult.httpCode == 401) authFailed = true
+            if (pushResult.problem != null) problems.add(pushResult.problem)
+            productRepo.pullFromServer()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error sincronizando el almacén", e)
+            problems.add("No se pudo sincronizar el almacén")
         }
 
         // ── Notas de campo (no bloquea a las actividades si falla) ──
@@ -221,10 +237,29 @@ class SyncWorker(
 
             if (unsyncedActivities.isNotEmpty()) {
                 Log.i(TAG, "Sincronizando ${unsyncedActivities.size} actividades...")
+                val productDao = db.productDao()
                 val items = unsyncedActivities.map { act ->
                     // Horas y jornadas SOLO en la primera subida: en updates el
                     // teléfono solo cambia el estado (la web manda en el resto)
                     val isFirstUpload = act.serverId == null
+
+                    // Consumo de productos: el almacén ya se subió unos pasos
+                    // antes, así que normalmente el serverId ya está resuelto.
+                    // Si un producto sigue pendiente, la línea se manda igual
+                    // con su nombre: el consumo no se pierde por esperar al
+                    // catálogo (se vinculará al producto cuando se edite).
+                    val productDtos = act.products().map { p ->
+                        val serverId = p.serverId
+                            ?: p.productUuid?.let { productDao.getByUuid(it)?.serverId }
+                        ActivityProductDto(
+                            productId = serverId,
+                            productName = p.name.take(255),
+                            unit = p.unit,
+                            plannedQuantity = p.planned?.take(32),
+                            usedQuantity = p.used?.take(32),
+                        )
+                    }
+
                     SyncActivityItem(
                         clientUuid = act.clientUuid,
                         serverId = act.serverId,
@@ -241,6 +276,7 @@ class SyncWorker(
                         workSessions = if (isFirstUpload) act.workSessions().takeIf { it.isNotEmpty() }?.map {
                             WorkSessionDto(it.workDate, it.startTime, it.endTime)
                         } else null,
+                        products = productDtos.takeIf { it.isNotEmpty() },
                     )
                 }
 

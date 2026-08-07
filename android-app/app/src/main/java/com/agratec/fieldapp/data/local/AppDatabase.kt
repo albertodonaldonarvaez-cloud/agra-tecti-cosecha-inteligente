@@ -12,12 +12,14 @@ import com.agratec.fieldapp.data.local.dao.FieldActivityDao
 import com.agratec.fieldapp.data.local.dao.FieldNoteDao
 import com.agratec.fieldapp.data.local.dao.ParcelDao
 import com.agratec.fieldapp.data.local.dao.PhotoDao
+import com.agratec.fieldapp.data.local.dao.ProductDao
 import com.agratec.fieldapp.data.local.entity.ActivityPhotoEntity
 import com.agratec.fieldapp.data.local.entity.CollaboratorEntity
 import com.agratec.fieldapp.data.local.entity.FieldActivityEntity
 import com.agratec.fieldapp.data.local.entity.FieldNoteEntity
 import com.agratec.fieldapp.data.local.entity.ParcelEntity
 import com.agratec.fieldapp.data.local.entity.PhotoEntity
+import com.agratec.fieldapp.data.local.entity.ProductEntity
 
 /**
  * Base de datos Room local para la app de campo.
@@ -29,12 +31,14 @@ import com.agratec.fieldapp.data.local.entity.PhotoEntity
  * v2 → v3: se agrega la tabla field_activities (libreta de campo).
  * v3 → v4: horas y jornadas multi-día en actividades, colaboradores de campo
  *          y fotos de actividades.
+ * v4 → v5: almacén de productos (products_cache) y consumo de productos en
+ *          actividades (planeado vs utilizado).
  * Las migraciones son REALES (no destructivas) para no perder datos pendientes
  * de sincronizar en los dispositivos de campo.
  */
 @Database(
-    entities = [FieldNoteEntity::class, PhotoEntity::class, ParcelEntity::class, FieldActivityEntity::class, CollaboratorEntity::class, ActivityPhotoEntity::class],
-    version = 4,
+    entities = [FieldNoteEntity::class, PhotoEntity::class, ParcelEntity::class, FieldActivityEntity::class, CollaboratorEntity::class, ActivityPhotoEntity::class, ProductEntity::class],
+    version = 5,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -45,6 +49,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun fieldActivityDao(): FieldActivityDao
     abstract fun collaboratorDao(): CollaboratorDao
     abstract fun activityPhotoDao(): ActivityPhotoDao
+    abstract fun productDao(): ProductDao
 
     companion object {
         @Volatile
@@ -121,6 +126,30 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v4 → v5: almacén de productos + productos consumidos en cada actividad */
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `field_activities` ADD COLUMN `productsJson` TEXT NOT NULL DEFAULT '[]'")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `products_cache` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `clientUuid` TEXT NOT NULL,
+                        `serverId` INTEGER,
+                        `name` TEXT NOT NULL,
+                        `brand` TEXT,
+                        `category` TEXT NOT NULL DEFAULT 'otro',
+                        `unit` TEXT NOT NULL DEFAULT 'kg',
+                        `isSynced` INTEGER NOT NULL,
+                        `syncAttempts` INTEGER NOT NULL,
+                        `lastSyncError` TEXT
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_products_cache_clientUuid` ON `products_cache` (`clientUuid`)")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -128,7 +157,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "agra_field_notes.db"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     // Solo como último recurso para saltos sin ruta de migración
                     .fallbackToDestructiveMigration()
                     .build()

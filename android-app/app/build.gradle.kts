@@ -12,10 +12,17 @@ android {
         applicationId = "com.agratec.fieldapp"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.5.0"
+        versionCode = 7
+        versionName = "1.6.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Room exporta el esquema a app/schemas: sirve para revisar que cada
+        // migración deje la base exactamente como Room la espera (si no
+        // coincide, Room recrearía la base y se perdería lo capturado en campo)
+        ksp {
+            arg("room.schemaLocation", "$projectDir/schemas")
+        }
 
         // URL base del servidor — cambiar según entorno
         // Para desarrollo local: usar la IP de tu máquina (NO localhost/10.0.2.2)

@@ -16,7 +16,7 @@ import * as db from "./db";
 import * as dbExt from "./db_extended";
 import {
   productionCycles, fieldActivities, fieldActivityParcels, fieldActivityWorkSessions,
-  parcels, weeklySummaries,
+  parcels, weeklySummaries, fieldNotes,
 } from "../drizzle/schema";
 import { eq, desc, asc, and, gte, lte, inArray, isNull, sql } from "drizzle-orm";
 
@@ -86,6 +86,13 @@ const ACTIVITY_LABELS: Record<string, string> = {
   aplicacion_fitosanitaria: "Aplicación fitosanitaria", otro: "Otra actividad",
 };
 
+const NOTE_LABELS: Record<string, string> = {
+  arboles_mal_plantados: "Árboles mal plantados", plaga_enfermedad: "Plaga o enfermedad",
+  riego_drenaje: "Riego/drenaje", dano_mecanico: "Daño mecánico", maleza: "Maleza",
+  fertilizacion: "Fertilización", suelo: "Suelo", infraestructura: "Infraestructura",
+  fauna: "Fauna", otro: "Otro",
+};
+
 /**
  * Genera (o regenera con force) el resumen de la última semana completa.
  * Devuelve el registro creado, el existente si ya había, o null si no se pudo.
@@ -128,13 +135,46 @@ export async function generateWeeklySummary(options?: { force?: boolean }): Prom
 
   console.log(`${TAG} Generando resumen de la semana ${weekStart} a ${weekEnd}...`);
 
-  // ── 1. Actividades de la semana ──
-  const weekActivities = await drizzle.select().from(fieldActivities)
-    .where(and(
-      gte(fieldActivities.activityDate, weekStart as any),
-      lte(fieldActivities.activityDate, weekEnd as any),
-    ))
-    .orderBy(asc(fieldActivities.activityDate));
+  const today = todayMx();
+
+  // ── 0. Ciclo activo: TODO el análisis se acota a él ────────────────
+  // El higo se maneja por ciclos que arrancan con la poda. Mezclar la libreta
+  // de ciclos anteriores distorsiona el diagnóstico (labores de hace un año
+  // aparecerían como pendientes), así que el ciclo define la ventana de datos.
+  const allCycles = await drizzle.select().from(productionCycles)
+    .orderBy(desc(productionCycles.startDate)).limit(5);
+  const activeCycle = allCycles.find(c => !c.endDate || c.endDate >= today) ?? null;
+
+  // Ventana del ciclo. Sin ciclos registrados se mantiene el comportamiento
+  // anterior (sin recorte) para no dejar al productor sin resumen.
+  const cycleStart = activeCycle?.startDate ?? null;
+  const cycleEnd = activeCycle?.endDate ?? null;
+
+  /** Recorta un rango de fechas a la ventana del ciclo activo */
+  const clampToCycle = (from: string, to: string): { from: string; to: string } | null => {
+    const f = cycleStart && from < cycleStart ? cycleStart : from;
+    const t = cycleEnd && to > cycleEnd ? cycleEnd : to;
+    return f > t ? null : { from: f, to: t };
+  };
+
+  /** Condición reutilizable: la actividad cae dentro del ciclo activo */
+  const withinCycle = () => {
+    const conds: any[] = [];
+    if (cycleStart) conds.push(gte(fieldActivities.activityDate, cycleStart as any));
+    if (cycleEnd) conds.push(lte(fieldActivities.activityDate, cycleEnd as any));
+    return conds;
+  };
+
+  // ── 1. Actividades de la semana (dentro del ciclo) ──
+  const weekRange = clampToCycle(weekStart, weekEnd);
+  const weekActivities = weekRange
+    ? await drizzle.select().from(fieldActivities)
+        .where(and(
+          gte(fieldActivities.activityDate, weekRange.from as any),
+          lte(fieldActivities.activityDate, weekRange.to as any),
+        ))
+        .orderBy(asc(fieldActivities.activityDate))
+    : [];
 
   const actIds = weekActivities.map(a => a.id);
   const parcelsByActivity: Record<number, string[]> = {};
@@ -207,22 +247,25 @@ export async function generateWeeklySummary(options?: { force?: boolean }): Prom
     }
   } catch (e) { console.log(`${TAG} Clima no disponible:`, e); }
 
-  // ── 2.b Actividades planeadas para los próximos días ──
-  const today = todayMx();
+  // ── 2.b Actividades planeadas para los próximos días (del ciclo actual) ──
   const horizon = addDaysStr(today, 14);
   const upcomingActivities = await drizzle.select().from(fieldActivities)
     .where(and(
       gte(fieldActivities.activityDate, today as any),
       lte(fieldActivities.activityDate, horizon as any),
       inArray(fieldActivities.status, ["planificada", "en_progreso"]),
+      ...withinCycle(),
     ))
     .orderBy(asc(fieldActivities.activityDate));
 
-  // Atrasadas: planificadas con fecha ya pasada y aún sin completar
+  // Atrasadas: planificadas con fecha ya pasada y aún sin completar.
+  // Acotadas al ciclo actual: lo que quedó pendiente de un ciclo cerrado
+  // pertenece a la historia, no al diagnóstico de hoy.
   const overdueActivities = await drizzle.select().from(fieldActivities)
     .where(and(
       lte(fieldActivities.activityDate, addDaysStr(today, -1) as any),
       inArray(fieldActivities.status, ["planificada", "en_progreso"]),
+      ...withinCycle(),
     ))
     .orderBy(desc(fieldActivities.activityDate))
     .limit(15);
@@ -241,11 +284,70 @@ export async function generateWeeklySummary(options?: { force?: boolean }): Prom
     }
   }
 
+  // ── 2.c Estado de la PODA por parcela dentro del ciclo actual ──
+  // El ciclo arranca con la poda: una parcela sin poda registrada NO va
+  // atrasada, sencillamente todavía no le toca. Se lo decimos explícito a la IA
+  // porque de otro modo interpreta la ausencia de labores como retraso.
+  const activeParcels = await drizzle.select({ id: parcels.id, name: parcels.name })
+    .from(parcels).where(eq(parcels.isActive, true)).orderBy(asc(parcels.name));
+
+  const podaByParcel = new Map<number, { date: string; status: string }>();
+  if (cycleStart) {
+    const podaRows = await drizzle
+      .select({
+        parcelId: fieldActivityParcels.parcelId,
+        activityDate: fieldActivities.activityDate,
+        status: fieldActivities.status,
+      })
+      .from(fieldActivities)
+      .innerJoin(fieldActivityParcels, eq(fieldActivityParcels.activityId, fieldActivities.id))
+      .where(and(
+        eq(fieldActivities.activityType, "poda"),
+        inArray(fieldActivities.status, ["completada", "en_progreso"]),
+        ...withinCycle(),
+      ))
+      .orderBy(desc(fieldActivities.activityDate));
+    for (const r of podaRows) {
+      if (podaByParcel.has(r.parcelId)) continue; // la más reciente gana
+      // activityDate llega como Date o como "YYYY-MM-DD" según el driver
+      const raw = r.activityDate as unknown;
+      const d = typeof raw === "string" ? raw.slice(0, 10) : new Date(raw as any).toISOString().slice(0, 10);
+      podaByParcel.set(r.parcelId, { date: d, status: r.status });
+    }
+  }
+  const parcelsWithPoda = activeParcels.filter(p => podaByParcel.has(p.id));
+  const parcelsWithoutPoda = activeParcels.filter(p => !podaByParcel.has(p.id));
+
+  // ── 2.d Notas de campo del ciclo actual ──
+  const noteConds: any[] = [];
+  if (cycleStart) noteConds.push(gte(fieldNotes.createdAt, new Date(cycleStart + "T00:00:00")));
+  if (cycleEnd) noteConds.push(lte(fieldNotes.createdAt, new Date(cycleEnd + "T23:59:59")));
+  const cycleNotes = await drizzle
+    .select({
+      description: fieldNotes.description,
+      category: fieldNotes.category,
+      severity: fieldNotes.severity,
+      status: fieldNotes.status,
+      createdAt: fieldNotes.createdAt,
+      parcelName: parcels.name,
+    })
+    .from(fieldNotes)
+    .leftJoin(parcels, eq(fieldNotes.parcelId, parcels.id))
+    .where(noteConds.length > 0 ? and(...noteConds) : undefined as any)
+    .orderBy(desc(fieldNotes.createdAt))
+    .limit(20);
+
+  const openNotes = cycleNotes.filter(n => n.status !== "resuelta" && n.status !== "descartada");
+  const noteLines = cycleNotes.slice(0, 15).map(n => {
+    const d = new Date(n.createdAt as any).toISOString().slice(0, 10);
+    const where = n.parcelName ? ` en ${n.parcelName}` : "";
+    const state = n.status === "resuelta" ? "resuelta" : n.status === "descartada" ? "descartada" : "abierta";
+    return `- ${d}: [${n.severity}] ${NOTE_LABELS[n.category] ?? n.category}${where} — ${(n.description || "").slice(0, 160)} (${state})`;
+  });
+
   // ── 3. Satelital: último NDVI cacheado por parcela activa ──
   const satelliteLines: string[] = [];
   try {
-    const activeParcels = await drizzle.select({ id: parcels.id, name: parcels.name })
-      .from(parcels).where(eq(parcels.isActive, true));
     for (const p of activeParcels.slice(0, 12)) {
       const rows: any = await drizzle.execute(
         sql`SELECT data, fetchedAt FROM parcelSatelliteCache WHERE parcelId = ${p.id} AND dataType = 'stats' AND indexType = 'NDVI' ORDER BY fetchedAt DESC LIMIT 1`
@@ -266,11 +368,8 @@ export async function generateWeeklySummary(options?: { force?: boolean }): Prom
     ? `Cosecha de la semana: ${harvestStats.total} cajas, ${harvestStats.totalWeight.toFixed(0)}kg (${harvestStats.firstQualityPercent}% primera calidad).`
     : "Sin cosecha registrada esta semana.";
 
-  // ── 5. Ciclo activo y su etapa ──
-  const allCycles = await drizzle.select().from(productionCycles)
-    .orderBy(desc(productionCycles.startDate)).limit(5);
-  const activeCycle = allCycles.find(c => !c.endDate || c.endDate >= today) ?? null;
-  let cycleLine = "Sin ciclo de producción registrado.";
+  // ── 5. Etapa del ciclo activo (resuelto al inicio) ──
+  let cycleLine = "Sin ciclo de producción registrado: el análisis toma toda la libreta.";
   let cyclePhase = "sin ciclo";
   if (activeCycle) {
     const daysSinceStart = Math.round((new Date(today + "T12:00:00").getTime() - new Date(activeCycle.startDate + "T12:00:00").getTime()) / 86400000);
@@ -283,10 +382,29 @@ export async function generateWeeklySummary(options?: { force?: boolean }): Prom
   }
 
   // ── 6. Prompt y llamada a la IA ──
+  const scopeLine = activeCycle
+    ? `IMPORTANTE — ALCANCE DEL ANÁLISIS: solo se incluye información del CICLO ACTUAL ("${activeCycle.name}", desde el ${activeCycle.startDate}${cycleEnd ? ` hasta el ${cycleEnd}` : ""}). Los ciclos anteriores NO forman parte de este análisis: no menciones ni arrastres pendientes de ciclos pasados.`
+    : `ALCANCE DEL ANÁLISIS: todavía no hay ciclos de producción registrados, así que se incluye toda la libreta.`;
+
+  const podaBlock = activeCycle
+    ? `ESTADO DE LA PODA EN ESTE CICLO (la poda es la labor que arranca el ciclo):
+${parcelsWithPoda.length > 0
+        ? parcelsWithPoda.map(p => `- ${p.name}: podada el ${podaByParcel.get(p.id)!.date}${podaByParcel.get(p.id)!.status === "en_progreso" ? " (poda en proceso)" : ""}`).join("\n")
+        : "- Ninguna parcela registra poda todavía en este ciclo"}
+${parcelsWithoutPoda.length > 0
+        ? `\nPARCELAS SIN PODA REGISTRADA EN ESTE CICLO (${parcelsWithoutPoda.length}): ${parcelsWithoutPoda.map(p => p.name).join(", ")}
+REGLA OBLIGATORIA: en estas parcelas la labor APENAS VA A COMENZAR. NO las califiques como atrasadas, rezagadas ni con problemas por no tener labores registradas; su ciclo simplemente aún no arranca. Si acaso, sugiere cuándo convendría iniciar la poda según el clima.`
+        : ""}`
+    : "";
+
   const prompt = `Genera el RESUMEN SEMANAL de una huerta de higo en México para la semana del ${weekStart} al ${weekEnd} (semana pasada). Hoy es ${today}.
+
+${scopeLine}
 
 ETAPA DEL CULTIVO:
 ${cycleLine}
+
+${podaBlock}
 
 ACTIVIDADES REALIZADAS EN LA SEMANA (${done.length}):
 ${done.length > 0 ? done.map(describeActivity).join("\n") : "- Ninguna registrada"}
@@ -307,6 +425,9 @@ Resumen: ${weatherLine}
 PRONÓSTICO DE LOS PRÓXIMOS DÍAS:
 ${forecastLines || "Sin pronóstico disponible."}
 
+NOTAS DE CAMPO DEL CICLO ACTUAL (${cycleNotes.length}, ${openNotes.length} sin resolver):
+${noteLines.length > 0 ? noteLines.join("\n") : "- Ninguna registrada en este ciclo"}
+
 DATOS SATELITALES (último NDVI por parcela):
 ${satelliteLines.length > 0 ? satelliteLines.join("\n") : "Sin datos satelitales recientes."}
 
@@ -315,16 +436,17 @@ ${harvestLine}
 
 Escribe un panorama ejecutivo en español de 8-12 líneas para el productor:
 1) Cómo va el cultivo según la etapa fenológica del higo (considera los días desde la poda y la época del año).
-2) Qué se logró la semana pasada y qué quedó pendiente o atrasado (menciona parcelas por nombre).
+2) Qué se logró la semana pasada y qué quedó pendiente o atrasado (menciona parcelas por nombre). Recuerda: una parcela sin poda en este ciclo NO está atrasada, apenas va a comenzar.
 3) Cómo influyó el clima de la semana pasada en las labores realizadas (por ejemplo, si llovió el día de una aplicación).
 4) **Cruza el pronóstico con las actividades planeadas**: di explícitamente qué días convienen o NO convienen para cada labor programada (no aplicar fitosanitarios ni foliares antes de lluvia o con viento fuerte, ajustar riego si viene lluvia, aprovechar días secos para poda, etc.).
-5) Estado de vigor según NDVI si hay datos (señala parcelas débiles).
+5) Estado de vigor según NDVI si hay datos (señala parcelas débiles) y atiende las notas de campo abiertas (plagas, riego, daños) que sigan sin resolver.
 6) 2-3 recomendaciones concretas y accionables para los próximos días.
 Tono profesional de ingeniero agrónomo, directo y útil. Sin saludos ni despedidas. Usa párrafos cortos o viñetas.`;
 
   console.log(
-    `${TAG} Contexto enviado a la IA: ${done.length} labores realizadas, ${planned.length} planificadas de la semana, ` +
-    `${upcomingActivities.length} próximas, ${overdueActivities.length} atrasadas, ` +
+    `${TAG} Contexto enviado a la IA (ciclo ${activeCycle?.name ?? "sin ciclo"}): ${done.length} labores realizadas, ${planned.length} planificadas de la semana, ` +
+    `${upcomingActivities.length} próximas, ${overdueActivities.length} atrasadas, ${cycleNotes.length} notas del ciclo, ` +
+    `${parcelsWithoutPoda.length} parcelas sin poda aún, ` +
     `${weatherRaw.length} días de clima, ${forecastRaw.length} días de pronóstico, ${satelliteLines.length} parcelas con NDVI`
   );
 
@@ -373,10 +495,16 @@ Tono profesional de ingeniero agrónomo, directo y útil. Sin saludos ni despedi
     }
 
     const statsJson = JSON.stringify({
+      cycleName: activeCycle?.name ?? null,
+      cycleStart,
+      cycleEnd,
       activitiesDone: done.length,
       activitiesPlanned: planned.length,
       activitiesUpcoming: upcomingActivities.length,
       activitiesOverdue: overdueActivities.length,
+      fieldNotes: cycleNotes.length,
+      fieldNotesOpen: openNotes.length,
+      parcelsWithoutPoda: parcelsWithoutPoda.length,
       harvest: harvestStats ? { boxes: harvestStats.total, kg: harvestStats.totalWeight } : null,
       weatherDays: weatherRaw.length,
       forecastDays: forecastRaw.length,

@@ -30,7 +30,9 @@ const PRODUCT_TYPES = [
 const UNITS = [
   { value: "kg", label: "Kilogramos (kg)" }, { value: "g", label: "Gramos (g)" },
   { value: "lt", label: "Litros (lt)" }, { value: "ml", label: "Mililitros (ml)" },
-  { value: "ton", label: "Toneladas" }, { value: "bulto", label: "Bultos" },
+  { value: "ton", label: "Toneladas" }, { value: "oz", label: "Onzas (oz)" },
+  { value: "lb", label: "Libras (lb)" }, { value: "gal", label: "Galones (gal)" },
+  { value: "bulto", label: "Bultos" },
   { value: "saco", label: "Sacos" }, { value: "unidad", label: "Unidades" },
   { value: "otro", label: "Otro" },
 ];
@@ -50,7 +52,8 @@ interface ProductForm {
   warehouseProductId?: number;
   productName: string;
   productType: string;
-  quantity: string;
+  plannedQuantity: string; // lo que se pensaba aplicar
+  quantity: string;        // lo que realmente se aplicó
   unit: string;
   dosisPerHectare: string;
   applicationMethod: string;
@@ -64,7 +67,7 @@ interface ToolForm {
   notes: string;
 }
 
-const emptyProduct: ProductForm = { productName: "", productType: "otro", quantity: "", unit: "kg", dosisPerHectare: "", applicationMethod: "", notes: "" };
+const emptyProduct: ProductForm = { productName: "", productType: "otro", plannedQuantity: "", quantity: "", unit: "kg", dosisPerHectare: "", applicationMethod: "", notes: "" };
 const emptyTool: ToolForm = { toolName: "", toolType: "otro", notes: "" };
 
 // Jornada de trabajo: un día trabajado con sus horas (actividades multi-día)
@@ -221,7 +224,8 @@ function FieldNotebookContent() {
     });
     setFormProducts(
       activity.products?.map((p: any) => ({
-        warehouseProductId: undefined, productName: p.productName, productType: p.productType || "otro",
+        warehouseProductId: p.productId ?? undefined, productName: p.productName, productType: p.productType || "otro",
+        plannedQuantity: p.plannedQuantity || "",
         quantity: p.quantity || "", unit: p.unit || "kg", dosisPerHectare: p.dosisPerHectare || "",
         applicationMethod: p.applicationMethod || "", notes: p.notes || "",
       })) || []
@@ -248,7 +252,10 @@ function FieldNotebookContent() {
 
     const payload = {
       ...formData,
-      products: formProducts.filter(p => p.productName.trim()),
+      products: formProducts
+        .filter(p => p.productName.trim())
+        // warehouseProductId es el vínculo con el catálogo del almacén
+        .map(({ warehouseProductId, ...p }) => ({ ...p, productId: warehouseProductId ?? null })),
       tools: formTools.filter(t => t.toolName.trim()),
       workSessions: formSessions.filter(s => s.workDate),
     };
@@ -716,7 +723,10 @@ function FieldNotebookContent() {
                         {PRODUCT_TYPES.map(pt => <option key={pt.value} value={pt.value}>{pt.label}</option>)}
                       </select>
                       <div className="flex gap-2">
-                        <input type="text" placeholder="Cantidad" value={product.quantity}
+                        <input type="text" placeholder="Planeada" title="Cantidad planeada" value={product.plannedQuantity}
+                          onChange={(e) => { const u = [...formProducts]; u[idx] = { ...u[idx], plannedQuantity: e.target.value }; setFormProducts(u); }}
+                          className="flex-1 px-3 py-1.5 text-sm border border-blue-200 rounded-lg bg-blue-50/40 focus:ring-2 focus:ring-blue-300 outline-none" />
+                        <input type="text" placeholder="Utilizada" title="Cantidad utilizada" value={product.quantity}
                           onChange={(e) => { const u = [...formProducts]; u[idx] = { ...u[idx], quantity: e.target.value }; setFormProducts(u); }}
                           className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white/70 focus:ring-2 focus:ring-green-300 outline-none" />
                         <select value={product.unit}
@@ -1007,9 +1017,14 @@ function FieldNotebookContent() {
                                     <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
                                       {PRODUCT_TYPES.find(pt => pt.value === p.productType)?.label || p.productType}
                                     </span>
-                                    {p.quantity && (
+                                    {p.plannedQuantity && (
                                       <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">
-                                        {p.quantity} {UNITS.find(u => u.value === p.unit)?.label || p.unit}
+                                        Planeado: {p.plannedQuantity} {p.unit}
+                                      </span>
+                                    )}
+                                    {p.quantity && (
+                                      <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full">
+                                        Utilizado: {p.quantity} {p.unit}
                                       </span>
                                     )}
                                     {p.dosisPerHectare && (
@@ -1069,25 +1084,12 @@ function FieldNotebookContent() {
                         </div>
                       )}
 
-                      {/* Fotos */}
-                      {activity.photos?.length > 0 && (
-                        <div>
-                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
-                            <Camera className="w-3.5 h-3.5" /> Fotos ({activity.photos.length})
-                          </p>
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                            {activity.photos.map((photo: any, i: number) => (
-                              <div key={i} className="relative group">
-                                <img src={photo.photoUrl} alt={photo.caption || `Foto ${i + 1}`}
-                                  className="w-full h-32 object-cover rounded-xl border border-gray-200" />
-                                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent rounded-b-xl p-2">
-                                  <span className="text-xs text-white capitalize">{photo.photoType}</span>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                      {/* Fotos — se pueden agregar desde archivos locales */}
+                      <ActivityPhotos
+                        activityId={activity.id}
+                        photos={activity.photos || []}
+                        onChanged={refetch}
+                      />
 
                       <div className="text-xs text-gray-400 pt-2 border-t border-gray-100">
                         Registrado el {new Date(activity.createdAt).toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })}
@@ -1100,6 +1102,144 @@ function FieldNotebookContent() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Evidencia fotográfica de una actividad.
+ *
+ * La app móvil solo permite cámara en vivo (la evidencia de campo debe ser del
+ * momento). Aquí, en cambio, se pueden adjuntar archivos que ya se tenían en la
+ * computadora o el celular, para regularizar actividades cuya foto no se subió.
+ */
+function ActivityPhotos({
+  activityId,
+  photos,
+  onChanged,
+}: {
+  activityId: number;
+  photos: any[];
+  onChanged: () => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [photoType, setPhotoType] = useState("durante");
+  const inputId = `activity-photos-${activityId}`;
+
+  const deletePhotoMutation = trpc.fieldNotebook.deletePhoto.useMutation({
+    onSuccess: () => { toast.success("Foto eliminada"); onChanged(); },
+    onError: (e: any) => toast.error("No se pudo eliminar: " + e.message),
+  });
+
+  const handleFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    // El servidor acepta hasta 10 por envío; avisamos en vez de perder fotos
+    const list = Array.from(files);
+    if (list.length > 10) {
+      toast.error("Máximo 10 fotos por vez; selecciona menos.");
+      return;
+    }
+    const tooBig = list.find(f => f.size > 50 * 1024 * 1024);
+    if (tooBig) {
+      toast.error(`"${tooBig.name}" pesa más de 50MB`);
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("activityId", String(activityId));
+    formData.append("photoType", photoType);
+    for (const file of list) formData.append("photos", file);
+
+    setUploading(true);
+    try {
+      const res = await fetch("/api/activity-photo", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `Error ${res.status}`);
+      toast.success(`${data.uploaded} foto${data.uploaded === 1 ? "" : "s"} agregada${data.uploaded === 1 ? "" : "s"}`);
+      onChanged();
+    } catch (e: any) {
+      toast.error("No se pudieron subir las fotos: " + e.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+          <Camera className="w-3.5 h-3.5" /> Fotos ({photos.length})
+        </p>
+        <div className="ml-auto flex items-center gap-2">
+          <select
+            value={photoType}
+            onChange={e => setPhotoType(e.target.value)}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white/70"
+            disabled={uploading}
+          >
+            <option value="antes">Antes</option>
+            <option value="durante">Durante</option>
+            <option value="despues">Después</option>
+            <option value="producto">Producto</option>
+            <option value="otro">Otro</option>
+          </select>
+          <input
+            id={inputId}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            disabled={uploading}
+            onChange={e => { handleFiles(e.target.files); e.target.value = ""; }}
+          />
+          <label
+            htmlFor={inputId}
+            className={`text-xs font-semibold px-3 py-1.5 rounded-lg border flex items-center gap-1.5 cursor-pointer transition
+              ${uploading
+                ? "bg-gray-100 text-gray-400 border-gray-200 cursor-wait"
+                : "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"}`}
+          >
+            <ArrowDown className="w-3.5 h-3.5 rotate-180" />
+            {uploading ? "Subiendo..." : "Subir fotos"}
+          </label>
+        </div>
+      </div>
+
+      {photos.length === 0 ? (
+        <p className="text-xs text-gray-400">
+          Sin evidencia todavía. Puedes subir fotos desde tus archivos para completar el registro.
+        </p>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {photos.map((photo: any, i: number) => (
+            <div key={photo.id ?? i} className="relative group">
+              <a href={photo.photoUrl} target="_blank" rel="noreferrer">
+                <img src={photo.photoUrl} alt={photo.caption || `Foto ${i + 1}`}
+                  className="w-full h-32 object-cover rounded-xl border border-gray-200" />
+              </a>
+              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent rounded-b-xl p-2">
+                <span className="text-xs text-white capitalize">{photo.photoType}</span>
+              </div>
+              {photo.id && (
+                <button
+                  onClick={() => {
+                    if (confirm("¿Eliminar esta foto?")) deletePhotoMutation.mutate({ id: photo.id });
+                  }}
+                  className="absolute top-1.5 right-1.5 w-7 h-7 rounded-full bg-black/50 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition hover:bg-red-500"
+                  title="Eliminar foto"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

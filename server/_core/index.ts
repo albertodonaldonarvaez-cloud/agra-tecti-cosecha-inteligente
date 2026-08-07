@@ -7,6 +7,7 @@ import cookieParser from "cookie-parser";
 import multer from "multer";
 import path from "path";
 import sharp from "sharp";
+import { randomUUID } from "crypto";
 import { appRouter } from "../routers";
 import { createContext } from "./authContext";
 import { serveStatic, setupVite } from "./vite";
@@ -397,6 +398,107 @@ async function startServer() {
       res.json({ success: true, photoUrl, activityClientUuid, localPhotoId });
     } catch (error: any) {
       console.error("[SyncActivityPhoto] Error:", error);
+      res.status(500).json({ error: error.message || "Error interno del servidor" });
+    }
+  });
+
+  // ============================================
+  // WEB ACTIVITY PHOTOS — Regularizar evidencia desde la computadora
+  // La app solo permite cámara en vivo (evidencia confiable del campo); desde
+  // la web sí se pueden adjuntar archivos locales a actividades ya creadas,
+  // para subir lo que en su momento no se capturó con el teléfono.
+  // ============================================
+  app.post("/api/activity-photo", (req, res, next) => {
+    upload.array("photos", 10)(req, res, (err: any) => {
+      if (err) {
+        const msg = err?.code === "LIMIT_FILE_SIZE"
+          ? "Alguna foto supera el límite de 50MB"
+          : (err.message || "Error subiendo las fotos");
+        return res.status(400).json({ error: msg });
+      }
+      next();
+    });
+  }, async (req, res) => {
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    // Limpieza de temporales pase lo que pase (si no, /tmp crece sin control)
+    const cleanupTemp = async () => {
+      const fs = await import("fs");
+      for (const f of files) {
+        try { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); } catch { /* ya no está */ }
+      }
+    };
+
+    try {
+      const user = await getAuthUser(req);
+      if (!user) { await cleanupTemp(); return res.status(401).json({ error: "No autenticado" }); }
+
+      const activityId = parseInt(String(req.body.activityId), 10);
+      if (!activityId || Number.isNaN(activityId)) {
+        await cleanupTemp();
+        return res.status(400).json({ error: "activityId es requerido" });
+      }
+      if (files.length === 0) {
+        return res.status(400).json({ error: "No se recibió ninguna foto" });
+      }
+
+      const photoType = ["antes", "despues", "durante", "producto", "otro"].includes(req.body.photoType)
+        ? req.body.photoType : "durante";
+      const caption = String(req.body.caption || "").slice(0, 512) || null;
+
+      const { getDb } = await import("../db");
+      const { fieldActivities, fieldActivityPhotos } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      const drizzle = await getDb();
+      if (!drizzle) { await cleanupTemp(); return res.status(503).json({ error: "Base de datos no disponible" }); }
+
+      const [activity] = await drizzle.select({ id: fieldActivities.id })
+        .from(fieldActivities)
+        .where(eq(fieldActivities.id, activityId))
+        .limit(1);
+      if (!activity) {
+        await cleanupTemp();
+        return res.status(404).json({ error: "La actividad ya no existe" });
+      }
+
+      const fs = await import("fs");
+      const pathModule = await import("path");
+      const dir = `/app/photos/field-activities/web-${activityId}`;
+      fs.mkdirSync(dir, { recursive: true });
+
+      const uploaded: string[] = [];
+      for (const file of files) {
+        // Nombre único generado en el servidor: el del navegador no se usa
+        // para armar rutas (evita path traversal con nombres maliciosos)
+        const fileName = `web-${Date.now()}-${randomUUID().slice(0, 8)}.jpg`;
+        const destPath = pathModule.join(dir, fileName);
+        try {
+          const compressed = await sharp(file.path)
+            .rotate() // respetar la orientación EXIF de la cámara
+            .resize(1920, 1920, { fit: "inside", withoutEnlargement: true })
+            .jpeg({ quality: 80 })
+            .toBuffer();
+          fs.writeFileSync(destPath, compressed);
+        } catch (sharpErr) {
+          console.warn("[WebActivityPhoto] Sharp falló, copiando sin comprimir:", sharpErr);
+          fs.copyFileSync(file.path, destPath);
+        }
+
+        const photoUrl = `/app/photos/field-activities/web-${activityId}/${fileName}`;
+        await drizzle.insert(fieldActivityPhotos).values({
+          activityId,
+          photoType: photoType as any,
+          photoUrl,
+          caption: caption ?? "Foto cargada desde la web",
+          uploadedByUserId: user.id,
+        });
+        uploaded.push(photoUrl);
+      }
+
+      await cleanupTemp();
+      res.json({ success: true, uploaded: uploaded.length, photoUrls: uploaded });
+    } catch (error: any) {
+      console.error("[WebActivityPhoto] Error:", error);
+      await cleanupTemp();
       res.status(500).json({ error: error.message || "Error interno del servidor" });
     }
   });

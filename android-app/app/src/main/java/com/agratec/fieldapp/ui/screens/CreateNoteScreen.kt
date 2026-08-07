@@ -39,6 +39,9 @@ import com.agratec.fieldapp.data.local.entity.ParcelEntity
 import com.agratec.fieldapp.data.repository.FieldNoteRepository
 import com.agratec.fieldapp.data.repository.ParcelRepository
 import com.agratec.fieldapp.sync.SyncWorker
+import com.agratec.fieldapp.ui.components.AgraHeader
+import com.agratec.fieldapp.ui.components.AgraPrimaryButton
+import com.agratec.fieldapp.ui.components.AgraScreen
 import com.agratec.fieldapp.ui.components.GlassCard
 import com.agratec.fieldapp.ui.theme.*
 import com.google.android.gms.location.*
@@ -250,54 +253,13 @@ fun CreateNoteScreen(onBack: () -> Unit) {
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                brush = Brush.linearGradient(
-                    colors = listOf(
-                        AgraGreenSurface,
-                        AgraEmerald50,
-                        AgraTeal50,
-                    ),
-                    start = Offset(0f, 0f),
-                    end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
-                )
-            ),
-    ) {
+    AgraScreen {
         Column(Modifier.fillMaxSize()) {
-            // ── Top App Bar with glassmorphism ──
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .shadow(
-                        elevation = 2.dp,
-                        shape = RoundedCornerShape(0.dp),
-                        ambientColor = Color.Black.copy(alpha = 0.04f),
-                    )
-                    .background(Color.White.copy(alpha = 0.88f))
-                    .statusBarsPadding()
-                    .padding(horizontal = 4.dp, vertical = 4.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            "Volver",
-                            tint = TextPrimary,
-                        )
-                    }
-                    Text(
-                        "Nueva Observación",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
-                        color = TextPrimary,
-                    )
-                }
-            }
+            AgraHeader(
+                title = "Nueva Observación",
+                subtitle = "Nota de campo",
+                onBack = onBack,
+            )
 
             // ── Content ──
             Column(
@@ -686,9 +648,13 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                         && selectedCategory.isNotBlank()
                         && selectedParcel != null
                         && currentLocation != null
-                        && !isSaving
 
-                Button(
+                AgraPrimaryButton(
+                    text = "Guardar Nota",
+                    icon = Icons.Default.Save,
+                    enabled = canSave,
+                    loading = isSaving,
+                    modifier = Modifier.fillMaxWidth(),
                     onClick = {
                         isSaving = true
                         scope.launch {
@@ -711,58 +677,7 @@ fun CreateNoteScreen(onBack: () -> Unit) {
                             onBack()
                         }
                     },
-                    enabled = canSave,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.Transparent,
-                        disabledContainerColor = Color.Transparent,
-                    ),
-                    contentPadding = PaddingValues(0.dp),
-                    elevation = ButtonDefaults.buttonElevation(
-                        defaultElevation = if (canSave) 6.dp else 0.dp,
-                        pressedElevation = 2.dp,
-                    ),
-                ) {
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .background(
-                                brush = Brush.horizontalGradient(
-                                    colors = if (canSave) listOf(AgraGreen, AgraEmerald600)
-                                    else listOf(LightBg3, LightBg3),
-                                ),
-                                shape = RoundedCornerShape(14.dp),
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (isSaving) {
-                            CircularProgressIndicator(
-                                Modifier.size(22.dp),
-                                color = Color.White,
-                                strokeWidth = 2.dp,
-                            )
-                        } else {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    Icons.Default.Save,
-                                    null,
-                                    tint = if (canSave) Color.White else TextTertiary,
-                                    modifier = Modifier.size(20.dp),
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    "Guardar Nota",
-                                    color = if (canSave) Color.White else TextTertiary,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 15.sp,
-                                )
-                            }
-                        }
-                    }
-                }
+                )
                 Spacer(Modifier.height(32.dp))
             }
         }
