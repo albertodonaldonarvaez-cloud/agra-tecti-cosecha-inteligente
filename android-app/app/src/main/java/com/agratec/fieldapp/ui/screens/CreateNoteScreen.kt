@@ -206,8 +206,8 @@ fun CreateNoteScreen(onBack: () -> Unit) {
         syncStatus = if (updated) "Actualizado" else ""
     }
 
-    // Camera launcher
-    var lastPhotoRealPath by remember { mutableStateOf<String?>(null) }
+    // Camera launcher — saveable: la cámara puede matar el proceso y la foto se perdería
+    var lastPhotoRealPath by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
 
     fun createImageFile(): Pair<Uri, String> {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
@@ -222,7 +222,18 @@ fun CreateNoteScreen(onBack: () -> Unit) {
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
         if (success) {
-            photoUri = tempPhotoUri
+            // Procesar en el teléfono: máx 8MP, calidad media (pesa mucho menos al subir)
+            val path = lastPhotoRealPath
+            if (path != null) {
+                scope.launch {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.agratec.fieldapp.util.ImageProcessor.compressInPlace(path)
+                    }
+                    photoUri = tempPhotoUri
+                }
+            } else {
+                photoUri = tempPhotoUri
+            }
         }
     }
 

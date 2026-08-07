@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.work.*
 import com.agratec.fieldapp.data.local.AppDatabase
+import com.agratec.fieldapp.data.prefs.SyncPreferences
 import com.agratec.fieldapp.data.remote.RetrofitClient
 import com.agratec.fieldapp.data.remote.dto.SyncActivitiesRequest
 import com.agratec.fieldapp.data.remote.dto.SyncActivityItem
@@ -19,17 +20,18 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
- * Worker de sincronización que se ejecuta en background.
- * Implementa CoroutineWorker para soporte de coroutines.
+ * Worker de sincronización en segundo plano.
  *
- * Flujo:
- * 1. Lee notas locales NO sincronizadas (batch de 10)
- * 2. Las envía al servidor via tRPC offlineSync.syncFieldNotes
- * 3. Si el servidor responde 200 OK, marca isSynced = true en Room
- * 4. Luego repite el proceso para fotos (una por una, multipart)
- * 5. Si falla por red, retorna Result.retry() (WorkManager reintentará con backoff)
+ * REGLA PRINCIPAL: cada paso es INDEPENDIENTE. Si las notas fallan, las
+ * actividades igual se sincronizan (antes un error en el primer paso abortaba
+ * todo y las actividades nunca subían).
  *
- * Se ejecuta bajo constraints de red: solo cuando hay conexión disponible.
+ * Orden:
+ *  1. Datos que pesan poco — SIEMPRE, con datos móviles o WiFi:
+ *     parcelas, colaboradores, notas, actividades (subida y bajada)
+ *  2. Fotos — solo con WiFi, o con datos móviles si el usuario lo autorizó
+ *
+ * El resultado queda en [SyncStatus] para mostrárselo al usuario.
  */
 class SyncWorker(
     context: Context,
@@ -40,11 +42,10 @@ class SyncWorker(
         const val TAG = "SyncWorker"
         const val UNIQUE_WORK_NAME = "agra_field_sync"
 
-        /**
-         * Programar sincronización periódica.
-         * Se ejecuta cada 15 minutos cuando hay conexión a internet.
-         * Si no hay red, WorkManager espera automáticamente.
-         */
+        /** Arriba de esto, la foto se recomprime antes de subir (~2.5 MB) */
+        private const val MAX_UPLOAD_BYTES = 2_500_000L
+
+        /** Sincronización periódica cada 15 minutos cuando hay conexión */
         fun enqueuePeriodicSync(context: Context) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -71,10 +72,7 @@ class SyncWorker(
             Log.i(TAG, "Sincronización periódica programada (cada 15 min)")
         }
 
-        /**
-         * Ejecutar sincronización inmediata (one-shot).
-         * Útil cuando el usuario acaba de crear una nota y quiere forzar sync.
-         */
+        /** Sincronización inmediata (one-shot) */
         fun enqueueImmediateSync(context: Context) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -90,40 +88,70 @@ class SyncWorker(
         }
     }
 
+    /** Errores acumulados con mensaje legible para el usuario */
+    private val problems = mutableListOf<String>()
+
+    private fun httpProblem(what: String, code: Int): String = when (code) {
+        401 -> "Tu sesión expiró: vuelve a iniciar sesión"
+        403 -> "Tu usuario no tiene permiso para $what"
+        404 -> "El servidor no tiene soporte para $what (falta actualizar el servidor)"
+        in 500..599 -> "El servidor tuvo un error al $what (código $code)"
+        else -> "No se pudo $what (código $code)"
+    }
+
     override suspend fun doWork(): Result {
         Log.i(TAG, "=== Iniciando sincronización ===")
 
-        // Verificar que hay token de sesión
         if (!RetrofitClient.isLoggedIn(applicationContext)) {
             Log.w(TAG, "No hay sesión activa, omitiendo sync")
+            SyncStatus.record(applicationContext, "Inicia sesión para sincronizar", ok = false)
             return Result.success()
         }
 
         val db = AppDatabase.getInstance(applicationContext)
         val apiService = RetrofitClient.getApiService(applicationContext)
 
+        val networkType = NetworkUtils.currentType(applicationContext)
+        val photosAllowed = SyncPreferences.canUploadPhotosNow(applicationContext)
+        Log.i(TAG, "Red: $networkType · fotos permitidas: $photosAllowed")
+
         var notesSynced = 0
         var photosSynced = 0
-        var errors = 0
+        var activitiesSynced = 0
+        var activityPhotosSynced = 0
+        var authFailed = false
+        var networkFailed = false
 
-        // ===== PASO 0: Sincronizar parcelas desde servidor =====
+        // ============================================================
+        // DATOS (siempre, pesan poco)
+        // ============================================================
+
+        // ── Parcelas ──
         try {
             val parcelRepo = com.agratec.fieldapp.data.repository.ParcelRepository(applicationContext)
-            val synced = parcelRepo.syncFromServer()
-            if (synced) {
-                Log.i(TAG, "Parcelas actualizadas desde servidor")
-            }
+            if (parcelRepo.syncFromServer()) Log.i(TAG, "Parcelas actualizadas desde servidor")
         } catch (e: Exception) {
-            Log.w(TAG, "Error sincronizando parcelas (no crítico)", e)
+            Log.w(TAG, "Error sincronizando parcelas", e)
+            problems.add("No se pudieron actualizar las parcelas")
         }
 
-        // ===== PASO 1: Sincronizar notas de campo =====
+        // ── Colaboradores (antes de actividades: resuelven las asignaciones) ──
+        try {
+            val collabRepo = com.agratec.fieldapp.data.repository.CollaboratorRepository(applicationContext)
+            val pushResult = collabRepo.pushUnsynced()
+            if (pushResult.httpCode == 401) authFailed = true
+            if (pushResult.problem != null) problems.add(pushResult.problem)
+            collabRepo.pullFromServer()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error sincronizando colaboradores", e)
+            problems.add("No se pudieron sincronizar los colaboradores")
+        }
+
+        // ── Notas de campo (no bloquea a las actividades si falla) ──
         try {
             val unsyncedNotes = db.fieldNoteDao().getUnsyncedNotes(limit = 10)
-
             if (unsyncedNotes.isNotEmpty()) {
                 Log.i(TAG, "Sincronizando ${unsyncedNotes.size} notas...")
-
                 val syncItems = unsyncedNotes.map { note ->
                     SyncNoteItem(
                         folio = note.folio,
@@ -136,146 +164,38 @@ class SyncWorker(
                         createdAtLocal = note.createdAtLocal,
                     )
                 }
-
                 val response = apiService.syncFieldNotes(
                     TrpcMutationRequest(SyncNotesRequest(notes = syncItems))
                 )
-
                 if (response.isSuccessful) {
-                    val data = response.body()?.result?.data?.json
-                    if (data?.success == true) {
-                        // Marcar cada nota como sincronizada
-                        data.results?.forEach { result ->
-                            if (result.status != "error") {
-                                db.fieldNoteDao().markAsSynced(result.folio)
-                                notesSynced++
-                                Log.d(TAG, "Nota ${result.folio} -> ${result.status}")
-                            } else {
-                                db.fieldNoteDao().markSyncFailed(
-                                    result.folio,
-                                    result.error ?: "Error desconocido"
-                                )
-                                errors++
-                                Log.w(TAG, "Error en nota ${result.folio}: ${result.error}")
-                            }
+                    response.body()?.result?.data?.json?.results?.forEach { result ->
+                        if (result.status != "error") {
+                            db.fieldNoteDao().markAsSynced(result.folio)
+                            notesSynced++
+                        } else {
+                            db.fieldNoteDao().markSyncFailed(result.folio, result.error ?: "Error desconocido")
+                            problems.add("Nota rechazada: ${result.error ?: "error desconocido"}")
                         }
                     }
                 } else {
-                    Log.e(TAG, "Error HTTP al sincronizar notas: ${response.code()}")
-                    // Si es error de auth, no reintentar
-                    if (response.code() == 401) {
-                        Log.e(TAG, "Token expirado, se requiere re-login")
-                        return Result.failure()
-                    }
-                    return Result.retry()
+                    if (response.code() == 401) authFailed = true
+                    problems.add(httpProblem("subir las notas", response.code()))
+                    Log.e(TAG, "Error HTTP notas: ${response.code()}")
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Excepción al sincronizar notas", e)
-            return Result.retry()
+            Log.e(TAG, "Excepción notas", e)
+            networkFailed = true
+            problems.add("Sin conexión al subir notas")
         }
 
-        // ===== PASO 2: Sincronizar fotos (una por una) =====
-        try {
-            val totalUnsyncedPhotos = db.photoDao().getUnsyncedCount()
-            Log.i(TAG, ">>> FOTOS: Total sin sync en Room = $totalUnsyncedPhotos")
-
-            val unsyncedPhotos = db.photoDao().getUnsyncedPhotos(limit = 20)
-            Log.i(TAG, ">>> FOTOS: Query getUnsyncedPhotos retornó ${unsyncedPhotos.size} fotos (filtrada por notas sincronizadas)")
-
-            if (unsyncedPhotos.isEmpty() && totalUnsyncedPhotos > 0) {
-                Log.w(TAG, ">>> PROBLEMA: Hay $totalUnsyncedPhotos fotos sin sync, pero la query de JOIN con notas sincronizadas retornó 0. Verificar si las notas están marcadas como isSynced=1 en Room.")
-            }
-
-            if (unsyncedPhotos.isNotEmpty()) {
-                Log.i(TAG, "Sincronizando ${unsyncedPhotos.size} fotos...")
-
-                for ((index, photo) in unsyncedPhotos.withIndex()) {
-                    try {
-                        val file = File(photo.localFilePath)
-                        Log.d(TAG, ">>> Foto ${index+1}/${unsyncedPhotos.size}: ${photo.localPhotoId}")
-                        Log.d(TAG, "    Ruta: ${photo.localFilePath}")
-                        Log.d(TAG, "    Existe: ${file.exists()}")
-                        Log.d(TAG, "    Folio nota: ${photo.fieldNoteFolio}")
-
-                        if (!file.exists()) {
-                            Log.w(TAG, ">>> Archivo NO encontrado: ${photo.localFilePath}")
-                            db.photoDao().markSyncFailed(
-                                photo.localPhotoId,
-                                "Archivo local no encontrado"
-                            )
-                            errors++
-                            continue
-                        }
-
-                        Log.d(TAG, "    Tamaño: ${file.length()} bytes (${file.length() / 1024}KB)")
-
-                        // Construir request multipart
-                        val requestFile = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
-                        val photoPart = MultipartBody.Part.createFormData(
-                            "photo", file.name, requestFile
-                        )
-                        val folioPart = photo.fieldNoteFolio
-                            .toRequestBody("text/plain".toMediaTypeOrNull())
-                        val photoIdPart = photo.localPhotoId
-                            .toRequestBody("text/plain".toMediaTypeOrNull())
-
-                        Log.d(TAG, "    Enviando a servidor...")
-                        val response = apiService.uploadPhoto(
-                            photo = photoPart,
-                            fieldNoteFolio = folioPart,
-                            localPhotoId = photoIdPart,
-                        )
-
-                        Log.d(TAG, "    HTTP Status: ${response.code()}")
-                        if (response.isSuccessful && response.body()?.success == true) {
-                            db.photoDao().markAsSynced(photo.localPhotoId)
-                            photosSynced++
-                            Log.d(TAG, ">>> Foto ${photo.localPhotoId} sincronizada OK ✅")
-                        } else {
-                            val errorMsg = response.body()?.error
-                                ?: "HTTP ${response.code()}"
-                            db.photoDao().markSyncFailed(photo.localPhotoId, errorMsg)
-                            errors++
-                            Log.w(TAG, ">>> Error al subir foto ${photo.localPhotoId}: $errorMsg")
-                            Log.w(TAG, "    Response body: ${response.errorBody()?.string()}")
-                        }
-                    } catch (e: Exception) {
-                        db.photoDao().markSyncFailed(
-                            photo.localPhotoId,
-                            e.message ?: "Error desconocido"
-                        )
-                        errors++
-                        Log.e(TAG, ">>> Excepción al subir foto ${photo.localPhotoId}: ${e.message}", e)
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Excepción al sincronizar fotos", e)
-            return Result.retry()
-        }
-
-        // ===== PASO 2.6: Sincronizar colaboradores (antes que las actividades,
-        // para que las asignaciones puedan resolver sus IDs de servidor) =====
-        try {
-            val collabRepo = com.agratec.fieldapp.data.repository.CollaboratorRepository(applicationContext)
-            collabRepo.pushUnsynced()
-            collabRepo.pullFromServer()
-        } catch (e: Exception) {
-            Log.w(TAG, "Error sincronizando colaboradores (no crítico)", e)
-        }
-
-        // ===== PASO 3: Subir actividades de la libreta de campo =====
-        var activitiesSynced = 0
+        // ── Actividades de la libreta ──
         try {
             val allUnsynced = db.fieldActivityDao().getUnsynced(limit = 10)
-
-            // Resolver colaboradores → IDs de servidor. Solo se pospone la actividad
-            // si un colaborador está PENDIENTE con reintentos vivos; los borrados o
-            // rechazados definitivamente se omiten (la actividad no se atora jamás).
             val collabDao = db.collaboratorDao()
             val unsyncedActivities = mutableListOf<com.agratec.fieldapp.data.local.entity.FieldActivityEntity>()
             val collabIdsByActivity = mutableMapOf<String, List<Int>>()
+
             for (act in allUnsynced) {
                 val serverIds = mutableListOf<Int>()
                 var waitForCollaborator = false
@@ -283,12 +203,16 @@ class SyncWorker(
                     val collab = collabDao.getByUuid(uuid)
                     when {
                         collab?.serverId != null -> serverIds.add(collab.serverId)
-                        collab != null && collab.syncAttempts < 8 -> waitForCollaborator = true
-                        else -> Log.w(TAG, "Colaborador $uuid omitido en ${act.clientUuid} (borrado o rechazado)")
+                        // Solo esperamos si el colaborador tiene reintentos vivos Y
+                        // la actividad no lleva demasiado tiempo atorada por su culpa
+                        collab != null && collab.syncAttempts < 3 && act.syncAttempts < 3 -> waitForCollaborator = true
+                        else -> Log.w(TAG, "Colaborador $uuid omitido en ${act.clientUuid}")
                     }
                 }
                 if (waitForCollaborator) {
-                    Log.i(TAG, "Actividad ${act.clientUuid} pospuesta: colaborador aún sincronizando")
+                    // Contabilizar el intento: así la actividad nunca se atora para siempre
+                    db.fieldActivityDao().markSyncFailed(act.clientUuid, "Esperando que suba el colaborador")
+                    Log.i(TAG, "Actividad ${act.clientUuid} pospuesta (colaborador pendiente)")
                     continue
                 }
                 unsyncedActivities.add(act)
@@ -297,12 +221,9 @@ class SyncWorker(
 
             if (unsyncedActivities.isNotEmpty()) {
                 Log.i(TAG, "Sincronizando ${unsyncedActivities.size} actividades...")
-
                 val items = unsyncedActivities.map { act ->
-                    // Horas y jornadas SOLO en la primera subida (actividad creada en
-                    // el teléfono, sin serverId). En updates posteriores el teléfono
-                    // solo cambia el estado — si las mandara siempre, un eco del pull
-                    // podría pisar jornadas editadas después en la web.
+                    // Horas y jornadas SOLO en la primera subida: en updates el
+                    // teléfono solo cambia el estado (la web manda en el resto)
                     val isFirstUpload = act.serverId == null
                     SyncActivityItem(
                         clientUuid = act.clientUuid,
@@ -331,62 +252,118 @@ class SyncWorker(
                     val data = response.body()?.result?.data?.json
                     if (data?.success == true) {
                         data.results?.forEach { result ->
-                            if (result.status == "deleted") {
-                                // La actividad fue eliminada en la web: quitarla del
-                                // teléfono (si quedara, podría "resucitar" al tocarla)
-                                db.activityPhotoDao().deleteForActivity(result.clientUuid)
-                                db.fieldActivityDao().deleteByUuid(result.clientUuid)
-                                Log.i(TAG, "Actividad ${result.clientUuid} eliminada en la web — removida localmente")
-                            } else if (result.status != "error") {
-                                // Solo se marca sincronizada si el estado no cambió
-                                // mientras la subida estaba en vuelo
-                                val uploaded = unsyncedActivities.find { it.clientUuid == result.clientUuid }
-                                db.fieldActivityDao().markAsSyncedIfStatus(
-                                    result.clientUuid,
-                                    result.serverId,
-                                    uploaded?.status ?: "",
-                                )
-                                activitiesSynced++
-                                Log.d(TAG, "Actividad ${result.clientUuid} -> ${result.status}")
-                            } else {
-                                db.fieldActivityDao().markSyncFailed(
-                                    result.clientUuid,
-                                    result.error ?: "Error desconocido"
-                                )
-                                errors++
-                                Log.w(TAG, "Error en actividad ${result.clientUuid}: ${result.error}")
+                            when {
+                                result.status == "deleted" -> {
+                                    db.activityPhotoDao().deleteForActivity(result.clientUuid)
+                                    db.fieldActivityDao().deleteByUuid(result.clientUuid)
+                                    Log.i(TAG, "Actividad ${result.clientUuid} eliminada en la web")
+                                }
+                                result.status != "error" -> {
+                                    val uploaded = unsyncedActivities.find { it.clientUuid == result.clientUuid }
+                                    db.fieldActivityDao().markAsSyncedIfStatus(
+                                        result.clientUuid, result.serverId, uploaded?.status ?: "",
+                                    )
+                                    activitiesSynced++
+                                }
+                                else -> {
+                                    db.fieldActivityDao().markSyncFailed(
+                                        result.clientUuid, result.error ?: "Error desconocido",
+                                    )
+                                    problems.add("Actividad rechazada: ${result.error ?: "error desconocido"}")
+                                }
                             }
                         }
+                    } else {
+                        problems.add("El servidor no aceptó las actividades")
                     }
                 } else {
-                    Log.e(TAG, "Error HTTP al sincronizar actividades: ${response.code()}")
-                    if (response.code() == 401) return Result.failure()
-                    return Result.retry()
+                    if (response.code() == 401) authFailed = true
+                    problems.add(httpProblem("subir las actividades", response.code()))
+                    Log.e(TAG, "Error HTTP actividades: ${response.code()}")
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Excepción al sincronizar actividades", e)
-            return Result.retry()
+            Log.e(TAG, "Excepción actividades", e)
+            networkFailed = true
+            problems.add("Sin conexión al subir actividades")
         }
 
-        // ===== PASO 3.5: Subir fotos de actividades (multipart, varias por actividad) =====
-        var activityPhotosSynced = 0
+        // ── Bajar del servidor todo lo que cambió (para tener el teléfono al día) ──
         try {
-            val photos = db.activityPhotoDao().getUnsyncedUploadable(limit = 10)
-            if (photos.isNotEmpty()) {
-                Log.i(TAG, "Sincronizando ${photos.size} fotos de actividades...")
+            val activityRepo = com.agratec.fieldapp.data.repository.FieldActivityRepository(applicationContext)
+            activityRepo.pullFromServer()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error bajando actividades", e)
+        }
+
+        // ============================================================
+        // FOTOS (solo WiFi, o datos móviles si el usuario lo autorizó)
+        // ============================================================
+        val notePhotosPending = db.photoDao().getUnsyncedCount()
+        val activityPhotosPending = db.activityPhotoDao().getUnsyncedCount()
+        val totalPhotosPending = notePhotosPending + activityPhotosPending
+
+        if (!photosAllowed) {
+            if (totalPhotosPending > 0) {
+                Log.i(TAG, "$totalPhotosPending fotos esperan WiFi (red actual: $networkType)")
+            }
+        } else {
+            // ── Fotos de notas ──
+            try {
+                val unsyncedPhotos = db.photoDao().getUnsyncedPhotos(limit = 20)
+                for (photo in unsyncedPhotos) {
+                    try {
+                        val file = File(photo.localFilePath)
+                        if (!file.exists()) {
+                            db.photoDao().markSyncFailed(photo.localPhotoId, "Archivo local no encontrado")
+                            continue
+                        }
+                        // Fotos viejas tomadas antes de la compresión: reducirlas ahora
+                        // (una foto de 48MP tardaba tanto que tumbaba la sincronización)
+                        if (file.length() > MAX_UPLOAD_BYTES) {
+                            com.agratec.fieldapp.util.ImageProcessor.compressInPlace(photo.localFilePath)
+                        }
+                        val requestFile = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
+                        val response = apiService.uploadPhoto(
+                            photo = MultipartBody.Part.createFormData("photo", file.name, requestFile),
+                            fieldNoteFolio = photo.fieldNoteFolio.toRequestBody("text/plain".toMediaTypeOrNull()),
+                            localPhotoId = photo.localPhotoId.toRequestBody("text/plain".toMediaTypeOrNull()),
+                        )
+                        if (response.isSuccessful && response.body()?.success == true) {
+                            db.photoDao().markAsSynced(photo.localPhotoId)
+                            photosSynced++
+                        } else {
+                            if (response.code() == 401) authFailed = true
+                            db.photoDao().markSyncFailed(
+                                photo.localPhotoId,
+                                response.body()?.error ?: "HTTP ${response.code()}",
+                            )
+                        }
+                    } catch (e: Exception) {
+                        db.photoDao().markSyncFailed(photo.localPhotoId, e.message ?: "Error desconocido")
+                        networkFailed = true
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Excepción fotos de notas", e)
+            }
+
+            // ── Fotos de actividades ──
+            try {
+                val photos = db.activityPhotoDao().getUnsyncedUploadable(limit = 10)
                 for (photo in photos) {
                     try {
                         val file = File(photo.localFilePath)
                         if (!file.exists()) {
                             db.activityPhotoDao().markSyncFailed(photo.localPhotoId, "Archivo local no encontrado")
-                            errors++
                             continue
                         }
+                        if (file.length() > MAX_UPLOAD_BYTES) {
+                            com.agratec.fieldapp.util.ImageProcessor.compressInPlace(photo.localFilePath)
+                        }
                         val requestFile = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
-                        val photoPart = MultipartBody.Part.createFormData("photo", file.name, requestFile)
                         val response = apiService.uploadActivityPhoto(
-                            photo = photoPart,
+                            photo = MultipartBody.Part.createFormData("photo", file.name, requestFile),
                             activityClientUuid = photo.activityClientUuid.toRequestBody("text/plain".toMediaTypeOrNull()),
                             localPhotoId = photo.localPhotoId.toRequestBody("text/plain".toMediaTypeOrNull()),
                             photoType = photo.photoType.toRequestBody("text/plain".toMediaTypeOrNull()),
@@ -395,38 +372,51 @@ class SyncWorker(
                             db.activityPhotoDao().markAsSynced(photo.localPhotoId)
                             activityPhotosSynced++
                         } else {
-                            val errorMsg = response.body()?.error ?: "HTTP ${response.code()}"
-                            db.activityPhotoDao().markSyncFailed(photo.localPhotoId, errorMsg)
-                            errors++
+                            if (response.code() == 401) authFailed = true
+                            db.activityPhotoDao().markSyncFailed(
+                                photo.localPhotoId,
+                                response.body()?.error ?: "HTTP ${response.code()}",
+                            )
                         }
                     } catch (e: Exception) {
                         db.activityPhotoDao().markSyncFailed(photo.localPhotoId, e.message ?: "Error desconocido")
-                        errors++
+                        networkFailed = true
                     }
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Excepción fotos de actividades", e)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Excepción al sincronizar fotos de actividades", e)
         }
 
-        // ===== PASO 4: Bajar actividades del servidor (planificadas en la web) =====
-        try {
-            val activityRepo = com.agratec.fieldapp.data.repository.FieldActivityRepository(applicationContext)
-            activityRepo.pullFromServer()
-        } catch (e: Exception) {
-            Log.w(TAG, "Error bajando actividades (no crítico)", e)
+        // ============================================================
+        // RESULTADO PARA EL USUARIO
+        // ============================================================
+        val stillPendingPhotos = db.photoDao().getUnsyncedCount() + db.activityPhotoDao().getUnsyncedCount()
+        val subidos = notesSynced + activitiesSynced
+        val fotos = photosSynced + activityPhotosSynced
+
+        val message = when {
+            authFailed -> "Tu sesión expiró: vuelve a iniciar sesión"
+            problems.isNotEmpty() -> problems.first()
+            subidos == 0 && fotos == 0 && stillPendingPhotos == 0 -> "Todo está sincronizado"
+            else -> buildString {
+                if (subidos > 0) append("$subidos registro${if (subidos == 1) "" else "s"} sincronizado${if (subidos == 1) "" else "s"}")
+                if (fotos > 0) {
+                    if (isNotEmpty()) append(" · ")
+                    append("$fotos foto${if (fotos == 1) "" else "s"} subida${if (fotos == 1) "" else "s"}")
+                }
+                if (isEmpty()) append("Datos actualizados")
+            }
         }
+        val photosWaiting = if (!photosAllowed) stillPendingPhotos else 0
+        SyncStatus.record(applicationContext, message, ok = !authFailed && problems.isEmpty(), photosWaitingForWifi = photosWaiting)
 
-        Log.i(TAG, "=== Sincronización completada: $notesSynced notas, $photosSynced fotos, $activitiesSynced actividades, $activityPhotosSynced fotos de actividad, $errors errores ===")
+        Log.i(TAG, "=== Sync: $notesSynced notas, $activitiesSynced actividades, $fotos fotos, ${problems.size} problemas ===")
 
-        // Si quedan más items pendientes, programar otro run
-        val remainingNotes = db.fieldNoteDao().getUnsyncedCount()
-        val remainingPhotos = db.photoDao().getUnsyncedCount()
-        val remainingActivities = db.fieldActivityDao().getUnsyncedCount()
-        if (remainingNotes > 0 || remainingPhotos > 0 || remainingActivities > 0) {
-            Log.i(TAG, "Quedan $remainingNotes notas, $remainingPhotos fotos y $remainingActivities actividades pendientes")
+        return when {
+            authFailed -> Result.failure() // re-login necesario: no sirve reintentar
+            networkFailed -> Result.retry()
+            else -> Result.success()
         }
-
-        return Result.success()
     }
 }

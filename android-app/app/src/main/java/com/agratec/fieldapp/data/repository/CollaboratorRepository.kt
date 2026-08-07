@@ -40,10 +40,13 @@ class CollaboratorRepository(private val context: Context) {
         return entity
     }
 
+    /** Resultado de la subida, para que el worker pueda avisar al usuario */
+    data class PushResult(val synced: Int, val httpCode: Int? = null, val problem: String? = null)
+
     /** Subir colaboradores pendientes al servidor */
-    suspend fun pushUnsynced(): Int {
+    suspend fun pushUnsynced(): PushResult {
         val unsynced = dao.getUnsynced()
-        if (unsynced.isEmpty()) return 0
+        if (unsynced.isEmpty()) return PushResult(0)
         val api = RetrofitClient.getApiService(context)
         var synced = 0
         try {
@@ -68,11 +71,24 @@ class CollaboratorRepository(private val context: Context) {
                         dao.markSyncFailed(r.clientUuid, r.error ?: "Error desconocido")
                     }
                 }
+                return PushResult(synced)
             }
+
+            // Fallo HTTP: contabilizar el intento en CADA colaborador, si no
+            // quedarían pendientes para siempre bloqueando a sus actividades
+            val problem = when (response.code()) {
+                401 -> "Tu sesión expiró: vuelve a iniciar sesión"
+                404 -> "El servidor no tiene soporte para colaboradores (falta actualizarlo)"
+                else -> "No se pudieron subir los colaboradores (código ${response.code()})"
+            }
+            for (c in unsynced) dao.markSyncFailed(c.clientUuid, "HTTP ${response.code()}")
+            Log.w(TAG, "Error HTTP subiendo colaboradores: ${response.code()}")
+            return PushResult(synced, response.code(), problem)
         } catch (e: Exception) {
             Log.e(TAG, "Error subiendo colaboradores", e)
+            for (c in unsynced) dao.markSyncFailed(c.clientUuid, e.message ?: "Sin conexión")
+            return PushResult(synced, null, "Sin conexión al subir colaboradores")
         }
-        return synced
     }
 
     /**

@@ -168,3 +168,55 @@ el APK 1.2.0 desde Configuración.
   rechazados; el botón Sync reintenta lo que había fallado 8 veces; las
   actividades borradas en la web se eliminan del teléfono (ya no resucitan) y los
   colaboradores dados de baja desaparecen del selector.
+
+---
+
+# Tercera entrega: arreglo de sincronización y fotos inteligentes (app 1.3.0)
+
+## El bug que impedía sincronizar actividades
+
+En la app 1.2.0 los pasos de sincronización eran **secuenciales con aborto**: si
+fallaba la subida de una foto (o de una nota), el worker hacía `return Result.retry()`
+y **nunca llegaba al paso de las actividades**. Con fotos de 48MP sobre la red del
+campo, la subida se pasaba del timeout, tumbaba el ciclo completo y las actividades
+se quedaban sin subir para siempre — sin ningún mensaje que lo explicara.
+
+Verificado: el servidor de producción estaba correcto (endpoints respondiendo);
+el problema era 100% de la app.
+
+**Arreglado**: cada paso es independiente. Los datos suben aunque las fotos fallen.
+
+## Qué hay de nuevo (v1.3.0)
+
+### Datos primero, fotos después
+- **Con datos móviles**: se sincronizan siempre actividades, notas, parcelas y
+  colaboradores (pesan poco). Las fotos esperan.
+- **Con WiFi**: se sincroniza todo, incluidas las fotos.
+- La primera vez que la app detecta datos móviles **pregunta** qué prefieres:
+  *"Solo con WiFi"* o *"Usar datos también"*, por separado para **subir** y
+  **descargar** fotos. Se puede cambiar cuando quieras con el engrane de la
+  pantalla Libreta.
+
+### Fotos más ligeras (procesadas en el teléfono)
+- Máximo **8 megapíxeles** y calidad JPEG media (80) antes de guardarlas.
+- Respeta la orientación de la cámara (ya no salen giradas).
+- Las fotos **ya tomadas** que estén atoradas también se recomprimen antes de subir,
+  así se destraba el rezago.
+- Si el procesamiento falla por lo que sea, la foto original se conserva intacta.
+
+### La app ahora te dice qué pasó
+- Banda de estado en la Libreta: *"3 registros sincronizados · 14:32"*, o el motivo
+  exacto del fallo (*"Tu sesión expiró"*, *"El servidor no tiene soporte para…"*,
+  *"Sin conexión"*, *"Actividad rechazada: …"*).
+- Aviso de cuántas fotos esperan WiFi, tocable para cambiar la preferencia.
+- Al tocar Sincronizar te dice qué va a hacer según la red que tengas.
+
+### Todo al día desde el servidor
+Cada sincronización refresca parcelas, colaboradores y actividades (incluidas las
+planificadas desde la web), y elimina del teléfono lo que se borró o desactivó en
+la web.
+
+## Despliegue
+El servidor **no requiere cambios** para esta entrega (solo trae el endurecimiento
+de la entrega anterior). Compila el APK **1.3.0 (versionCode 4)**, súbelo en
+Configuración → App Móvil, y los teléfonos lo ofrecerán al abrir la app.

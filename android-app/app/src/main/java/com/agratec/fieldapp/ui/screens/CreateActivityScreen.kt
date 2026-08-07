@@ -113,7 +113,13 @@ fun CreateActivityScreen(onBack: () -> Unit) {
     ) { success ->
         val path = pendingPhotoPath
         if (success && path != null) {
-            photoPaths = photoPaths + path
+            // Procesar en el teléfono: máx 8MP, calidad media (pesa mucho menos al subir)
+            scope.launch {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.agratec.fieldapp.util.ImageProcessor.compressInPlace(path)
+                }
+                photoPaths = photoPaths + path
+            }
         }
         pendingPhotoPath = null
     }

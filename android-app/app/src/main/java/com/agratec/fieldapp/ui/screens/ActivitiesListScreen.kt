@@ -31,8 +31,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.agratec.fieldapp.data.local.entity.FieldActivityEntity
+import com.agratec.fieldapp.data.prefs.SyncPreferences
 import com.agratec.fieldapp.data.repository.FieldActivityRepository
+import com.agratec.fieldapp.sync.NetworkUtils
+import com.agratec.fieldapp.sync.SyncStatus
 import com.agratec.fieldapp.sync.SyncWorker
+import com.agratec.fieldapp.ui.components.PhotoPolicyDialog
+import com.agratec.fieldapp.ui.components.PhotoSettingsDialog
 import com.agratec.fieldapp.ui.components.AgraBottomBar
 import com.agratec.fieldapp.ui.components.GlassCard
 import com.agratec.fieldapp.ui.theme.*
@@ -99,13 +104,64 @@ fun ActivitiesListScreen(
     var unsyncedCount by remember { mutableIntStateOf(0) }
     var confirmActivity by remember { mutableStateOf<FieldActivityEntity?>(null) }
 
+    // Estado de la última sincronización (para que el usuario sepa qué pasó)
+    val syncStatus by SyncStatus.state.collectAsState()
+    var showPhotoPolicyDialog by remember { mutableStateOf(false) }
+    var showPhotoSettings by remember { mutableStateOf(false) }
+    var uploadOnMobile by remember {
+        mutableStateOf(SyncPreferences.uploadPolicy(context) == SyncPreferences.Policy.ALLOW)
+    }
+    var downloadOnMobile by remember {
+        mutableStateOf(SyncPreferences.downloadPolicy(context) == SyncPreferences.Policy.ALLOW)
+    }
+
     LaunchedEffect(activities) {
         unsyncedCount = repository.getUnsyncedCount()
     }
 
-    // Al abrir, bajar actividades nuevas del servidor (si hay red)
+    // Al abrir: cargar estado previo, bajar datos frescos del servidor y
+    // preguntar por las fotos si estamos con datos móviles y nunca se preguntó
     LaunchedEffect(Unit) {
+        SyncStatus.load(context)
         repository.pullFromServer()
+        val onMobile = !NetworkUtils.isUnmetered(context) && NetworkUtils.isConnected(context)
+        if (onMobile && !SyncPreferences.hasBeenAsked(context)) {
+            showPhotoPolicyDialog = true
+        }
+    }
+
+    if (showPhotoPolicyDialog) {
+        PhotoPolicyDialog(
+            pendingPhotos = syncStatus?.photosWaitingForWifi ?: 0,
+            onDecide = { allowUpload, allowDownload ->
+                SyncPreferences.setUploadPolicy(context, if (allowUpload) SyncPreferences.Policy.ALLOW else SyncPreferences.Policy.WIFI_ONLY)
+                SyncPreferences.setDownloadPolicy(context, if (allowDownload) SyncPreferences.Policy.ALLOW else SyncPreferences.Policy.WIFI_ONLY)
+                SyncPreferences.markAsked(context)
+                uploadOnMobile = allowUpload
+                downloadOnMobile = allowDownload
+                showPhotoPolicyDialog = false
+                SyncWorker.enqueueImmediateSync(context)
+            },
+            onDismiss = {
+                SyncPreferences.markAsked(context)
+                showPhotoPolicyDialog = false
+            },
+        )
+    }
+
+    if (showPhotoSettings) {
+        PhotoSettingsDialog(
+            uploadOnMobile = uploadOnMobile,
+            downloadOnMobile = downloadOnMobile,
+            onChange = { up, down ->
+                SyncPreferences.setUploadPolicy(context, if (up) SyncPreferences.Policy.ALLOW else SyncPreferences.Policy.WIFI_ONLY)
+                SyncPreferences.setDownloadPolicy(context, if (down) SyncPreferences.Policy.ALLOW else SyncPreferences.Policy.WIFI_ONLY)
+                SyncPreferences.markAsked(context)
+                uploadOnMobile = up
+                downloadOnMobile = down
+            },
+            onDismiss = { showPhotoSettings = false },
+        )
     }
 
     val filtered = when (filter) {
@@ -136,6 +192,10 @@ fun ActivitiesListScreen(
         val uuid = photoTargetUuid
         if (success && path != null && uuid != null) {
             scope.launch {
+                // Procesar en el teléfono: máx 8MP, calidad media
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.agratec.fieldapp.util.ImageProcessor.compressInPlace(path)
+                }
                 repository.addPhoto(uuid, path)
                 Toast.makeText(context, "Foto agregada 📷 (se sube al sincronizar)", Toast.LENGTH_SHORT).show()
             }
@@ -255,6 +315,41 @@ fun ActivitiesListScreen(
                             Text("$unsyncedCount sin sync", color = SyncPending, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
+                    IconButton(onClick = { showPhotoSettings = true }) {
+                        Icon(Icons.Default.Settings, contentDescription = "Ajustes de fotos", tint = TextTertiary, modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+
+            // ── Estado de la última sincronización ──
+            syncStatus?.let { status ->
+                val bg = if (status.ok) AgraGreenSurface else Color(0xFFFEF2F2)
+                val fg = if (status.ok) AgraEmerald600 else SyncError
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(bg)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (status.ok) Icons.Default.CloudDone else Icons.Default.ErrorOutline,
+                        contentDescription = null,
+                        tint = fg,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("${status.message} · ${status.at}", color = fg, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                        if (status.photosWaitingForWifi > 0) {
+                            Text(
+                                "${status.photosWaitingForWifi} foto${if (status.photosWaitingForWifi == 1) "" else "s"} esperan WiFi · toca para cambiarlo",
+                                color = SyncPending,
+                                fontSize = 11.sp,
+                                modifier = Modifier.clickable { showPhotoSettings = true },
+                            )
+                        }
+                    }
                 }
             }
 
@@ -353,6 +448,14 @@ fun ActivitiesListScreen(
                 scope.launch {
                     repository.resetFailedSyncAttempts()
                     SyncWorker.enqueueImmediateSync(context)
+                    val red = when (com.agratec.fieldapp.sync.NetworkUtils.currentType(context)) {
+                        com.agratec.fieldapp.sync.NetworkUtils.NetworkType.NONE -> "Sin conexión: se sincronizará al recuperar señal"
+                        com.agratec.fieldapp.sync.NetworkUtils.NetworkType.WIFI -> "Sincronizando por WiFi (datos y fotos)..."
+                        com.agratec.fieldapp.sync.NetworkUtils.NetworkType.MOBILE ->
+                            if (uploadOnMobile) "Sincronizando por datos (datos y fotos)..."
+                            else "Sincronizando datos... las fotos esperarán WiFi"
+                    }
+                    Toast.makeText(context, red, Toast.LENGTH_SHORT).show()
                 }
             },
             onCreateNote = onCreateActivity,
