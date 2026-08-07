@@ -220,3 +220,48 @@ la web.
 El servidor **no requiere cambios** para esta entrega (solo trae el endurecimiento
 de la entrega anterior). Compila el APK **1.3.0 (versionCode 4)**, súbelo en
 Configuración → App Móvil, y los teléfonos lo ofrecerán al abrir la app.
+
+---
+
+# Cuarta entrega: sesión que no caduca, IA Tecti, resumen nocturno y actividades en el reporte
+
+## 1. Se acabaron las sesiones caídas (app 1.4.0)
+El token de acceso caducaba y la app se quedaba "logueada" pero sin poder
+sincronizar nada, en silencio. Ahora:
+- El login entrega también un **token de refresco de larga duración (1 año)**.
+- Cuando el servidor responde 401, la app **renueva la sesión sola** y reintenta
+  la petición: el usuario ni se entera.
+- Si el refresco ya no sirve (usuario borrado, secreto rotado), la app **cierra
+  sesión y manda al login** con un aviso claro: *"Por seguridad tu sesión terminó…
+  nada de lo que capturaste se pierde"*.
+- Seguridad: el token de refresco **no sirve** para autenticar peticiones normales
+  (verificado); un refresco inválido responde con mensaje claro.
+
+## 2. "IA Tecti" en lugar de DeepSeek
+El nombre del proveedor ya no aparece en nada que vea el cliente. El Panorama
+Semanal del dashboard muestra el distintivo **IA Tecti**, y el reporte PDF ya
+usaba **IA AGRA TEC-TI**. (En Ajustes, que solo ve el administrador, se conserva
+el nombre técnico del proveedor porque ahí es donde se configura la llave.)
+
+## 3. El panorama se genera de noche
+El resumen se **regenera cada madrugada (2-5 AM, hora de México)**, así el
+productor lo encuentra fresco por la mañana con todo lo capturado el día anterior.
+La tarjeta lo indica: *"se actualiza cada noche"*. Si por un despliegue faltara
+el resumen de la semana, se genera en cuanto se detecta.
+
+## 4. El reporte ahora incluye el trabajo de campo
+Nueva sección **"Trabajo de Campo"** en el reporte general (en pantalla y en el PDF):
+- KPIs: actividades del periodo, completadas, pendientes y **horas de labor**.
+- **Dónde se trabajó**: conteo de actividades por parcela.
+- **Labores por tipo**: riegos, podas, fertilizaciones, etc.
+- **Detalle**: fecha (con los días si duró varias jornadas), labor y subtipo,
+  parcela(s), responsable, horas y estado.
+- El análisis de IA del reporte ahora también recibe las labores ejecutadas y en
+  qué parcelas, así sus conclusiones consideran el trabajo real de campo.
+
+## Despliegue
+Servidor: `git pull && docker-compose up -d --build` (sin migraciones nuevas).
+App: compilar **1.4.0 (versionCode 5)** y publicarla en Configuración → App Móvil.
+
+> Al instalar la 1.4.0, cada usuario debe iniciar sesión **una última vez** para
+> recibir el token de refresco. A partir de ahí la sesión se mantiene sola.

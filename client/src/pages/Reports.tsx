@@ -7,7 +7,7 @@ import {
   FileText, Download, Calendar, Package, TrendingUp,
   ClipboardList, CloudSun, Brain, ChevronDown, Loader2,
   BarChart3, Globe, Filter, Satellite, AlertTriangle,
-  CheckCircle, Leaf, Droplets, Thermometer, Box, Layers
+  CheckCircle, Leaf, Droplets, Thermometer, Box, Layers, BookOpen
 } from "lucide-react";
 
 
@@ -803,6 +803,62 @@ export default function Reports() {
           });
           html += '</tbody></table></div>';
         }
+        // ── Libreta de campo: qué se hizo y en qué parcelas ──
+        const gActivities = ((generalData as any)?.activities as any[]) || [];
+        const gActTotals = (generalData as any)?.activityTotals;
+        if (gActivities.length > 0) {
+          html += `<div class="section-title">Trabajo de Campo Realizado</div>`;
+          html += '<div class="metrics-grid">';
+          html += buildMetricCard('Actividades', `${gActTotals?.total || 0}`, 'en el periodo', 'green');
+          html += buildMetricCard('Completadas', `${gActTotals?.completed || 0}`, '', 'green');
+          html += buildMetricCard('Pendientes', `${gActTotals?.pending || 0}`, '', (gActTotals?.pending || 0) > 0 ? 'amber' : 'green');
+          html += buildMetricCard('Horas', `${gActTotals?.hours || 0}`, 'de trabajo', 'purple');
+          html += '</div>';
+
+          // Dónde se trabajó
+          const byParcel: Record<string, number> = gActTotals?.byParcel || {};
+          const parcelEntries = Object.entries(byParcel).sort((a, b) => (b[1] as number) - (a[1] as number));
+          if (parcelEntries.length > 0) {
+            html += `<div class="section-title">Dónde se Trabajó</div>`;
+            html += '<div class="glass-table-container"><table><thead><tr><th>Parcela</th><th class="text-right">Actividades</th></tr></thead><tbody>';
+            parcelEntries.forEach(([name, count]) => {
+              html += `<tr><td class="parcel-name">${safe(name)}</td><td class="text-right">${count}</td></tr>`;
+            });
+            html += '</tbody></table></div>';
+          }
+
+          // Tipos de labor
+          const byType: Record<string, number> = gActTotals?.byType || {};
+          const typeEntries = Object.entries(byType).sort((a, b) => (b[1] as number) - (a[1] as number));
+          if (typeEntries.length > 0) {
+            html += `<div class="section-title">Labores por Tipo</div>`;
+            html += '<div class="glass-table-container"><table><thead><tr><th>Tipo de labor</th><th class="text-right">Veces</th></tr></thead><tbody>';
+            typeEntries.forEach(([name, count]) => {
+              html += `<tr><td class="parcel-name">${safe(name)}</td><td class="text-right">${count}</td></tr>`;
+            });
+            html += '</tbody></table></div>';
+          }
+
+          // Detalle de cada actividad
+          html += `<div class="section-title">Detalle de Actividades</div>`;
+          html += '<div class="glass-table-container"><table><thead><tr><th>Fecha</th><th>Labor</th><th>Parcela(s)</th><th>Responsable</th><th class="text-right">Horas</th><th>Estado</th></tr></thead><tbody>';
+          gActivities.forEach((a: any) => {
+            const estado = a.status === 'completada' ? 'Completada'
+              : a.status === 'en_progreso' ? 'En proceso'
+              : a.status === 'cancelada' ? 'Cancelada' : 'Planificada';
+            const labor = safe(a.typeLabel) + (a.subtype ? ` (${safe(a.subtype)})` : '');
+            const dias = a.days > 1 ? ` · ${a.days} dias` : '';
+            html += `<tr class="${a.status === 'completada' ? '' : 'risk-row'}">` +
+              `<td class="parcel-name">${fmtDateShort(a.date)}${dias}</td>` +
+              `<td>${labor}</td>` +
+              `<td>${safe(a.parcelNames?.join(', ') || 'General')}</td>` +
+              `<td>${safe(a.performedBy || '-')}</td>` +
+              `<td class="text-right">${a.hours ?? '-'}</td>` +
+              `<td>${estado}</td></tr>`;
+          });
+          html += '</tbody></table></div>';
+        }
+
         html += buildPageClose(2, nPages, logo, now);
 
         // ── GENERAL PAGE 3: Notes + AI ──
@@ -1116,6 +1172,100 @@ ${html}
                 )}
               </GlassCard>
             )}
+
+            {/* Trabajo de campo: qué se hizo y dónde */}
+            {isGeneral && (((generalData as any)?.activities as any[])?.length ?? 0) > 0 && (() => {
+              const acts = ((generalData as any).activities as any[]);
+              const tot = (generalData as any).activityTotals;
+              const byParcel: [string, number][] = Object.entries(tot?.byParcel || {}) as [string, number][];
+              return (
+                <GlassCard className="p-4 md:p-6" hover={false}>
+                  <div className="mb-4 flex items-center justify-between border-b border-green-200 pb-3">
+                    <div className="flex items-center gap-2">
+                      <BookOpen className="h-5 w-5 text-green-600" />
+                      <h2 className="text-base md:text-xl font-bold text-green-900">Trabajo de Campo</h2>
+                    </div>
+                    <span className="text-xs text-green-600">{tot?.hours ?? 0} h de labor</span>
+                  </div>
+
+                  <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <div className="rounded-xl bg-green-50/60 border border-green-100 p-2.5">
+                      <p className="text-lg font-bold text-green-900">{tot?.total ?? 0}</p>
+                      <p className="text-[11px] text-green-600">actividades</p>
+                    </div>
+                    <div className="rounded-xl bg-green-50/60 border border-green-100 p-2.5">
+                      <p className="text-lg font-bold text-green-900">{tot?.completed ?? 0}</p>
+                      <p className="text-[11px] text-green-600">completadas</p>
+                    </div>
+                    <div className="rounded-xl bg-amber-50/60 border border-amber-100 p-2.5">
+                      <p className="text-lg font-bold text-amber-900">{tot?.pending ?? 0}</p>
+                      <p className="text-[11px] text-amber-600">pendientes</p>
+                    </div>
+                    <div className="rounded-xl bg-purple-50/60 border border-purple-100 p-2.5">
+                      <p className="text-lg font-bold text-purple-900">{byParcel.length}</p>
+                      <p className="text-[11px] text-purple-600">parcelas trabajadas</p>
+                    </div>
+                  </div>
+
+                  {byParcel.length > 0 && (
+                    <div className="mb-4">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">Dónde se trabajó</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {byParcel.sort((a, b) => b[1] - a[1]).map(([name, count]) => (
+                          <span key={name} className="inline-flex items-center gap-1 rounded-lg bg-white/60 border border-green-200/50 px-2 py-1 text-[11px] text-green-800">
+                            {name} <strong>{count}</strong>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-green-200 text-left text-xs text-green-700">
+                          <th className="px-3 py-2">Fecha</th>
+                          <th className="px-3 py-2">Labor</th>
+                          <th className="px-3 py-2">Parcela(s)</th>
+                          <th className="px-3 py-2 hidden sm:table-cell">Responsable</th>
+                          <th className="px-3 py-2 text-right">Horas</th>
+                          <th className="px-3 py-2">Estado</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {acts.map((a: any) => (
+                          <tr key={a.id} className="border-b border-green-100/60">
+                            <td className="px-3 py-2 text-green-900">
+                              {new Date(a.date + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}
+                              {a.days > 1 && <span className="text-[10px] text-green-500"> · {a.days} días</span>}
+                            </td>
+                            <td className="px-3 py-2">
+                              <span className="font-medium text-green-900">{a.typeLabel}</span>
+                              {a.subtype && <span className="text-[11px] text-gray-500"> · {a.subtype}</span>}
+                            </td>
+                            <td className="px-3 py-2 text-gray-600">{a.parcelNames?.join(', ') || 'General'}</td>
+                            <td className="px-3 py-2 text-gray-600 hidden sm:table-cell">{a.performedBy || '-'}</td>
+                            <td className="px-3 py-2 text-right text-green-700">{a.hours ?? '-'}</td>
+                            <td className="px-3 py-2">
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                                a.status === 'completada' ? 'bg-green-50 text-green-700'
+                                : a.status === 'en_progreso' ? 'bg-amber-50 text-amber-700'
+                                : a.status === 'cancelada' ? 'bg-red-50 text-red-600'
+                                : 'bg-blue-50 text-blue-700'
+                              }`}>
+                                {a.status === 'completada' ? 'Completada'
+                                  : a.status === 'en_progreso' ? 'En proceso'
+                                  : a.status === 'cancelada' ? 'Cancelada' : 'Planificada'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </GlassCard>
+              );
+            })()}
 
             {/* AI Analysis */}
             {aiText && (

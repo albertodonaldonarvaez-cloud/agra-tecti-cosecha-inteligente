@@ -1199,13 +1199,13 @@ function WeeklySummaryCard({ summary, isAdmin, onGenerate, generating, generateE
           <div>
             <h2 className="text-base md:text-lg font-semibold text-green-900 flex items-center gap-2">
               Panorama Semanal
-              <span className="rounded-full bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-bold text-indigo-600">IA</span>
+              <span className="rounded-full bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-bold text-indigo-600">IA Tecti</span>
             </h2>
             <p className="text-xs text-green-600">
               {weekLabel ? (
-                <>Resumen de la <strong>semana pasada</strong> ({weekLabel}) · se actualiza cada semana</>
+                <>Resumen de la <strong>semana pasada</strong> ({weekLabel}) · se actualiza cada noche</>
               ) : (
-                "Se genera automáticamente cada semana con actividades, clima y datos satelitales"
+                "Se genera automáticamente cada noche con actividades, clima y datos satelitales"
               )}
             </p>
           </div>
@@ -1247,7 +1247,7 @@ function WeeklySummaryCard({ summary, isAdmin, onGenerate, generating, generateE
         </>
       ) : (
         <p className="mt-3 text-sm text-gray-500">
-          Aún no hay resumen semanal. {isAdmin ? "Genera el primero con el botón (requiere la API key de DeepSeek en Ajustes)." : ""}
+          Aún no hay resumen semanal. {isAdmin ? "Genera el primero con el botón (requiere la API key de IA en Ajustes)." : ""}
         </p>
       )}
     </GlassCard>

@@ -22,6 +22,8 @@ data class TrpcData<T>(
 data class LoginResponseData(
     val success: Boolean,
     val token: String?,
+    /** Token de larga duración para renovar la sesión sin re-login */
+    val refreshToken: String?,
     val user: UserData?,
 )
 

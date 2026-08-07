@@ -395,8 +395,12 @@ class SyncWorker(
         val subidos = notesSynced + activitiesSynced
         val fotos = photosSynced + activityPhotosSynced
 
+        // Si el 401 persistió es que ni la renovación automática funcionó
+        val sessionReallyExpired = authFailed && RetrofitClient.isSessionExpired(applicationContext)
+
         val message = when {
-            authFailed -> "Tu sesión expiró: vuelve a iniciar sesión"
+            sessionReallyExpired -> "Tu sesión terminó: vuelve a iniciar sesión"
+            authFailed -> "Reintentando con sesión renovada..."
             problems.isNotEmpty() -> problems.first()
             subidos == 0 && fotos == 0 && stillPendingPhotos == 0 -> "Todo está sincronizado"
             else -> buildString {
@@ -414,7 +418,10 @@ class SyncWorker(
         Log.i(TAG, "=== Sync: $notesSynced notas, $activitiesSynced actividades, $fotos fotos, ${problems.size} problemas ===")
 
         return when {
-            authFailed -> Result.failure() // re-login necesario: no sirve reintentar
+            // Sesión muerta de verdad: reintentar no sirve, el usuario debe entrar
+            sessionReallyExpired -> Result.failure()
+            // 401 que sí se pudo renovar: reintentar para completar lo que faltó
+            authFailed -> Result.retry()
             networkFailed -> Result.retry()
             else -> Result.success()
         }

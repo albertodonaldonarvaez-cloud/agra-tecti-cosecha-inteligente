@@ -2800,7 +2800,7 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
         ))}
       </div>
 
-      {/* ANALISIS IA — DeepSeek */}
+      {/* ANALISIS IA — IA Tecti */}
       <AIAnalysisCard parcelId={parcel.id} parcelName={parcel.name || parcel.code} ndviStats={ndviStats} ndreStats={ndreStats} ndmiStats={ndmiStats} />
 
       {/* FILA 2: Grafica combinada — 3 indices superpuestos */}

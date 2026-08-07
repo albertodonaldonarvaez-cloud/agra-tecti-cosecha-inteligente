@@ -60,11 +60,38 @@ export const appRouter = router({
     loginMobile: publicProcedure
       .input(z.object({ email: z.string().email(), password: z.string() }))
       .mutation(async ({ input }) => {
-        const { user, token } = await loginUser(input.email, input.password);
+        const { user, token, refreshToken } = await loginUser(input.email, input.password);
         return {
           success: true,
           token,
+          refreshToken,
           user: { id: user.id, email: user.email, name: user.name, role: user.role },
+        };
+      }),
+
+    // Renovar la sesión de la app sin volver a pedir contraseña.
+    // La app lo llama sola cuando el token de acceso caduca.
+    refreshMobile: publicProcedure
+      .input(z.object({ refreshToken: z.string().min(10) }))
+      .mutation(async ({ input }) => {
+        const { refreshSession } = await import("./auth");
+        const result = await refreshSession(input.refreshToken);
+        if (!result) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "La sesión expiró definitivamente, vuelve a iniciar sesión",
+          });
+        }
+        return {
+          success: true,
+          token: result.token,
+          refreshToken: result.refreshToken,
+          user: {
+            id: result.user.id,
+            email: result.user.email,
+            name: result.user.name,
+            role: result.user.role,
+          },
         };
       }),
     
@@ -4783,6 +4810,105 @@ IMPORTANTE:
           }
         } catch (e) { /* ignore */ }
 
+        // ===== ACTIVIDADES DE LA LIBRETA DE CAMPO (qué se hizo y dónde) =====
+        const activityRows = await drizzle.select().from(fieldActivities)
+          .where(and(
+            gte(fieldActivities.activityDate, input.fromDate as any),
+            lte(fieldActivities.activityDate, input.toDate as any),
+          ))
+          .orderBy(asc(fieldActivities.activityDate), asc(fieldActivities.id));
+
+        const activityIds = activityRows.map(a => a.id);
+        const parcelNamesByActivity: Record<number, string[]> = {};
+        const productsByActivity: Record<number, string[]> = {};
+        const hoursByActivity: Record<number, number> = {};
+        const daysByActivity: Record<number, number> = {};
+
+        if (activityIds.length > 0) {
+          const links = await drizzle
+            .select({ activityId: fieldActivityParcels.activityId, name: parcels.name })
+            .from(fieldActivityParcels)
+            .leftJoin(parcels, eq(fieldActivityParcels.parcelId, parcels.id))
+            .where(inArray(fieldActivityParcels.activityId, activityIds));
+          for (const l of links) {
+            if (!parcelNamesByActivity[l.activityId]) parcelNamesByActivity[l.activityId] = [];
+            if (l.name) parcelNamesByActivity[l.activityId].push(l.name);
+          }
+
+          const prods = await drizzle
+            .select({
+              activityId: fieldActivityProducts.activityId,
+              productName: fieldActivityProducts.productName,
+              quantity: fieldActivityProducts.quantity,
+              unit: fieldActivityProducts.unit,
+            })
+            .from(fieldActivityProducts)
+            .where(inArray(fieldActivityProducts.activityId, activityIds));
+          for (const p of prods) {
+            if (!productsByActivity[p.activityId]) productsByActivity[p.activityId] = [];
+            productsByActivity[p.activityId].push(
+              p.quantity ? `${p.productName} (${p.quantity}${p.unit ?? ""})` : p.productName
+            );
+          }
+
+          const sessions = await drizzle.select().from(fieldActivityWorkSessions)
+            .where(inArray(fieldActivityWorkSessions.activityId, activityIds));
+          for (const s of sessions) {
+            daysByActivity[s.activityId] = (daysByActivity[s.activityId] || 0) + 1;
+            if (s.startTime && s.endTime) {
+              const [sh, sm] = s.startTime.split(":").map(Number);
+              const [eh, em] = s.endTime.split(":").map(Number);
+              let dur = (eh * 60 + em) - (sh * 60 + sm);
+              if (dur < 0) dur += 24 * 60;
+              hoursByActivity[s.activityId] = (hoursByActivity[s.activityId] || 0) + dur;
+            }
+          }
+        }
+
+        const ACTIVITY_LABELS: Record<string, string> = {
+          riego: "Riego", fertilizacion: "Fertilización", nutricion: "Nutrición", poda: "Poda",
+          control_maleza: "Control de maleza", control_plagas: "Control de plagas",
+          aplicacion_fitosanitaria: "Aplicación fitosanitaria", otro: "Otra actividad",
+        };
+
+        const activitiesReport = activityRows.map(a => {
+          const minutes = hoursByActivity[a.id] ?? a.durationMinutes ?? 0;
+          return {
+            id: a.id,
+            date: typeof a.activityDate === "string"
+              ? a.activityDate
+              : new Date(a.activityDate as any).toISOString().slice(0, 10),
+            type: a.activityType,
+            typeLabel: ACTIVITY_LABELS[a.activityType] || a.activityType,
+            subtype: a.activitySubtype,
+            description: a.description,
+            performedBy: a.performedBy,
+            status: a.status,
+            parcelNames: parcelNamesByActivity[a.id] ?? [],
+            products: productsByActivity[a.id] ?? [],
+            days: daysByActivity[a.id] || 1,
+            hours: minutes > 0 ? Math.round((minutes / 60) * 10) / 10 : null,
+          };
+        });
+
+        // Resumen por tipo de actividad y por parcela (dónde se trabajó)
+        const activitiesByType: Record<string, number> = {};
+        const activitiesByParcel: Record<string, number> = {};
+        for (const a of activitiesReport) {
+          activitiesByType[a.typeLabel] = (activitiesByType[a.typeLabel] || 0) + 1;
+          for (const p of a.parcelNames) {
+            activitiesByParcel[p] = (activitiesByParcel[p] || 0) + 1;
+          }
+        }
+        const activityTotals = {
+          total: activitiesReport.length,
+          completed: activitiesReport.filter(a => a.status === "completada").length,
+          pending: activitiesReport.filter(a => a.status === "planificada" || a.status === "en_progreso").length,
+          hours: Math.round(activitiesReport.reduce((s, a) => s + (a.hours || 0), 0) * 10) / 10,
+          byType: activitiesByType,
+          byParcel: activitiesByParcel,
+        };
+
         // IA: Análisis semanal general
         let aiAnalysis: string | null = null;
         try {
@@ -4800,15 +4926,26 @@ IMPORTANTE:
             const weatherLine = weatherData.length > 0
               ? `Clima: Temp max prom ${(weatherData.reduce((s: any, d: any) => s + (d.temperatureMax || 0), 0) / weatherData.length).toFixed(1)}°C, min prom ${(weatherData.reduce((s: any, d: any) => s + (d.temperatureMin || 0), 0) / weatherData.length).toFixed(1)}°C, lluvia acum ${weatherData.reduce((s: any, d: any) => s + (d.precipitation || 0), 0).toFixed(1)}mm`
               : '';
+            // Trabajo de campo del periodo (qué se hizo y en qué parcelas)
+            const activityLines = activitiesReport.length > 0
+              ? activitiesReport.slice(0, 40).map(a =>
+                  `- ${a.date}: ${a.typeLabel}${a.subtype ? ` (${a.subtype})` : ""}` +
+                  `${a.parcelNames.length ? ` en ${a.parcelNames.join(", ")}` : ""}` +
+                  `${a.hours ? ` [${a.hours}h]` : ""} — ${a.description ?? ""} (${a.performedBy || "sin responsable"}, ${a.status})`
+                ).join('\n')
+              : "- Sin actividades registradas en el periodo";
             const prompt = `Analiza el estado semanal de esta operación agrícola (${input.fromDate} a ${input.toDate}):
 
 Resumen por parcela:
 ${summaryLines}
 
-Totales: ${totalHarvest.toFixed(1)}kg cosechados, ${totalBoxes} cajas, ${totalNotes} notas de campo (${totalNotesOpen} abiertas)
+Trabajo de campo realizado (libreta de campo):
+${activityLines}
+
+Totales: ${totalHarvest.toFixed(1)}kg cosechados, ${totalBoxes} cajas, ${totalNotes} notas de campo (${totalNotesOpen} abiertas), ${activityTotals.total} actividades (${activityTotals.completed} completadas, ${activityTotals.hours}h de trabajo)
 ${weatherLine}
 
-Da un análisis ejecutivo de 5-6 líneas máximo: estado general de la operación, parcelas que requieren atención (bajo NDVI o muchas notas abiertas), impacto del clima, y 1-2 recomendaciones. Tono profesional de ingeniero agrónomo. Responde en español.`;
+Da un análisis ejecutivo de 6-8 líneas máximo: estado general de la operación, qué labores se ejecutaron y en qué parcelas, parcelas que requieren atención (bajo NDVI, notas abiertas o sin labores), impacto del clima, y 1-2 recomendaciones. Tono profesional de ingeniero agrónomo. Responde en español.`;
 
             const response = await fetch("https://api.deepseek.com/chat/completions", {
               method: "POST",
@@ -4841,6 +4978,9 @@ Da un análisis ejecutivo de 5-6 líneas máximo: estado general de la operació
             notesOpen: totalNotesOpen,
             parcelsCount: parcelsWithPolygon.length,
           },
+          // Libreta de campo: qué se hizo y dónde
+          activities: activitiesReport,
+          activityTotals,
           weatherData,
           period: { from: input.fromDate, to: input.toDate },
         };

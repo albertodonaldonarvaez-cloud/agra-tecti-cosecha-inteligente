@@ -6,6 +6,10 @@ import { getDb } from "./db";
 
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production";
 const JWT_EXPIRES_IN = "30d";
+// La app de campo vive meses sin re-login: token de refresco de larga duración.
+// Cuando el token de acceso caduca, la app lo canjea sola por uno nuevo
+// (antes se quedaba sin sesión en silencio y dejaba de sincronizar).
+const REFRESH_EXPIRES_IN = "365d";
 
 export interface JWTPayload {
   userId: number;
@@ -27,10 +31,44 @@ export function generateToken(payload: JWTPayload): string {
 
 export function verifyToken(token: string): JWTPayload | null {
   try {
-    return jwt.verify(token, JWT_SECRET) as JWTPayload;
+    const payload = jwt.verify(token, JWT_SECRET) as JWTPayload & { typ?: string };
+    // Un token de refresco NO sirve para autenticar peticiones normales
+    if (payload.typ === "refresh") return null;
+    return payload;
   } catch {
     return null;
   }
+}
+
+/** Token de refresco: solo sirve para pedir un token de acceso nuevo */
+export function generateRefreshToken(payload: JWTPayload): string {
+  return jwt.sign({ ...payload, typ: "refresh" }, JWT_SECRET, { expiresIn: REFRESH_EXPIRES_IN });
+}
+
+/**
+ * Canjea un token de refresco por un par nuevo (acceso + refresco).
+ * Devuelve null si el refresco es inválido, caducó o el usuario ya no existe.
+ */
+export async function refreshSession(refreshToken: string) {
+  let payload: (JWTPayload & { typ?: string }) | null = null;
+  try {
+    payload = jwt.verify(refreshToken, JWT_SECRET) as JWTPayload & { typ?: string };
+  } catch {
+    return null;
+  }
+  if (!payload || payload.typ !== "refresh") return null;
+
+  const db = await getDb();
+  if (!db) return null;
+  const [user] = await db.select().from(users).where(eq(users.id, payload.userId)).limit(1);
+  if (!user) return null;
+
+  const nextPayload: JWTPayload = { userId: user.id, email: user.email, role: user.role };
+  return {
+    user,
+    token: generateToken(nextPayload),
+    refreshToken: generateRefreshToken(nextPayload),
+  };
 }
 
 export async function registerUser(email: string, password: string, name: string) {
@@ -81,14 +119,12 @@ export async function loginUser(email: string, password: string) {
   // Actualizar última conexión
   await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, user.id));
 
-  // Generar token
-  const token = generateToken({
-    userId: user.id,
-    email: user.email,
-    role: user.role,
-  });
+  // Generar tokens
+  const payload: JWTPayload = { userId: user.id, email: user.email, role: user.role };
+  const token = generateToken(payload);
+  const refreshToken = generateRefreshToken(payload);
 
-  return { user, token };
+  return { user, token, refreshToken };
 }
 
 export async function getUserFromToken(token: string) {

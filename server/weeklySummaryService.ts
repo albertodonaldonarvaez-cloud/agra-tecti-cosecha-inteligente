@@ -321,28 +321,55 @@ Tono profesional de ingeniero agrónomo, directo y útil. Sin saludos ni despedi
 }
 
 let schedulerStarted = false;
+let lastNightlyRun: string | null = null;
+
+/** Hora local de México (0-23) */
+function currentHourMx(): number {
+  const hh = new Date().toLocaleString("en-US", {
+    timeZone: "America/Mexico_City",
+    hour: "2-digit",
+    hour12: false,
+  });
+  return parseInt(hh, 10);
+}
 
 /**
- * Scheduler: revisa cada hora si falta el resumen de la última semana completa
- * y lo genera. En la práctica: se genera el lunes en la mañana (hora de México)
- * o al primer arranque después del cambio de semana.
+ * Scheduler nocturno: cada madrugada (2-4 AM hora de México) REGENERA el
+ * panorama para que el productor lo encuentre fresco por la mañana, con todo
+ * lo que se capturó el día anterior.
+ *
+ * También cubre el caso de que falte por completo el resumen de la semana
+ * (por ejemplo tras un despliegue): lo genera en cuanto lo detecta.
  */
 export function startWeeklySummaryScheduler() {
   if (schedulerStarted) return;
   schedulerStarted = true;
-  console.log(`${TAG} Scheduler iniciado (revisión cada hora; genera los lunes o al detectar semana faltante)`);
+  console.log(`${TAG} Scheduler iniciado (regeneración nocturna 2-4 AM hora de México)`);
 
   const check = async () => {
     try {
       const drizzle = await getDb();
       if (!drizzle) return;
+
       const { weekStart } = getLastWeekRange();
       const [existing] = await drizzle.select({ id: weeklySummaries.id })
         .from(weeklySummaries)
         .where(eq(weeklySummaries.weekStart, weekStart))
         .limit(1);
+
+      // 1. Falta el resumen de la semana: generarlo cuanto antes
       if (!existing) {
         await generateWeeklySummary();
+        return;
+      }
+
+      // 2. Regeneración nocturna, una vez por noche
+      const today = todayMx();
+      const hour = currentHourMx();
+      if (hour >= 2 && hour < 5 && lastNightlyRun !== today) {
+        lastNightlyRun = today;
+        console.log(`${TAG} Regeneración nocturna (${today})...`);
+        await generateWeeklySummary({ force: true });
       }
     } catch (e) {
       console.error(`${TAG} Error en scheduler:`, e);
@@ -351,5 +378,5 @@ export function startWeeklySummaryScheduler() {
 
   // Primer chequeo a los 2 minutos del arranque (deja calentar el server)
   setTimeout(check, 2 * 60 * 1000);
-  setInterval(check, 60 * 60 * 1000);
+  setInterval(check, 30 * 60 * 1000);
 }

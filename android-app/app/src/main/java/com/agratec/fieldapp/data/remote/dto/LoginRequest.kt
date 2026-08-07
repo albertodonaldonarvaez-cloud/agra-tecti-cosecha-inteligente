@@ -3,6 +3,11 @@ package com.agratec.fieldapp.data.remote.dto
 import com.google.gson.annotations.SerializedName
 
 /** Request body para auth.loginMobile via tRPC */
+/** Body para auth.refreshMobile */
+data class RefreshRequest(
+    val refreshToken: String,
+)
+
 data class LoginRequest(
     val email: String,
     val password: String,

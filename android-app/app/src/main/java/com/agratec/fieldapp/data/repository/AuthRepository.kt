@@ -44,6 +44,10 @@ class AuthRepository(private val context: Context) {
                 if (data?.success == true && data.token != null) {
                     // Guardar token de forma segura
                     RetrofitClient.saveToken(context, data.token)
+                    // Token de refresco: permite renovar la sesión sin volver a
+                    // pedir contraseña cuando caduque el de acceso
+                    data.refreshToken?.let { RetrofitClient.saveRefreshToken(context, it) }
+                    RetrofitClient.consumeSessionExpired(context)
                     // Guardar nombre para prellenar "realizado por" en la libreta
                     context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                         .edit().putString(KEY_USER_NAME, data.user?.name ?: "").apply()
@@ -81,6 +85,11 @@ class AuthRepository(private val context: Context) {
 
     /** Verificar si hay sesión activa */
     fun isLoggedIn(): Boolean = RetrofitClient.isLoggedIn(context)
+
+    /** true si la sesión caducó y ya no se pudo renovar (hay que volver a entrar) */
+    fun sessionExpired(): Boolean = RetrofitClient.isSessionExpired(context)
+
+    fun consumeSessionExpired() = RetrofitClient.consumeSessionExpired(context)
 }
 
 /** Resultado simplificado del login */

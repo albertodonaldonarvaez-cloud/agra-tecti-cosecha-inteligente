@@ -32,6 +32,21 @@ interface ApiService {
         @Body body: TrpcMutationRequest<LoginRequest>
     ): Response<TrpcResponse<LoginResponseData>>
 
+    /**
+     * Renovar la sesión con el token de refresco (sin pedir contraseña).
+     * Se llama automáticamente cuando el token de acceso caduca.
+     */
+    @POST("api/trpc/auth.refreshMobile")
+    suspend fun refreshMobile(
+        @Body body: TrpcMutationRequest<RefreshRequest>
+    ): Response<TrpcResponse<LoginResponseData>>
+
+    /** Versión síncrona (la usa el Authenticator de OkHttp, que no es suspend) */
+    @POST("api/trpc/auth.refreshMobile")
+    fun refreshMobileSync(
+        @Body body: TrpcMutationRequest<RefreshRequest>
+    ): retrofit2.Call<TrpcResponse<LoginResponseData>>
+
     // ============================================
     // OFFLINE SYNC — NOTAS DE CAMPO
     // ============================================

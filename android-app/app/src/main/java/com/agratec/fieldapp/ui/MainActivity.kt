@@ -77,6 +77,53 @@ fun AppNavigation() {
         updateInfo = updateRepository.checkForUpdate()
     }
 
+    // ── Sesión caducada: si ya no se pudo renovar sola, mandar al login ──
+    // (la renovación automática ocurre en RetrofitClient; esto es el último recurso)
+    var sessionExpiredNotice by remember { mutableStateOf(false) }
+    LaunchedEffect(currentScreen) {
+        if (currentScreen != Screen.Login && authRepository.sessionExpired()) {
+            sessionExpiredNotice = true
+            currentScreen = Screen.Login
+        }
+    }
+    // Revisar periódicamente mientras la app está abierta
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(30_000)
+            if (currentScreen != Screen.Login && authRepository.sessionExpired()) {
+                sessionExpiredNotice = true
+                currentScreen = Screen.Login
+            }
+        }
+    }
+
+    if (sessionExpiredNotice) {
+        AlertDialog(
+            onDismissRequest = {
+                authRepository.consumeSessionExpired()
+                sessionExpiredNotice = false
+            },
+            title = { Text("Sesión finalizada", color = TextPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Por seguridad tu sesión terminó. Vuelve a iniciar sesión para seguir sincronizando.\n\n" +
+                        "Nada de lo que capturaste se pierde: queda guardado en el teléfono y se subirá al entrar.",
+                    color = TextSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    authRepository.consumeSessionExpired()
+                    sessionExpiredNotice = false
+                }) {
+                    Text("Iniciar sesión", color = AgraGreen, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            containerColor = Color.White,
+            shape = RoundedCornerShape(20.dp),
+        )
+    }
+
     updateInfo?.let { info ->
         AlertDialog(
             onDismissRequest = { updateInfo = null },
