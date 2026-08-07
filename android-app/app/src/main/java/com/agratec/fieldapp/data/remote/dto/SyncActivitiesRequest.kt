@@ -18,8 +18,19 @@ data class SyncActivityItem(
     val description: String,
     val performedBy: String? = null,
     val activityDate: String, // "YYYY-MM-DD"
+    val startTime: String? = null, // "HH:MM"
+    val endTime: String? = null,
     val status: String = "planificada",
     val parcelIds: List<Int>? = null,
+    val collaboratorIds: List<Int>? = null,
+    val workSessions: List<WorkSessionDto>? = null,
+)
+
+/** Jornada de trabajo: un día con sus horas */
+data class WorkSessionDto(
+    val workDate: String,
+    val startTime: String? = null,
+    val endTime: String? = null,
 )
 
 /** Respuesta de sincronización de actividades */
@@ -32,7 +43,7 @@ data class SyncActivitiesResponseData(
 data class SyncActivityResult(
     val clientUuid: String,
     val serverId: Int?,
-    val status: String, // "created", "updated", "error"
+    val status: String, // "created", "updated", "deleted", "error"
     val error: String?,
 )
 
@@ -48,6 +59,56 @@ data class ActivityData(
     val description: String?,
     val performedBy: String?,
     val activityDate: String,
+    val startTime: String?,
+    val endTime: String?,
     val status: String,
     val parcelIds: List<Int>?,
+    val collaboratorIds: List<Int>?,
+    val workSessions: List<WorkSessionDto>?,
+)
+
+// ============ COLABORADORES ============
+
+data class SyncCollaboratorsRequest(
+    val collaborators: List<SyncCollaboratorItem>,
+)
+
+data class SyncCollaboratorItem(
+    val clientUuid: String,
+    val name: String,
+    val phone: String? = null,
+    val role: String? = null,
+)
+
+data class SyncCollaboratorsResponseData(
+    val success: Boolean,
+    val results: List<SyncCollaboratorResult>?,
+    val syncedCount: Int?,
+)
+
+data class SyncCollaboratorResult(
+    val clientUuid: String,
+    val serverId: Int?,
+    val status: String,
+    val error: String?,
+)
+
+/** Colaborador del servidor (offlineSync.getCollaborators) */
+data class CollaboratorData(
+    val id: Int,
+    val name: String,
+    val role: String?,
+)
+
+// ============ AUTO-ACTUALIZACIÓN ============
+
+/** Respuesta de GET /api/mobile/app-version */
+data class AppVersionResponse(
+    val success: Boolean,
+    val available: Boolean?,
+    val versionCode: Int?,
+    val versionName: String?,
+    val notes: String?,
+    val fileSize: Long?,
+    val downloadUrl: String?,
 )

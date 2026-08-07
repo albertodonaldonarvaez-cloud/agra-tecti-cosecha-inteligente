@@ -2,6 +2,12 @@
 
 **Fecha:** Agosto 2026
 
+> **Segunda entrega (misma fecha):** jornadas de trabajo multi-día con horas,
+> colaboradores de campo desde la app, fotos múltiples de actividades,
+> distribución del APK con auto-actualización, parcelas con actividad en el
+> dashboard (mapa satelital) y resumen semanal generado con IA.
+> Ver sección "Segunda entrega" abajo.
+
 Esta versión convierte el sistema de "revisar la cosecha" en la base de agricultura de
 precisión por **ciclos de producción de higo**: cada ciclo inicia con la **poda/dormancia**
 y registra su **fin de cosecha** y **fin de ciclo**. El dashboard ahora pone la **libreta de
@@ -95,3 +101,70 @@ Pendientes conocidos (no bloquean):
 - Las actividades eliminadas en la web no se borran de los teléfonos (quedan localmente,
   pero ya no se pueden "resucitar" en el servidor).
 - La app baja hasta 500 actividades recientes; con historiales más grandes convendrá paginar.
+
+---
+
+# Segunda entrega: precisión en actividades, app 1.2.0 e IA semanal
+
+## Qué hay de nuevo
+
+### 🌐 Web
+1. **Jornadas de trabajo**: cada actividad puede registrar de qué hora a qué hora
+   se trabajó, y si tomó varios días, un renglón por día con sus horas (el total
+   de horas se calcula solo). Editor en la Libreta de Campo, visible en el detalle.
+2. **Dashboard**:
+   - **Panorama Semanal (IA)**: tarjeta arriba del dashboard con el resumen de la
+     **semana pasada** — actividades realizadas/pendientes, clima, NDVI por parcela,
+     cosecha y la etapa fenológica estimada del ciclo. Se genera **cada lunes**
+     automáticamente (o con el botón "Generar ahora" del admin). La tarjeta indica
+     claramente que se actualiza cada semana.
+   - **Parcelas con trabajo en curso**: las parcelas con actividades recientes o
+     planificadas aparecen con su mapa satelital NDVI (del cache de Copernicus) y
+     el resumen de lo que se está haciendo en cada una.
+3. **Configuración → App Móvil (APK)**: sube el APK nuevo con su versionCode y
+   versionName; los teléfonos lo detectan al abrir la app y ofrecen descargarlo.
+
+### 📱 App Android (v1.2.0)
+- **Estado "En proceso"** además de Realizada/Planificada.
+- **Horas de trabajo**: de qué hora a qué hora se hizo la actividad; con el switch
+  "¿Varios días?" se capturan varias jornadas (día + horas cada una).
+- **Colaboradores de campo**: alta desde el teléfono (nombre + rol) y selección
+  en cada actividad para saber quién la hizo; se sincronizan con la web
+  (aparecen en Equipo y en las asignaciones de la Libreta).
+- **Fotos múltiples por actividad**: varios ángulos al crearla, al completarla
+  o tocando una completada; se comprimen y suben solas al sincronizar.
+- **Auto-actualización**: al abrir la app con internet revisa si hay APK más
+  nuevo publicado en la web y ofrece descargarlo.
+
+## Requisitos
+- **Resumen semanal**: requiere la API key de DeepSeek en Ajustes (la misma de
+  los reportes). Sin key, la tarjeta simplemente no genera y lo indica.
+- **Mapas satelitales en el dashboard**: usa el cache de Copernicus (se llena al
+  visitar Análisis de Parcela o con el sync satelital normal); no hace llamadas
+  extra a la API.
+
+## Despliegue
+Igual que siempre: `git pull && docker-compose up -d --build` (migración 0020
+automática e idempotente vía migrate.cjs; SQL manual en
+`drizzle/0020_work_sessions_photos_weekly.sql`). Primero servidor, luego publicar
+el APK 1.2.0 desde Configuración.
+
+## Endurecimiento aplicado en esta entrega
+- **Anti-CSRF en endpoints REST**: si la autenticación llega por cookie (navegador)
+  y el `Origin` es de otro sitio, se rechaza. Así una página maliciosa no puede
+  usar la sesión del admin para publicar un APK a todos los teléfonos. El token
+  Bearer de la app no se ve afectado.
+- **Anti path traversal**: `localPhotoId`, `activityClientUuid` y `fieldNoteFolio`
+  se validan (`[A-Za-z0-9_-]{1,64}`) antes de formar rutas de archivo; `versionName`
+  se sanitiza para el nombre del APK y el header de descarga.
+- **APK hasta 300MB** con error en JSON (antes: HTML 500 ilegible al pasarse).
+- **Resumen semanal**: `weekStart` único + upsert (el scheduler y el botón manual
+  ya no pueden duplicar la semana); mensajes de error distinguen "falta la key"
+  de "falló la IA", y una regeneración fallida ya no reporta éxito falso.
+- **Dashboard ligero**: los mapas NDVI se sirven por `/api/parcel-ndvi-map/:id`
+  (imagen cacheable) en vez de base64 inline — el payload pasó de varios MB a ~1KB.
+- **App**: las fotos y el formulario sobreviven a que la cámara mate el proceso
+  (`rememberSaveable`); las actividades ya no se atascan por colaboradores
+  rechazados; el botón Sync reintenta lo que había fallado 8 veces; las
+  actividades borradas en la web se eliminan del teléfono (ya no resucitan) y los
+  colaboradores dados de baja desaparecen del selector.

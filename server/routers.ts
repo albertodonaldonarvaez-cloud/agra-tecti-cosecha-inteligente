@@ -8,7 +8,7 @@ import * as db from "./db";
 import * as dbExt from "./db_extended";
 import * as webodm from "./webodmService";
 import { getDb } from "./db";
-import { users, boxes, harvesters, parcels, parcelDetails, parcelAiAnalysis, crops, cropVarieties, productionCycles, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos, telegramLinkCodes, collaborators, collaboratorLinkCodes, fieldActivityAssignments, labelPrintHistory } from "../drizzle/schema";
+import { users, boxes, harvesters, parcels, parcelDetails, parcelAiAnalysis, crops, cropVarieties, productionCycles, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, fieldActivityWorkSessions, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos, telegramLinkCodes, collaborators, collaboratorLinkCodes, fieldActivityAssignments, labelPrintHistory, weeklySummaries, appReleases } from "../drizzle/schema";
 import { eq, desc, asc, and, gte, lte, inArray, isNull, sql } from "drizzle-orm";
 
 // Fecha local de México "YYYY-MM-DD" (el negocio opera en America/Mexico_City)
@@ -21,6 +21,21 @@ function addDaysStr(dateStr: string, days: number): string {
   const d = new Date(dateStr + "T12:00:00");
   d.setDate(d.getDate() + days);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Suma los minutos trabajados de una lista de jornadas (día + HH:MM inicio/fin)
+function sumSessionMinutes(sessions: { startTime?: string | null; endTime?: string | null }[]): number {
+  let total = 0;
+  for (const ws of sessions) {
+    if (!ws.startTime || !ws.endTime) continue;
+    const [sh, sm] = ws.startTime.split(":").map(Number);
+    const [eh, em] = ws.endTime.split(":").map(Number);
+    if ([sh, sm, eh, em].some((n) => Number.isNaN(n))) continue;
+    let dur = (eh * 60 + em) - (sh * 60 + sm);
+    if (dur < 0) dur += 24 * 60;
+    total += dur;
+  }
+  return total;
 }
 
 export const appRouter = router({
@@ -2365,6 +2380,86 @@ IMPORTANTE:
       }),
   }),
 
+  // ===== RESUMEN SEMANAL CON IA =====
+  // Panorama general de la semana pasada: actividades + clima + satelital + etapa del ciclo
+  weeklySummary: router({
+    // Último resumen generado (para el Dashboard)
+    latest: protectedProcedure.query(async () => {
+      const drizzle = await getDb();
+      if (!drizzle) throw new Error("Base de datos no disponible");
+      const [row] = await drizzle.select().from(weeklySummaries)
+        .orderBy(desc(weeklySummaries.weekStart), desc(weeklySummaries.id))
+        .limit(1);
+      return row ?? null;
+    }),
+
+    // Historial (para revisar semanas anteriores)
+    list: protectedProcedure
+      .input(z.object({ limit: z.number().min(1).max(26).default(8) }).optional())
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new Error("Base de datos no disponible");
+        return drizzle.select().from(weeklySummaries)
+          .orderBy(desc(weeklySummaries.weekStart), desc(weeklySummaries.id))
+          .limit(input?.limit ?? 8);
+      }),
+
+    // Generar/regenerar manualmente (admin)
+    generate: adminProcedure
+      .input(z.object({ force: z.boolean().default(false) }).optional())
+      .mutation(async ({ input }) => {
+        // Distinguir "falta la key" de "falló la IA/red" para no confundir al admin
+        let hasKey = false;
+        try {
+          const { getGlobalSetting } = await import("./globalSettings");
+          hasKey = !!(await getGlobalSetting("deepseekApiKey"));
+        } catch { /* sin key */ }
+        if (!hasKey) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Falta la API key de DeepSeek. Configúrala en Ajustes → IA.",
+          });
+        }
+
+        const { generateWeeklySummary } = await import("./weeklySummaryService");
+        const result = await generateWeeklySummary({ force: input?.force ?? false });
+        if (!result) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "No se pudo generar el resumen (falla temporal de la IA o de red). Intenta de nuevo en unos minutos.",
+          });
+        }
+        return result;
+      }),
+  }),
+
+  // ===== VERSIONES DE LA APP MÓVIL =====
+  appReleases: router({
+    list: adminProcedure.query(async () => {
+      const drizzle = await getDb();
+      if (!drizzle) throw new Error("Base de datos no disponible");
+      return drizzle.select().from(appReleases)
+        .orderBy(desc(appReleases.versionCode), desc(appReleases.id))
+        .limit(20);
+    }),
+
+    delete: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new Error("Base de datos no disponible");
+        const [row] = await drizzle.select().from(appReleases).where(eq(appReleases.id, input.id)).limit(1);
+        if (row) {
+          try {
+            const fs = await import("fs");
+            if (fs.existsSync(row.filePath)) fs.unlinkSync(row.filePath);
+          } catch (e) { console.error("[AppRelease] No se pudo borrar el archivo:", e); }
+          await drizzle.delete(appReleases).where(eq(appReleases.id, input.id));
+        }
+        return { success: true };
+      }),
+  }),
+
   // Sincronización semanal de vuelos ODM
   odmSync: router({
     status: protectedProcedure.query(async () => {
@@ -2403,14 +2498,15 @@ IMPORTANTE:
         }
         const activities = await query;
 
-        // Enriquecer con parcelas, productos, herramientas, fotos y asignaciones
+        // Enriquecer con parcelas, productos, herramientas, fotos, asignaciones y jornadas
         const enriched = await Promise.all(activities.map(async (act) => {
-          const [actParcels, actProducts, actTools, actPhotos, actAssignments] = await Promise.all([
+          const [actParcels, actProducts, actTools, actPhotos, actAssignments, actSessions] = await Promise.all([
             drizzle.select().from(fieldActivityParcels).where(eq(fieldActivityParcels.activityId, act.id)),
             drizzle.select().from(fieldActivityProducts).where(eq(fieldActivityProducts.activityId, act.id)),
             drizzle.select().from(fieldActivityTools).where(eq(fieldActivityTools.activityId, act.id)),
             drizzle.select().from(fieldActivityPhotos).where(eq(fieldActivityPhotos.activityId, act.id)),
             drizzle.select().from(fieldActivityAssignments).where(eq(fieldActivityAssignments.activityId, act.id)),
+            drizzle.select().from(fieldActivityWorkSessions).where(eq(fieldActivityWorkSessions.activityId, act.id)).orderBy(asc(fieldActivityWorkSessions.workDate)),
           ]);
 
           // Obtener nombres de parcelas
@@ -2439,6 +2535,7 @@ IMPORTANTE:
             tools: actTools,
             photos: actPhotos,
             assignments: assignedCollaborators,
+            workSessions: actSessions,
           };
         }));
 
@@ -2504,9 +2601,18 @@ IMPORTANTE:
           notes: z.string().optional(),
         })).optional(),
         collaboratorIds: z.array(z.number()).optional(),
+        // Jornadas de trabajo: un registro por día con sus horas
+        // (actividades de varios días)
+        workSessions: z.array(z.object({
+          workDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+          startTime: z.string().optional(),
+          endTime: z.string().optional(),
+          notes: z.string().max(512).optional(),
+        })).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const drizzle = await getDb();
+        if (!drizzle) throw new Error("Base de datos no disponible");
         const userId = (ctx as any).user?.id || 0;
 
         // Calcular duración si no se proporcionó
@@ -2516,6 +2622,10 @@ IMPORTANTE:
           const [eh, em] = input.endTime.split(":").map(Number);
           duration = (eh * 60 + em) - (sh * 60 + sm);
           if (duration < 0) duration += 24 * 60;
+        }
+        // Con jornadas de varios días, la duración total es la suma de las jornadas
+        if (input.workSessions && input.workSessions.length > 0) {
+          duration = sumSessionMinutes(input.workSessions) || duration;
         }
 
         const [result] = await drizzle.insert(fieldActivities).values({
@@ -2566,6 +2676,19 @@ IMPORTANTE:
               toolName: t.toolName,
               toolType: (t.toolType as any) || "otro",
               notes: t.notes || null,
+            }))
+          );
+        }
+
+        // Insertar jornadas de trabajo
+        if (input.workSessions && input.workSessions.length > 0) {
+          await drizzle.insert(fieldActivityWorkSessions).values(
+            input.workSessions.map(ws => ({
+              activityId,
+              workDate: ws.workDate,
+              startTime: ws.startTime || null,
+              endTime: ws.endTime || null,
+              notes: ws.notes || null,
             }))
           );
         }
@@ -2623,9 +2746,16 @@ IMPORTANTE:
           notes: z.string().optional(),
         })).optional(),
         collaboratorIds: z.array(z.number()).optional(),
+        workSessions: z.array(z.object({
+          workDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+          startTime: z.string().optional(),
+          endTime: z.string().optional(),
+          notes: z.string().max(512).optional(),
+        })).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const drizzle = await getDb();
+        if (!drizzle) throw new Error("Base de datos no disponible");
         const updateData: any = {};
         if (input.activityType) updateData.activityType = input.activityType;
         if (input.activitySubtype !== undefined) updateData.activitySubtype = input.activitySubtype || null;
@@ -2647,8 +2777,27 @@ IMPORTANTE:
           if (dur < 0) dur += 24 * 60;
           updateData.durationMinutes = dur;
         }
+        if (input.workSessions && input.workSessions.length > 0) {
+          updateData.durationMinutes = sumSessionMinutes(input.workSessions) || updateData.durationMinutes;
+        }
 
         await drizzle.update(fieldActivities).set(updateData).where(eq(fieldActivities.id, input.id));
+
+        // Reemplazar jornadas de trabajo
+        if (input.workSessions !== undefined) {
+          await drizzle.delete(fieldActivityWorkSessions).where(eq(fieldActivityWorkSessions.activityId, input.id));
+          if (input.workSessions.length > 0) {
+            await drizzle.insert(fieldActivityWorkSessions).values(
+              input.workSessions.map(ws => ({
+                activityId: input.id,
+                workDate: ws.workDate,
+                startTime: ws.startTime || null,
+                endTime: ws.endTime || null,
+                notes: ws.notes || null,
+              }))
+            );
+          }
+        }
 
         // Reemplazar parcelas
         if (input.parcelIds !== undefined) {
@@ -2735,6 +2884,7 @@ IMPORTANTE:
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         const drizzle = await getDb();
+        if (!drizzle) throw new Error("Base de datos no disponible");
         // Eliminar relaciones primero
         await Promise.all([
           drizzle.delete(fieldActivityParcels).where(eq(fieldActivityParcels.activityId, input.id)),
@@ -2742,6 +2892,7 @@ IMPORTANTE:
           drizzle.delete(fieldActivityTools).where(eq(fieldActivityTools.activityId, input.id)),
           drizzle.delete(fieldActivityPhotos).where(eq(fieldActivityPhotos.activityId, input.id)),
           drizzle.delete(fieldActivityAssignments).where(eq(fieldActivityAssignments.activityId, input.id)),
+          drizzle.delete(fieldActivityWorkSessions).where(eq(fieldActivityWorkSessions.activityId, input.id)),
         ]);
         await drizzle.delete(fieldActivities).where(eq(fieldActivities.id, input.id));
         return { success: true };
@@ -2872,6 +3023,112 @@ IMPORTANTE:
           recent: recent.map(attach),
           counts,
         };
+      }),
+
+    // Parcelas con actividad reciente o planificada, con su mapa satelital
+    // cacheado (NDVI) y resumen de lo que se está haciendo — para el Dashboard
+    parcelsWithActivity: protectedProcedure
+      .input(z.object({
+        recentDays: z.number().min(1).max(60).default(14),
+        maxParcels: z.number().min(1).max(12).default(6),
+      }).optional())
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new Error("Base de datos no disponible");
+        const recentDays = input?.recentDays ?? 14;
+        const maxParcels = input?.maxParcels ?? 6;
+        const since = addDaysStr(todayMx(), -recentDays);
+
+        // Actividades relevantes: recientes o aún pendientes
+        const acts = await drizzle.select().from(fieldActivities)
+          .where(sql`(${fieldActivities.activityDate} >= ${since} OR ${fieldActivities.status} IN ('planificada', 'en_progreso'))`)
+          .orderBy(desc(fieldActivities.activityDate), desc(fieldActivities.id))
+          .limit(100);
+        if (acts.length === 0) return [];
+
+        const actIds = acts.map(a => a.id);
+        const links = await drizzle
+          .select({ activityId: fieldActivityParcels.activityId, parcelId: fieldActivityParcels.parcelId })
+          .from(fieldActivityParcels)
+          .where(inArray(fieldActivityParcels.activityId, actIds));
+        if (links.length === 0) return [];
+
+        // Agrupar actividades por parcela (ordenadas: más recientes primero)
+        const actsByParcel: Record<number, typeof acts> = {};
+        const actById = new Map(acts.map(a => [a.id, a]));
+        for (const l of links) {
+          const act = actById.get(l.activityId);
+          if (!act) continue;
+          if (!actsByParcel[l.parcelId]) actsByParcel[l.parcelId] = [];
+          actsByParcel[l.parcelId].push(act);
+        }
+        const dateKey = (a: typeof acts[number]) =>
+          typeof a.activityDate === "string" ? a.activityDate : new Date(a.activityDate as any).toISOString().slice(0, 10);
+        for (const pid of Object.keys(actsByParcel)) {
+          actsByParcel[Number(pid)].sort((a, b) =>
+            dateKey(b).localeCompare(dateKey(a)) || b.id - a.id
+          );
+        }
+
+        // Ordenar parcelas por actividad más reciente y limitar
+        const parcelIds = Object.keys(actsByParcel).map(Number)
+          .sort((a, b) => {
+            const lastA = actsByParcel[a][0]?.id ?? 0;
+            const lastB = actsByParcel[b][0]?.id ?? 0;
+            return lastB - lastA;
+          })
+          .slice(0, maxParcels);
+
+        const parcelRows = await drizzle
+          .select({ id: parcels.id, code: parcels.code, name: parcels.name })
+          .from(parcels)
+          .where(inArray(parcels.id, parcelIds));
+
+        const result = [];
+        for (const pid of parcelIds) {
+          const parcel = parcelRows.find(p => p.id === pid);
+          if (!parcel) continue;
+
+          // ¿Hay mapa NDVI cacheado? La imagen se sirve aparte por
+          // /api/parcel-ndvi-map/:parcelId (no se inyecta base64 en el payload)
+          let hasNdviMap = false;
+          let ndviMapDate: string | null = null;
+          try {
+            const rows: any = await drizzle.execute(
+              sql`SELECT mapDate FROM parcelSatelliteCache WHERE parcelId = ${pid} AND dataType = 'map' AND indexType = 'NDVI' ORDER BY fetchedAt DESC LIMIT 1`
+            );
+            const row = (rows as any)?.[0]?.[0] ?? (rows as any)?.rows?.[0];
+            if (row) {
+              hasNdviMap = true;
+              // mapDate puede ser 'latest' (sync semanal) — solo fechas reales
+              const rawDate = String(row.mapDate ?? "");
+              ndviMapDate = /^\d{4}-\d{2}-\d{2}/.test(rawDate) ? rawDate.slice(0, 10) : null;
+            }
+          } catch { /* sin cache */ }
+
+          const parcelActs = actsByParcel[pid];
+          result.push({
+            parcelId: pid,
+            code: parcel.code,
+            name: parcel.name,
+            hasNdviMap,
+            ndviMapDate,
+            pendingCount: parcelActs.filter(a => a.status === "planificada" || a.status === "en_progreso").length,
+            doneCount: parcelActs.filter(a => a.status === "completada").length,
+            activities: parcelActs.slice(0, 5).map(a => ({
+              id: a.id,
+              activityType: a.activityType,
+              activitySubtype: a.activitySubtype,
+              description: a.description,
+              activityDate: typeof a.activityDate === "string"
+                ? a.activityDate
+                : new Date(a.activityDate as any).toISOString().slice(0, 10),
+              status: a.status,
+              performedBy: a.performedBy,
+            })),
+          });
+        }
+        return result;
       }),
   }),
 
@@ -4011,8 +4268,17 @@ IMPORTANTE:
           description: z.string().min(1),
           performedBy: z.string().max(255).optional(),
           activityDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+          startTime: z.string().max(8).optional(),
+          endTime: z.string().max(8).optional(),
           status: z.enum(["planificada", "en_progreso", "completada", "cancelada"]).default("planificada"),
           parcelIds: z.array(z.number()).optional(),
+          collaboratorIds: z.array(z.number()).optional(),
+          // Jornadas trabajadas (multi-día con horas)
+          workSessions: z.array(z.object({
+            workDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+            startTime: z.string().max(8).optional(),
+            endTime: z.string().max(8).optional(),
+          })).optional(),
         })),
       }))
       .mutation(async ({ input, ctx }) => {
@@ -4053,6 +4319,8 @@ IMPORTANTE:
             }
             const isNew = !existingBefore;
 
+            const sessionMinutes = act.workSessions?.length ? sumSessionMinutes(act.workSessions) : 0;
+
             if (isNew) {
               // Actividad creada en el dispositivo: insert completo
               await drizzle.insert(fieldActivities).values({
@@ -4062,6 +4330,9 @@ IMPORTANTE:
                 description: act.description,
                 performedBy: act.performedBy || userName,
                 activityDate: act.activityDate as any,
+                startTime: act.startTime || null,
+                endTime: act.endTime || null,
+                durationMinutes: sessionMinutes || null,
                 status: act.status as any,
                 createdByUserId: userId,
               }).onDuplicateKeyUpdate({
@@ -4069,10 +4340,14 @@ IMPORTANTE:
                 set: { status: act.status as any },
               });
             } else {
-              // Actividad ya existente: la app solo puede cambiar el estado.
-              // No se pisan descripción/fechas/parcelas editadas en la web.
+              // Actividad ya existente: la app solo puede cambiar estado y horas
+              // trabajadas. No se pisan descripción/fechas/parcelas editadas en la web.
+              const upd: Record<string, unknown> = { status: act.status as any };
+              if (act.startTime !== undefined) upd.startTime = act.startTime || null;
+              if (act.endTime !== undefined) upd.endTime = act.endTime || null;
+              if (sessionMinutes > 0) upd.durationMinutes = sessionMinutes;
               await drizzle.update(fieldActivities)
-                .set({ status: act.status as any })
+                .set(upd)
                 .where(eq(fieldActivities.id, existingBefore.id));
             }
 
@@ -4087,6 +4362,31 @@ IMPORTANTE:
               await drizzle.delete(fieldActivityParcels).where(eq(fieldActivityParcels.activityId, rowId));
               for (const parcelId of act.parcelIds) {
                 await drizzle.insert(fieldActivityParcels).values({ activityId: rowId, parcelId });
+              }
+            }
+
+            // Colaboradores asignados solo al crear (en updates la web es la autoridad)
+            if (isNew && rowId && act.collaboratorIds && act.collaboratorIds.length > 0) {
+              for (const cid of act.collaboratorIds) {
+                await drizzle.insert(fieldActivityAssignments).values({
+                  activityId: rowId,
+                  collaboratorId: cid,
+                  status: (act.status === "completada" ? "completada" : "pendiente") as any,
+                  assignedByUserId: userId,
+                });
+              }
+            }
+
+            // Jornadas trabajadas: la app es la autoridad (vienen del campo)
+            if (rowId && act.workSessions !== undefined && act.workSessions.length > 0) {
+              await drizzle.delete(fieldActivityWorkSessions).where(eq(fieldActivityWorkSessions.activityId, rowId));
+              for (const ws of act.workSessions) {
+                await drizzle.insert(fieldActivityWorkSessions).values({
+                  activityId: rowId,
+                  workDate: ws.workDate,
+                  startTime: ws.startTime || null,
+                  endTime: ws.endTime || null,
+                });
               }
             }
 
@@ -4134,9 +4434,11 @@ IMPORTANTE:
           }
         }
 
-        // parcelIds de todas las actividades en una sola query
+        // parcelIds, jornadas y colaboradores de todas las actividades en 3 queries
         const ids = activities.map((a) => a.id);
         const parcelsByActivity: Record<number, number[]> = {};
+        const sessionsByActivity: Record<number, { workDate: string; startTime: string | null; endTime: string | null }[]> = {};
+        const collabsByActivity: Record<number, number[]> = {};
         if (ids.length > 0) {
           const links = await drizzle
             .select({ activityId: fieldActivityParcels.activityId, parcelId: fieldActivityParcels.parcelId })
@@ -4145,6 +4447,27 @@ IMPORTANTE:
           for (const l of links) {
             if (!parcelsByActivity[l.activityId]) parcelsByActivity[l.activityId] = [];
             parcelsByActivity[l.activityId].push(l.parcelId);
+          }
+          const sessions = await drizzle
+            .select()
+            .from(fieldActivityWorkSessions)
+            .where(inArray(fieldActivityWorkSessions.activityId, ids))
+            .orderBy(asc(fieldActivityWorkSessions.workDate));
+          for (const s of sessions) {
+            if (!sessionsByActivity[s.activityId]) sessionsByActivity[s.activityId] = [];
+            sessionsByActivity[s.activityId].push({
+              workDate: typeof s.workDate === "string" ? s.workDate : new Date(s.workDate as any).toISOString().split("T")[0],
+              startTime: s.startTime,
+              endTime: s.endTime,
+            });
+          }
+          const assigns = await drizzle
+            .select({ activityId: fieldActivityAssignments.activityId, collaboratorId: fieldActivityAssignments.collaboratorId })
+            .from(fieldActivityAssignments)
+            .where(inArray(fieldActivityAssignments.activityId, ids));
+          for (const a of assigns) {
+            if (!collabsByActivity[a.activityId]) collabsByActivity[a.activityId] = [];
+            collabsByActivity[a.activityId].push(a.collaboratorId);
           }
         }
 
@@ -4158,10 +4481,77 @@ IMPORTANTE:
           activityDate: typeof a.activityDate === "string"
             ? a.activityDate
             : new Date(a.activityDate as any).toISOString().split("T")[0],
+          startTime: a.startTime,
+          endTime: a.endTime,
           status: a.status,
           parcelIds: parcelsByActivity[a.id] ?? [],
+          collaboratorIds: collabsByActivity[a.id] ?? [],
+          workSessions: sessionsByActivity[a.id] ?? [],
           updatedAt: a.updatedAt,
         }));
+      }),
+
+    // Colaboradores de campo para la app (selector de "quién lo hizo")
+    getCollaborators: protectedProcedure.query(async () => {
+      const drizzle = await getDb();
+      if (!drizzle) throw new Error("Base de datos no disponible");
+      const rows = await drizzle
+        .select({ id: collaborators.id, name: collaborators.name, role: collaborators.role, isActive: collaborators.isActive })
+        .from(collaborators)
+        .where(eq(collaborators.isActive, true))
+        .orderBy(collaborators.name);
+      return rows;
+    }),
+
+    // Alta de colaboradores desde la app móvil (idempotente por clientUuid)
+    syncCollaborators: protectedProcedure
+      .input(z.object({
+        collaborators: z.array(z.object({
+          clientUuid: z.string().uuid(),
+          name: z.string().min(1).max(255),
+          phone: z.string().max(32).optional(),
+          role: z.string().max(128).optional(),
+        })),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new Error("Base de datos no disponible");
+        const userId = (ctx as any).user?.id || 0;
+        const results: { clientUuid: string; serverId?: number; status: "created" | "updated" | "error"; error?: string }[] = [];
+
+        for (const col of input.collaborators) {
+          try {
+            const [existing] = await drizzle.select({ id: collaborators.id })
+              .from(collaborators)
+              .where(eq(collaborators.clientUuid, col.clientUuid))
+              .limit(1);
+
+            if (!existing) {
+              await drizzle.insert(collaborators).values({
+                clientUuid: col.clientUuid,
+                name: col.name,
+                phone: col.phone || null,
+                role: col.role || null,
+                createdByUserId: userId,
+              }).onDuplicateKeyUpdate({ set: { name: col.name } });
+            } else {
+              await drizzle.update(collaborators)
+                .set({ name: col.name, phone: col.phone || null, role: col.role || null })
+                .where(eq(collaborators.id, existing.id));
+            }
+
+            const [row] = await drizzle.select({ id: collaborators.id })
+              .from(collaborators)
+              .where(eq(collaborators.clientUuid, col.clientUuid))
+              .limit(1);
+            results.push({ clientUuid: col.clientUuid, serverId: row?.id, status: existing ? "updated" : "created" });
+          } catch (error: any) {
+            console.error(`[OfflineSync] Error syncing colaborador ${col.clientUuid}:`, error.message);
+            results.push({ clientUuid: col.clientUuid, status: "error", error: error.message });
+          }
+        }
+
+        return { success: true, results, syncedCount: results.filter(r => r.status !== "error").length };
       }),
   }),
 

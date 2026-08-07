@@ -142,6 +142,22 @@ function HomeContent() {
     }
   );
 
+  // Resumen semanal generado con IA (se actualiza cada semana)
+  const utils = trpc.useUtils();
+  const { data: weeklySummary } = trpc.weeklySummary.latest.useQuery(undefined, {
+    enabled: !!user,
+    staleTime: 10 * 60 * 1000,
+  });
+  const generateSummaryMutation = trpc.weeklySummary.generate.useMutation({
+    onSuccess: () => utils.weeklySummary.latest.invalidate(),
+  });
+
+  // Parcelas con actividades recientes o planificadas (con mapa satelital cacheado)
+  const { data: activityParcels } = trpc.fieldNotebook.parcelsWithActivity.useQuery(undefined, {
+    enabled: !!user,
+    staleTime: 5 * 60 * 1000,
+  });
+
   // Mostrar modal de novedades una vez por version
   useEffect(() => {
     if (!user) return;
@@ -380,6 +396,15 @@ function HomeContent() {
           </GlassCard>
         )}
 
+        {/* Panorama semanal generado con IA */}
+        <WeeklySummaryCard
+          summary={weeklySummary}
+          isAdmin={user.role === "admin"}
+          onGenerate={(force) => generateSummaryMutation.mutate({ force })}
+          generating={generateSummaryMutation.isPending}
+          generateError={generateSummaryMutation.error?.message}
+        />
+
         {/* Invitación a configurar el primer ciclo (solo admin, no invasivo) */}
         {!cyclesLoading && !cyclesExist && user.role === "admin" && (
           <button
@@ -404,6 +429,13 @@ function HomeContent() {
               today={today}
               onGo={() => navigate("/field-notebook")}
             />
+          </div>
+        )}
+
+        {/* Parcelas con trabajo en curso (mapa satelital + resumen) */}
+        {!harvestActive && (activityParcels?.length ?? 0) > 0 && (
+          <div className="mb-4 md:mb-6">
+            <ParcelsWithActivitySection parcels={activityParcels!} onGoAnalysis={() => navigate("/parcel-analysis")} />
           </div>
         )}
 
@@ -876,6 +908,13 @@ function HomeContent() {
         </div>
       )}
 
+      {/* Parcelas con trabajo en curso (cuando la cosecha está al frente) */}
+      {harvestActive && (activityParcels?.length ?? 0) > 0 && (
+        <div className="container px-3 md:px-6 mt-6 md:mt-8">
+          <ParcelsWithActivitySection parcels={activityParcels!} onGoAnalysis={() => navigate("/parcel-analysis")} />
+        </div>
+      )}
+
       {/* Modal de detalle de imagen */}
       <Dialog open={showImageModal} onOpenChange={setShowImageModal}>
         <DialogContent className="max-w-[95vw] sm:max-w-4xl lg:max-w-5xl max-h-[90vh] overflow-hidden p-0">
@@ -1120,6 +1159,193 @@ function ActivityRow({ activity, today, done }: { activity: NotebookActivity; to
           {activity.parcelNames.length > 0 && <> · {activity.parcelNames.join(", ")}</>}
           {activity.performedBy && <> · {activity.performedBy}</>}
         </p>
+      </div>
+    </div>
+  );
+}
+
+// ===== PANORAMA SEMANAL (IA) =====
+// Resumen de la SEMANA PASADA generado automáticamente cada semana con IA:
+// actividades + clima + satelital + etapa del ciclo.
+interface WeeklySummaryCardProps {
+  summary?: {
+    weekStart: string;
+    weekEnd: string;
+    content: string;
+    cyclePhase: string | null;
+    createdAt: string | Date;
+  } | null;
+  isAdmin: boolean;
+  onGenerate: (force: boolean) => void;
+  generating: boolean;
+  generateError?: string;
+}
+
+function WeeklySummaryCard({ summary, isAdmin, onGenerate, generating, generateError }: WeeklySummaryCardProps) {
+  const [expanded, setExpanded] = useState(false);
+  if (!summary && !isAdmin) return null;
+
+  const weekLabel = summary
+    ? `${formatShortDate(summary.weekStart)} – ${formatShortDate(summary.weekEnd)}`
+    : null;
+
+  return (
+    <GlassCard className="mb-4 md:mb-6 p-4 md:p-5" hover={false}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-400 to-purple-600 shadow">
+            <Brain className="h-5 w-5 text-white" />
+          </div>
+          <div>
+            <h2 className="text-base md:text-lg font-semibold text-green-900 flex items-center gap-2">
+              Panorama Semanal
+              <span className="rounded-full bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-bold text-indigo-600">IA</span>
+            </h2>
+            <p className="text-xs text-green-600">
+              {weekLabel ? (
+                <>Resumen de la <strong>semana pasada</strong> ({weekLabel}) · se actualiza cada semana</>
+              ) : (
+                "Se genera automáticamente cada semana con actividades, clima y datos satelitales"
+              )}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {summary?.cyclePhase && (
+            <span className="rounded-full bg-green-50 border border-green-200 px-3 py-1 text-xs font-medium text-green-700">
+              {summary.cyclePhase}
+            </span>
+          )}
+          {isAdmin && (
+            <button
+              onClick={() => onGenerate(!!summary)}
+              disabled={generating}
+              className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-600 transition hover:bg-indigo-100 disabled:opacity-50"
+              title={summary ? "Regenerar el resumen de la semana pasada" : "Generar el primer resumen"}
+            >
+              {generating ? "Generando..." : summary ? "Regenerar" : "Generar ahora"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {generateError && (
+        <p className="mt-2 rounded-xl bg-red-50 border border-red-200 p-2 text-xs text-red-600">{generateError}</p>
+      )}
+
+      {summary ? (
+        <>
+          <div className={`mt-3 whitespace-pre-line text-sm leading-relaxed text-gray-700 ${expanded ? "" : "max-h-40 overflow-hidden"}`}>
+            {summary.content}
+          </div>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="mt-1 flex items-center gap-1 text-xs font-medium text-green-700 hover:text-green-900"
+          >
+            {expanded ? <>Ver menos <ChevronUp className="h-3.5 w-3.5" /></> : <>Ver completo <ChevronDown className="h-3.5 w-3.5" /></>}
+          </button>
+        </>
+      ) : (
+        <p className="mt-3 text-sm text-gray-500">
+          Aún no hay resumen semanal. {isAdmin ? "Genera el primero con el botón (requiere la API key de DeepSeek en Ajustes)." : ""}
+        </p>
+      )}
+    </GlassCard>
+  );
+}
+
+// ===== PARCELAS CON TRABAJO EN CURSO =====
+// Parcelas con actividades recientes o planificadas: mapa satelital NDVI
+// cacheado + resumen de lo que se está haciendo en cada una.
+interface ActivityParcel {
+  parcelId: number;
+  code: string;
+  name: string;
+  hasNdviMap: boolean;
+  ndviMapDate: string | null;
+  pendingCount: number;
+  doneCount: number;
+  activities: {
+    id: number;
+    activityType: string;
+    activitySubtype: string | null;
+    description: string | null;
+    activityDate: string;
+    status: string;
+    performedBy: string | null;
+  }[];
+}
+
+function ParcelsWithActivitySection({ parcels, onGoAnalysis }: { parcels: ActivityParcel[]; onGoAnalysis: () => void }) {
+  return (
+    <div>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="flex items-center gap-2 text-lg md:text-2xl font-semibold text-green-900">
+          <Satellite className="h-5 w-5 md:h-6 md:w-6 text-green-600" />
+          Parcelas con trabajo en curso
+        </h2>
+        <button onClick={onGoAnalysis} className="flex items-center gap-1 text-sm font-medium text-green-700 hover:text-green-900">
+          Análisis completo <ArrowRight className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        {parcels.map((p) => (
+          <GlassCard key={p.parcelId} className="overflow-hidden p-0" hover={false}>
+            {/* Mapa satelital NDVI (cacheado, servido como imagen real) */}
+            <div className="relative h-36 w-full bg-gradient-to-br from-green-100 to-emerald-200">
+              {p.hasNdviMap ? (
+                <img src={`/api/parcel-ndvi-map/${p.parcelId}`} alt={`NDVI ${p.name}`} loading="lazy" className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full flex-col items-center justify-center text-green-500">
+                  <MapPin className="h-8 w-8" />
+                  <span className="mt-1 text-xs">Sin imagen satelital reciente</span>
+                </div>
+              )}
+              <div className="absolute left-2 top-2 rounded-full bg-white/85 px-2.5 py-1 text-xs font-bold text-green-900 shadow">
+                {p.name}
+              </div>
+              {p.ndviMapDate && (
+                <div className="absolute bottom-2 right-2 rounded-full bg-black/50 px-2 py-0.5 text-[10px] font-medium text-white">
+                  NDVI · {formatShortDate(p.ndviMapDate)}
+                </div>
+              )}
+            </div>
+            {/* Resumen de actividades */}
+            <div className="p-3">
+              <div className="mb-2 flex items-center gap-2 text-xs">
+                {p.pendingCount > 0 && (
+                  <span className="rounded-full bg-blue-50 border border-blue-200 px-2 py-0.5 font-bold text-blue-700">
+                    {p.pendingCount} por realizar
+                  </span>
+                )}
+                {p.doneCount > 0 && (
+                  <span className="rounded-full bg-green-50 border border-green-200 px-2 py-0.5 font-bold text-green-700">
+                    {p.doneCount} realizada{p.doneCount === 1 ? "" : "s"}
+                  </span>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                {p.activities.slice(0, 3).map((a) => {
+                  const typeInfo = getActivityTypeInfo(a.activityType);
+                  const statusInfo = getStatusInfo(a.status);
+                  const TypeIcon = typeInfo.icon;
+                  return (
+                    <div key={a.id} className="flex items-center gap-2 text-xs">
+                      <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ${typeInfo.color}`}>
+                        <TypeIcon style={{ width: 13, height: 13 }} />
+                      </span>
+                      <span className="font-medium text-green-900">{typeInfo.label}</span>
+                      <span className="truncate text-gray-500">{a.description}</span>
+                      <span className={`ml-auto shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${statusInfo.color}`}>
+                        {statusInfo.label}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </GlassCard>
+        ))}
       </div>
     </div>
   );

@@ -507,6 +507,9 @@ export default function Settings() {
           {/* IA - Análisis Inteligente */}
           <AIApiSection />
 
+          {/* App Móvil - Distribución del APK */}
+          <AppReleaseSection />
+
           {/* Carga Manual */}
           <GlassCard className="p-4 md:p-6">
             <div className="mb-4 flex items-center gap-2">
@@ -1914,6 +1917,143 @@ function AIApiSection() {
           {saveConfig.isPending ? "Encriptando y guardando..." : "Guardar API Key"}
         </Button>
       </div>
+    </GlassCard>
+  );
+}
+
+// Componente de distribución del APK de la app móvil
+// Sube versiones nuevas; la app las detecta al arrancar y ofrece actualizarse
+function AppReleaseSection() {
+  const [apkFile, setApkFile] = useState<File | null>(null);
+  const [versionCode, setVersionCode] = useState("");
+  const [versionName, setVersionName] = useState("");
+  const [releaseNotes, setReleaseNotes] = useState("");
+  const [uploading, setUploading] = useState(false);
+
+  const utils = trpc.useUtils();
+  const { data: releases } = trpc.appReleases.list.useQuery(undefined, { retry: false });
+  const deleteMutation = trpc.appReleases.delete.useMutation({
+    onSuccess: () => { toast.success("Versión eliminada"); utils.appReleases.list.invalidate(); },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const handleUpload = async () => {
+    if (!apkFile) { toast.error("Selecciona el archivo APK"); return; }
+    const code = parseInt(versionCode, 10);
+    if (!code || !versionName.trim()) { toast.error("Indica versionCode (número) y versionName (ej. 1.2.0)"); return; }
+
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("apk", apkFile);
+      formData.append("versionCode", String(code));
+      formData.append("versionName", versionName.trim());
+      if (releaseNotes.trim()) formData.append("notes", releaseNotes.trim());
+
+      const res = await fetch("/api/admin/app-release", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+
+      toast.success(`APK v${versionName} publicado — los teléfonos lo detectarán al abrir la app`);
+      setApkFile(null);
+      setVersionCode("");
+      setVersionName("");
+      setReleaseNotes("");
+      utils.appReleases.list.invalidate();
+    } catch (e: any) {
+      toast.error("Error al subir: " + e.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <GlassCard className="p-4 md:p-6 border-2 border-emerald-200 bg-emerald-50/20">
+      <div className="mb-4 flex items-center gap-2">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-100">
+          <span className="text-lg">📱</span>
+        </div>
+        <div>
+          <h2 className="text-lg md:text-2xl font-semibold text-emerald-900">App Móvil (APK)</h2>
+          <p className="text-xs text-emerald-600">
+            Sube la versión nueva; la app avisa a los usuarios al abrirla (con internet) y les ofrece descargarla
+          </p>
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <div>
+          <Label>Archivo APK</Label>
+          <Input
+            type="file"
+            accept=".apk"
+            onChange={(e) => {
+              const f = e.target.files?.[0] || null;
+              setApkFile(f);
+              // Sugerir versionName desde el nombre del archivo si trae "v1.2.0"
+              const m = f?.name.match(/v?(\d+\.\d+\.\d+)/);
+              if (m && !versionName) setVersionName(m[1]);
+            }}
+          />
+          {apkFile && (
+            <p className="mt-1 text-xs text-emerald-600">
+              {apkFile.name} · {(apkFile.size / (1024 * 1024)).toFixed(1)} MB
+            </p>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label>versionCode</Label>
+            <Input type="number" placeholder="3" value={versionCode} onChange={(e) => setVersionCode(e.target.value)} />
+            <p className="mt-0.5 text-[10px] text-gray-400">Debe ser MAYOR al de la versión instalada</p>
+          </div>
+          <div>
+            <Label>versionName</Label>
+            <Input placeholder="1.2.0" value={versionName} onChange={(e) => setVersionName(e.target.value)} />
+          </div>
+        </div>
+        <div className="md:col-span-2">
+          <Label>Notas de la versión (opcional)</Label>
+          <Textarea rows={2} placeholder="Qué trae de nuevo esta versión..." value={releaseNotes} onChange={(e) => setReleaseNotes(e.target.value)} />
+        </div>
+      </div>
+
+      <Button
+        onClick={handleUpload}
+        disabled={uploading || !apkFile}
+        className="mt-3 bg-emerald-600 hover:bg-emerald-700 text-white"
+      >
+        {uploading ? (
+          <><Loader2 className="mr-1 h-4 w-4 animate-spin" /> Subiendo...</>
+        ) : (
+          <><Upload className="mr-1 h-4 w-4" /> Publicar versión</>
+        )}
+      </Button>
+
+      {releases && releases.length > 0 && (
+        <div className="mt-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">Versiones publicadas</p>
+          <div className="space-y-1.5">
+            {releases.map((r: any) => (
+              <div key={r.id} className="flex items-center gap-3 rounded-xl bg-white/60 border border-emerald-100 px-3 py-2 text-sm">
+                <span className="font-bold text-emerald-900">v{r.versionName}</span>
+                <span className="text-xs text-gray-500">code {r.versionCode}</span>
+                {r.fileSize && <span className="text-xs text-gray-400">{(r.fileSize / (1024 * 1024)).toFixed(1)} MB</span>}
+                <span className="text-xs text-gray-400">{new Date(r.createdAt).toLocaleDateString("es-MX")}</span>
+                <a href="/api/mobile/app-download" className="ml-auto text-xs font-medium text-emerald-700 underline hover:text-emerald-900">Descargar</a>
+                <button onClick={() => { if (confirm(`¿Eliminar v${r.versionName}?`)) deleteMutation.mutate({ id: r.id }); }}
+                  className="text-red-400 hover:text-red-600 text-xs font-medium">
+                  Eliminar
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </GlassCard>
   );
 }

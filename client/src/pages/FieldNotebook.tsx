@@ -67,6 +67,22 @@ interface ToolForm {
 const emptyProduct: ProductForm = { productName: "", productType: "otro", quantity: "", unit: "kg", dosisPerHectare: "", applicationMethod: "", notes: "" };
 const emptyTool: ToolForm = { toolName: "", toolType: "otro", notes: "" };
 
+// Jornada de trabajo: un día trabajado con sus horas (actividades multi-día)
+interface SessionForm {
+  workDate: string;
+  startTime: string;
+  endTime: string;
+}
+
+function sessionHours(s: SessionForm): number | null {
+  if (!s.startTime || !s.endTime) return null;
+  const [sh, sm] = s.startTime.split(":").map(Number);
+  const [eh, em] = s.endTime.split(":").map(Number);
+  let mins = (eh * 60 + em) - (sh * 60 + sm);
+  if (mins < 0) mins += 24 * 60;
+  return Math.round((mins / 60) * 10) / 10;
+}
+
 // ===== COMPONENTE PRINCIPAL =====
 
 export default function FieldNotebook() {
@@ -110,6 +126,7 @@ function FieldNotebookContent() {
   });
   const [formProducts, setFormProducts] = useState<ProductForm[]>([]);
   const [formTools, setFormTools] = useState<ToolForm[]>([]);
+  const [formSessions, setFormSessions] = useState<SessionForm[]>([]);
   const [weatherLoading, setWeatherLoading] = useState(false);
 
   // Queries
@@ -189,6 +206,7 @@ function FieldNotebookContent() {
     });
     setFormProducts([]);
     setFormTools([]);
+    setFormSessions([]);
   }, []);
 
   const handleEdit = useCallback((activity: any) => {
@@ -213,6 +231,13 @@ function FieldNotebookContent() {
         warehouseToolId: undefined, toolName: t.toolName, toolType: t.toolType || "otro", notes: t.notes || "",
       })) || []
     );
+    setFormSessions(
+      activity.workSessions?.map((ws: any) => ({
+        workDate: typeof ws.workDate === "string" ? ws.workDate.slice(0, 10) : new Date(ws.workDate).toISOString().slice(0, 10),
+        startTime: ws.startTime || "",
+        endTime: ws.endTime || "",
+      })) || []
+    );
     setEditingId(activity.id);
     setShowForm(true);
   }, []);
@@ -225,6 +250,7 @@ function FieldNotebookContent() {
       ...formData,
       products: formProducts.filter(p => p.productName.trim()),
       tools: formTools.filter(t => t.toolName.trim()),
+      workSessions: formSessions.filter(s => s.workDate),
     };
 
     if (editingId) {
@@ -514,6 +540,65 @@ function FieldNotebookContent() {
                 </div>
               </div>
 
+              {/* Jornadas de trabajo (actividades de varios días) */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    Jornadas de trabajo {formSessions.length > 0 && `(${formSessions.length} día${formSessions.length > 1 ? "s" : ""})`}
+                  </label>
+                  <button type="button"
+                    onClick={() => {
+                      const last = formSessions[formSessions.length - 1];
+                      const base = last?.workDate || formData.activityDate;
+                      const next = new Date(base + "T12:00:00");
+                      next.setDate(next.getDate() + (formSessions.length > 0 ? 1 : 0));
+                      const nextStr = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}`;
+                      setFormSessions(prev => [...prev, {
+                        workDate: nextStr,
+                        startTime: last?.startTime || formData.startTime || "",
+                        endTime: last?.endTime || formData.endTime || "",
+                      }]);
+                    }}
+                    className="text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-full px-3 py-1 hover:bg-green-100 transition">
+                    + Agregar día
+                  </button>
+                </div>
+                {formSessions.length === 0 ? (
+                  <p className="text-xs text-gray-400">
+                    Si la actividad tomó (o tomará) más de un día, agrega cada día con sus horas.
+                    Con un solo día basta la hora inicio/fin de arriba.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {formSessions.map((s, idx) => (
+                      <div key={idx} className="flex flex-wrap items-center gap-2 bg-white/60 border border-green-100 rounded-xl p-2">
+                        <span className="text-xs font-bold text-green-700 w-12">Día {idx + 1}</span>
+                        <input type="date" value={s.workDate}
+                          onChange={(e) => setFormSessions(prev => prev.map((x, i) => i === idx ? { ...x, workDate: e.target.value } : x))}
+                          className="px-2 py-1.5 text-sm border border-gray-200 rounded-lg bg-white/70 focus:ring-2 focus:ring-green-300 outline-none" />
+                        <input type="time" value={s.startTime}
+                          onChange={(e) => setFormSessions(prev => prev.map((x, i) => i === idx ? { ...x, startTime: e.target.value } : x))}
+                          className="px-2 py-1.5 text-sm border border-gray-200 rounded-lg bg-white/70 focus:ring-2 focus:ring-green-300 outline-none" />
+                        <span className="text-xs text-gray-400">a</span>
+                        <input type="time" value={s.endTime}
+                          onChange={(e) => setFormSessions(prev => prev.map((x, i) => i === idx ? { ...x, endTime: e.target.value } : x))}
+                          className="px-2 py-1.5 text-sm border border-gray-200 rounded-lg bg-white/70 focus:ring-2 focus:ring-green-300 outline-none" />
+                        {sessionHours(s) !== null && (
+                          <span className="text-xs font-medium text-green-600">{sessionHours(s)}h</span>
+                        )}
+                        <button type="button" onClick={() => setFormSessions(prev => prev.filter((_, i) => i !== idx))}
+                          className="ml-auto text-red-400 hover:text-red-600 p-1">
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                    <p className="text-xs text-green-600 font-medium">
+                      Total: {formSessions.reduce((sum, s) => sum + (sessionHours(s) || 0), 0).toFixed(1)} horas trabajadas
+                    </p>
+                  </div>
+                )}
+              </div>
+
               {/* Condiciones climáticas - Auto-llenado */}
               <div>
                 <div className="flex items-center gap-2 mb-2">
@@ -797,7 +882,7 @@ function FieldNotebookContent() {
                         <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 flex-wrap">
                           <span className="flex items-center gap-1">
                             <Calendar className="w-3 h-3" />
-                            {(() => { const d = activity.activityDate instanceof Date ? activity.activityDate : new Date(String(activity.activityDate) + "T12:00:00"); return d.toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" }); })()}
+                            {(() => { const raw = activity.activityDate instanceof Date ? activity.activityDate.toISOString().slice(0, 10) : String(activity.activityDate).slice(0, 10); return new Date(raw + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" }); })()}
                           </span>
                           {activity.assignments?.length > 0 && (
                             <span className="flex items-center gap-1"><UsersRound className="w-3 h-3" />{activity.assignments.map((a: any) => a.name).join(", ")}</span>
@@ -867,6 +952,42 @@ function FieldNotebookContent() {
                           </div>
                         )}
                       </div>
+
+                      {/* Jornadas de trabajo (multi-día) */}
+                      {activity.workSessions?.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5" /> Jornadas de trabajo ({activity.workSessions.length} día{activity.workSessions.length > 1 ? "s" : ""})
+                          </p>
+                          <div className="space-y-1.5">
+                            {activity.workSessions.map((ws: any, i: number) => {
+                              const dateStr = typeof ws.workDate === "string" ? ws.workDate.slice(0, 10) : new Date(ws.workDate).toISOString().slice(0, 10);
+                              const hours = ws.startTime && ws.endTime ? sessionHours({ workDate: dateStr, startTime: ws.startTime, endTime: ws.endTime }) : null;
+                              return (
+                                <div key={i} className="bg-white/50 rounded-lg px-3 py-2 flex items-center gap-3 text-sm">
+                                  <span className="font-semibold text-gray-700">
+                                    {new Date(dateStr + "T12:00:00").toLocaleDateString("es-MX", { weekday: "short", day: "numeric", month: "short" })}
+                                  </span>
+                                  {ws.startTime && ws.endTime ? (
+                                    <span className="text-gray-500">{ws.startTime} – {ws.endTime}</span>
+                                  ) : (
+                                    <span className="text-gray-400">sin horario</span>
+                                  )}
+                                  {hours !== null && (
+                                    <span className="ml-auto text-xs font-medium bg-green-50 text-green-600 px-2 py-0.5 rounded-full">{hours}h</span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            <p className="text-xs text-green-600 font-medium">
+                              Total: {activity.workSessions.reduce((sum: number, ws: any) => {
+                                const h = ws.startTime && ws.endTime ? (sessionHours({ workDate: "", startTime: ws.startTime, endTime: ws.endTime }) || 0) : 0;
+                                return sum + h;
+                              }, 0).toFixed(1)} horas
+                            </p>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Productos */}
                       {activity.products?.length > 0 && (

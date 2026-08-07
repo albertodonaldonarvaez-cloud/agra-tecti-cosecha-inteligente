@@ -58,6 +58,14 @@ interface FieldActivityDao {
     @Query("DELETE FROM field_activities WHERE id = :id")
     suspend fun deleteById(id: Long)
 
+    /** Eliminar una actividad que fue borrada en la web (evita fantasmas) */
+    @Query("DELETE FROM field_activities WHERE clientUuid = :uuid")
+    suspend fun deleteByUuid(uuid: String)
+
+    /** Dar otra oportunidad a los registros rechazados (sync manual del usuario) */
+    @Query("UPDATE field_activities SET syncAttempts = 0 WHERE isSynced = 0 AND syncAttempts >= 8")
+    suspend fun resetFailedAttempts()
+
     @Query("SELECT COUNT(*) FROM field_activities")
     suspend fun getTotalCount(): Int
 }

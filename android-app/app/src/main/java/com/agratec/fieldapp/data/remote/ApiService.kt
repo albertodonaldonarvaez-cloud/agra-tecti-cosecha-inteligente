@@ -86,6 +86,42 @@ interface ApiService {
     ): Response<TrpcResponse<List<ActivityData>>>
 
     // ============================================
+    // OFFLINE SYNC — COLABORADORES DE CAMPO
+    // ============================================
+
+    /** Subir colaboradores dados de alta desde el teléfono (idempotente por clientUuid) */
+    @POST("api/trpc/offlineSync.syncCollaborators")
+    suspend fun syncCollaborators(
+        @Body body: TrpcMutationRequest<SyncCollaboratorsRequest>
+    ): Response<TrpcResponse<SyncCollaboratorsResponseData>>
+
+    /** Descargar colaboradores activos del servidor (query sin input) */
+    @GET("api/trpc/offlineSync.getCollaborators")
+    suspend fun getCollaborators(): Response<TrpcResponse<List<CollaboratorData>>>
+
+    // ============================================
+    // FOTOS DE ACTIVIDADES (multipart)
+    // ============================================
+
+    /** Subir una foto de una actividad de la libreta (varios ángulos permitidos) */
+    @Multipart
+    @POST("api/sync/activity-photo")
+    suspend fun uploadActivityPhoto(
+        @Part photo: MultipartBody.Part,
+        @Part("activityClientUuid") activityClientUuid: RequestBody,
+        @Part("localPhotoId") localPhotoId: RequestBody,
+        @Part("photoType") photoType: RequestBody,
+    ): Response<PhotoUploadResponse>
+
+    // ============================================
+    // AUTO-ACTUALIZACIÓN
+    // ============================================
+
+    /** Última versión del APK publicada en el servidor (público) */
+    @GET("api/mobile/app-version")
+    suspend fun getAppVersion(): Response<AppVersionResponse>
+
+    // ============================================
     // DATOS DE REFERENCIA (para selector offline)
     // ============================================
 

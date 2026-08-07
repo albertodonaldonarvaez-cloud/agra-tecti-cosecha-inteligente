@@ -3,7 +3,9 @@ package com.agratec.fieldapp.data.repository
 import android.content.Context
 import android.util.Log
 import com.agratec.fieldapp.data.local.AppDatabase
+import com.agratec.fieldapp.data.local.entity.ActivityPhotoEntity
 import com.agratec.fieldapp.data.local.entity.FieldActivityEntity
+import com.agratec.fieldapp.data.local.entity.WorkSession
 import com.agratec.fieldapp.data.remote.RetrofitClient
 import com.agratec.fieldapp.sync.SyncWorker
 import kotlinx.coroutines.flow.Flow
@@ -43,6 +45,11 @@ class FieldActivityRepository(private val context: Context) {
         activityDate: String,
         status: String,
         parcelIds: List<Int>,
+        startTime: String? = null,
+        endTime: String? = null,
+        workSessions: List<WorkSession> = emptyList(),
+        collaboratorUuids: List<String> = emptyList(),
+        photoFilePaths: List<String> = emptyList(),
     ): FieldActivityEntity {
         val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(Date())
         val entity = FieldActivityEntity(
@@ -52,15 +59,57 @@ class FieldActivityRepository(private val context: Context) {
             description = description,
             performedBy = performedBy,
             activityDate = activityDate,
+            startTime = startTime?.takeIf { it.isNotBlank() },
+            endTime = endTime?.takeIf { it.isNotBlank() },
+            workSessionsJson = FieldActivityEntity.encodeSessions(workSessions),
             status = status,
             parcelIdsCsv = parcelIds.joinToString(","),
+            collaboratorUuidsCsv = collaboratorUuids.joinToString(","),
             isSynced = false,
             createdAtLocal = nowIso,
         )
         dao.insert(entity)
-        Log.i(TAG, "Actividad creada localmente: ${entity.clientUuid} ($activityType)")
+
+        // Registrar las fotos tomadas (se suben cuando la actividad sincronice)
+        for (path in photoFilePaths) {
+            db.activityPhotoDao().insert(
+                ActivityPhotoEntity(
+                    localPhotoId = UUID.randomUUID().toString(),
+                    activityClientUuid = entity.clientUuid,
+                    localFilePath = path,
+                    createdAtLocal = nowIso,
+                )
+            )
+        }
+
+        Log.i(TAG, "Actividad creada localmente: ${entity.clientUuid} ($activityType, ${photoFilePaths.size} fotos)")
         SyncWorker.enqueueImmediateSync(context)
         return entity
+    }
+
+    /** Agregar una foto a una actividad existente (p. ej. al completarla) */
+    suspend fun addPhoto(activityClientUuid: String, filePath: String, photoType: String = "durante") {
+        val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(Date())
+        db.activityPhotoDao().insert(
+            ActivityPhotoEntity(
+                localPhotoId = UUID.randomUUID().toString(),
+                activityClientUuid = activityClientUuid,
+                localFilePath = filePath,
+                photoType = photoType,
+                createdAtLocal = nowIso,
+            )
+        )
+        SyncWorker.enqueueImmediateSync(context)
+    }
+
+    suspend fun photoCount(activityClientUuid: String): Int =
+        db.activityPhotoDao().countForActivity(activityClientUuid)
+
+    /** Dar otra oportunidad a todo lo rechazado (lo dispara el sync manual) */
+    suspend fun resetFailedSyncAttempts() {
+        dao.resetFailedAttempts()
+        db.activityPhotoDao().resetFailedAttempts()
+        db.collaboratorDao().resetFailedAttempts()
     }
 
     /** Cambiar el estado de una actividad (p. ej. marcarla completada) */
@@ -90,9 +139,23 @@ class FieldActivityRepository(private val context: Context) {
             var created = 0
             var updated = 0
 
+            // Resolver colaboradores del servidor → UUIDs locales del cache
+            val collabDao = db.collaboratorDao()
+            val resolveCollabUuids: suspend (List<Int>?) -> String = { serverIds ->
+                (serverIds ?: emptyList())
+                    .mapNotNull { sid -> collabDao.getByServerId(sid)?.clientUuid }
+                    .joinToString(",")
+            }
+
             for (remote in activities) {
                 val local = dao.getByServerId(remote.id)
                     ?: remote.clientUuid?.let { dao.getByUuid(it) }
+
+                val sessionsJson = FieldActivityEntity.encodeSessions(
+                    (remote.workSessions ?: emptyList()).map {
+                        WorkSession(it.workDate.take(10), it.startTime, it.endTime)
+                    }
+                )
 
                 if (local == null) {
                     // Actividad nueva (normalmente creada desde la web)
@@ -106,8 +169,12 @@ class FieldActivityRepository(private val context: Context) {
                             description = remote.description ?: "",
                             performedBy = remote.performedBy ?: "",
                             activityDate = remote.activityDate.take(10),
+                            startTime = remote.startTime,
+                            endTime = remote.endTime,
+                            workSessionsJson = sessionsJson,
                             status = remote.status,
                             parcelIdsCsv = (remote.parcelIds ?: emptyList()).joinToString(","),
+                            collaboratorUuidsCsv = resolveCollabUuids(remote.collaboratorIds),
                             isSynced = true,
                             createdAtLocal = nowIso,
                         )
@@ -123,8 +190,12 @@ class FieldActivityRepository(private val context: Context) {
                             description = remote.description ?: local.description,
                             performedBy = remote.performedBy ?: local.performedBy,
                             activityDate = remote.activityDate.take(10),
+                            startTime = remote.startTime,
+                            endTime = remote.endTime,
+                            workSessionsJson = sessionsJson,
                             status = remote.status,
                             parcelIdsCsv = (remote.parcelIds ?: emptyList()).joinToString(","),
+                            collaboratorUuidsCsv = resolveCollabUuids(remote.collaboratorIds),
                         )
                     )
                     updated++

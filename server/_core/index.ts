@@ -147,6 +147,10 @@ async function startServer() {
       if (!fieldNoteFolio || !localPhotoId) {
         return res.status(400).json({ error: "fieldNoteFolio y localPhotoId son requeridos" });
       }
+      // Evitar path traversal: estos valores forman rutas de archivo
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(String(fieldNoteFolio)) || !/^[A-Za-z0-9_-]{1,64}$/.test(String(localPhotoId))) {
+        return res.status(400).json({ error: "fieldNoteFolio o localPhotoId con formato inválido" });
+      }
       if (!req.file) {
         return res.status(400).json({ error: "No se recibió ninguna foto" });
       }
@@ -275,7 +279,278 @@ async function startServer() {
       res.status(500).json({ error: error.message || "Error interno del servidor" });
     }
   });
-  
+
+  // Helper: usuario autenticado desde cookie o Bearer (para endpoints REST).
+  // Anti-CSRF: si la autenticación viene por COOKIE (navegador) y el request
+  // trae un header Origin de otro sitio, se rechaza — un formulario malicioso
+  // en otra página no debe poder usar la sesión del admin (la cookie viaja
+  // con sameSite none). El Bearer de la app no es vulnerable a CSRF.
+  const getAuthUser = async (req: any) => {
+    const { getUserFromToken } = await import("../auth");
+    const authHeader = req.headers.authorization;
+    const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    const cookieToken = req.cookies?.auth_token ?? null;
+    const token = bearerToken || cookieToken;
+    if (!token) return null;
+
+    if (!bearerToken && cookieToken) {
+      const origin = req.headers.origin as string | undefined;
+      if (origin) {
+        try {
+          const originHost = new URL(origin).host;
+          const reqHost = String(req.headers["x-forwarded-host"] || req.headers.host || "");
+          if (originHost !== reqHost) {
+            console.warn(`[REST] Bloqueado por Origin cruzado: ${origin} != ${reqHost}`);
+            return null;
+          }
+        } catch {
+          return null;
+        }
+      }
+    }
+    return getUserFromToken(token);
+  };
+
+  // IDs locales de la app (nombres de archivo): solo caracteres seguros
+  const isSafeLocalId = (value: unknown): value is string =>
+    typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value);
+
+  // ============================================
+  // SYNC ACTIVITY PHOTO — Fotos de actividades de la libreta desde la app
+  // Acepta varias fotos por actividad (varios ángulos); idempotente por localPhotoId
+  // ============================================
+  app.post("/api/sync/activity-photo", upload.single("photo"), async (req, res) => {
+    try {
+      const user = await getAuthUser(req);
+      if (!user) return res.status(401).json({ error: "No autenticado" });
+
+      const { activityClientUuid, localPhotoId, photoType } = req.body;
+      if (!activityClientUuid || !localPhotoId) {
+        return res.status(400).json({ error: "activityClientUuid y localPhotoId son requeridos" });
+      }
+      // Evitar path traversal: estos valores forman rutas de archivo
+      if (!isSafeLocalId(activityClientUuid) || !isSafeLocalId(localPhotoId)) {
+        return res.status(400).json({ error: "activityClientUuid o localPhotoId con formato inválido" });
+      }
+      if (!req.file) {
+        return res.status(400).json({ error: "No se recibió ninguna foto" });
+      }
+
+      const { getDb } = await import("../db");
+      const { fieldActivities, fieldActivityPhotos } = await import("../../drizzle/schema");
+      const { eq, and } = await import("drizzle-orm");
+      const drizzle = await getDb();
+      if (!drizzle) return res.status(503).json({ error: "Base de datos no disponible" });
+
+      const [activity] = await drizzle.select({ id: fieldActivities.id })
+        .from(fieldActivities)
+        .where(eq(fieldActivities.clientUuid, activityClientUuid))
+        .limit(1);
+      if (!activity) {
+        return res.status(404).json({ error: `Actividad '${activityClientUuid}' no encontrada (sincroniza la actividad antes que sus fotos)` });
+      }
+
+      const fs = await import("fs");
+      const pathModule = await import("path");
+      const dir = `/app/photos/field-activities/${activityClientUuid}`;
+      fs.mkdirSync(dir, { recursive: true });
+      const fileName = `mobile-${localPhotoId}.jpg`;
+      const destPath = pathModule.join(dir, fileName);
+
+      try {
+        const compressed = await sharp(req.file.path)
+          .resize(1920, 1920, { fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 80 })
+          .toBuffer();
+        fs.writeFileSync(destPath, compressed);
+      } catch (sharpErr) {
+        console.warn("[SyncActivityPhoto] Sharp falló, copiando sin comprimir:", sharpErr);
+        fs.copyFileSync(req.file.path, destPath);
+      }
+      fs.unlinkSync(req.file.path);
+
+      const photoUrl = `/app/photos/field-activities/${activityClientUuid}/${fileName}`;
+
+      // Idempotente: si ya existe esa foto (mismo localPhotoId), solo actualizar ruta
+      const [existing] = await drizzle.select({ id: fieldActivityPhotos.id })
+        .from(fieldActivityPhotos)
+        .where(and(
+          eq(fieldActivityPhotos.activityId, activity.id),
+          eq(fieldActivityPhotos.localPhotoId, localPhotoId),
+        ))
+        .limit(1);
+      if (existing) {
+        await drizzle.update(fieldActivityPhotos)
+          .set({ photoUrl })
+          .where(eq(fieldActivityPhotos.id, existing.id));
+      } else {
+        await drizzle.insert(fieldActivityPhotos).values({
+          activityId: activity.id,
+          photoType: (["antes", "despues", "durante", "producto", "otro"].includes(photoType) ? photoType : "durante") as any,
+          photoUrl,
+          caption: "Foto desde app móvil",
+          localPhotoId,
+          uploadedByUserId: user.id,
+        });
+      }
+
+      res.json({ success: true, photoUrl, activityClientUuid, localPhotoId });
+    } catch (error: any) {
+      console.error("[SyncActivityPhoto] Error:", error);
+      res.status(500).json({ error: error.message || "Error interno del servidor" });
+    }
+  });
+
+  // ============================================
+  // APP RELEASES — Distribución del APK y auto-actualización
+  // ============================================
+  // Multer dedicado para el APK (límite mayor) con errores en JSON
+  const uploadApk = multer({ dest: "/tmp/uploads/", limits: { fileSize: 300 * 1024 * 1024 } });
+
+  // Subir un APK nuevo (solo admin, multipart)
+  app.post("/api/admin/app-release", (req, res, next) => {
+    uploadApk.single("apk")(req, res, (err: any) => {
+      if (err) {
+        const msg = err?.code === "LIMIT_FILE_SIZE" ? "El APK supera el límite de 300MB" : (err.message || "Error subiendo archivo");
+        return res.status(400).json({ error: msg });
+      }
+      next();
+    });
+  }, async (req, res) => {
+    try {
+      const user = await getAuthUser(req);
+      if (!user || user.role !== "admin") return res.status(401).json({ error: "Solo administradores" });
+
+      const versionCode = parseInt(req.body.versionCode, 10);
+      // El versionName forma el nombre del archivo: solo caracteres seguros
+      const versionName = String(req.body.versionName || "").trim().replace(/[^A-Za-z0-9._-]/g, "").slice(0, 32);
+      if (!req.file) return res.status(400).json({ error: "No se recibió el APK" });
+      if (!versionCode || !versionName) {
+        return res.status(400).json({ error: "versionCode y versionName son requeridos" });
+      }
+
+      const { getDb } = await import("../db");
+      const { appReleases } = await import("../../drizzle/schema");
+      const drizzle = await getDb();
+      if (!drizzle) return res.status(503).json({ error: "Base de datos no disponible" });
+
+      const fs = await import("fs");
+      const pathModule = await import("path");
+      const dir = "/app/photos/app-releases";
+      fs.mkdirSync(dir, { recursive: true });
+      const fileName = `agra-field-v${versionName}-${versionCode}.apk`;
+      const destPath = pathModule.join(dir, fileName);
+      fs.copyFileSync(req.file.path, destPath);
+      fs.unlinkSync(req.file.path);
+      const fileSize = fs.statSync(destPath).size;
+
+      await drizzle.insert(appReleases).values({
+        versionCode,
+        versionName,
+        fileName,
+        filePath: destPath,
+        fileSize,
+        notes: req.body.notes || null,
+        uploadedByUserId: user.id,
+      });
+
+      res.json({ success: true, versionCode, versionName, fileName, fileSize });
+    } catch (error: any) {
+      console.error("[AppRelease] Error:", error);
+      res.status(500).json({ error: error.message || "Error interno del servidor" });
+    }
+  });
+
+  // Versión más reciente disponible (público: la app lo consulta al arrancar)
+  app.get("/api/mobile/app-version", async (_req, res) => {
+    try {
+      const { getDb } = await import("../db");
+      const { appReleases } = await import("../../drizzle/schema");
+      const { desc } = await import("drizzle-orm");
+      const drizzle = await getDb();
+      if (!drizzle) return res.status(503).json({ error: "Base de datos no disponible" });
+
+      const [latest] = await drizzle.select().from(appReleases)
+        .orderBy(desc(appReleases.versionCode), desc(appReleases.id))
+        .limit(1);
+      if (!latest) return res.json({ success: true, available: false });
+
+      res.json({
+        success: true,
+        available: true,
+        versionCode: latest.versionCode,
+        versionName: latest.versionName,
+        notes: latest.notes,
+        fileSize: latest.fileSize,
+        downloadUrl: "/api/mobile/app-download",
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error interno del servidor" });
+    }
+  });
+
+  // Descargar el APK más reciente
+  app.get("/api/mobile/app-download", async (_req, res) => {
+    try {
+      const { getDb } = await import("../db");
+      const { appReleases } = await import("../../drizzle/schema");
+      const { desc } = await import("drizzle-orm");
+      const drizzle = await getDb();
+      if (!drizzle) return res.status(503).json({ error: "Base de datos no disponible" });
+
+      const [latest] = await drizzle.select().from(appReleases)
+        .orderBy(desc(appReleases.versionCode), desc(appReleases.id))
+        .limit(1);
+      if (!latest) return res.status(404).json({ error: "No hay APK publicado" });
+
+      const fs = await import("fs");
+      if (!fs.existsSync(latest.filePath)) {
+        return res.status(404).json({ error: "Archivo APK no encontrado en el servidor" });
+      }
+
+      res.setHeader("Content-Type", "application/vnd.android.package-archive");
+      res.setHeader("Content-Disposition", `attachment; filename="${latest.fileName.replace(/[^A-Za-z0-9._-]/g, "")}"`);
+      fs.createReadStream(latest.filePath).pipe(res);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error interno del servidor" });
+    }
+  });
+
+  // ============================================
+  // NDVI MAP — Imagen del cache satelital como imagen real (no base64 inline)
+  // Evita mandar megabytes de base64 en el payload del dashboard
+  // ============================================
+  app.get("/api/parcel-ndvi-map/:parcelId", async (req, res) => {
+    try {
+      const user = await getAuthUser(req);
+      if (!user) return res.status(401).json({ error: "No autenticado" });
+
+      const parcelId = parseInt(req.params.parcelId, 10);
+      if (!parcelId) return res.status(400).json({ error: "parcelId inválido" });
+
+      const { getDb } = await import("../db");
+      const { sql } = await import("drizzle-orm");
+      const drizzle = await getDb();
+      if (!drizzle) return res.status(503).json({ error: "Base de datos no disponible" });
+
+      const rows: any = await drizzle.execute(
+        sql`SELECT data FROM parcelSatelliteCache WHERE parcelId = ${parcelId} AND dataType = 'map' AND indexType = 'NDVI' ORDER BY fetchedAt DESC LIMIT 1`
+      );
+      const row = (rows as any)?.[0]?.[0] ?? (rows as any)?.rows?.[0];
+      if (!row?.data) return res.status(404).json({ error: "Sin mapa NDVI cacheado" });
+
+      // El cache guarda un data-URI ("data:image/png;base64,....")
+      const match = String(row.data).match(/^data:(image\/[a-z+]+);base64,([\s\S]+)$/);
+      if (!match) return res.status(404).json({ error: "Formato de cache no reconocido" });
+
+      res.setHeader("Content-Type", match[1]);
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      res.send(Buffer.from(match[2], "base64"));
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error interno del servidor" });
+    }
+  });
+
   // tRPC API
   app.use(
     "/api/trpc",
@@ -323,6 +598,14 @@ async function startServer() {
       startHarvestNotifier();
     }).catch((err) => {
       console.error("Error al iniciar HarvestNotifier:", err);
+    });
+
+    // Iniciar generador del resumen semanal con IA
+    // Genera el panorama de la semana pasada cada lunes (o al detectar semana faltante)
+    import("../weeklySummaryService").then(({ startWeeklySummaryScheduler }) => {
+      startWeeklySummaryScheduler();
+    }).catch((err) => {
+      console.error("Error al iniciar WeeklySummary:", err);
     });
 
     // Iniciar bot de Telegram para Notas de Campo

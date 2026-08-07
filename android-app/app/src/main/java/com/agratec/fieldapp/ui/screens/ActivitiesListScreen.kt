@@ -1,5 +1,11 @@
 package com.agratec.fieldapp.ui.screens
 
+import android.Manifest
+import android.net.Uri
+import android.os.Environment
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -23,6 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.agratec.fieldapp.data.local.entity.FieldActivityEntity
 import com.agratec.fieldapp.data.repository.FieldActivityRepository
 import com.agratec.fieldapp.sync.SyncWorker
@@ -30,6 +37,10 @@ import com.agratec.fieldapp.ui.components.AgraBottomBar
 import com.agratec.fieldapp.ui.components.GlassCard
 import com.agratec.fieldapp.ui.theme.*
 import kotlinx.coroutines.launch
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 // ===== Catálogo de la libreta de campo (mismos valores que la web) =====
 
@@ -105,17 +116,73 @@ fun ActivitiesListScreen(
     val pendingCount = activities.count { it.status == "planificada" || it.status == "en_progreso" }
     val doneCount = activities.count { it.status == "completada" }
 
-    // Diálogo para marcar completada
+    // ── Cámara para agregar fotos a una actividad existente ──
+    // rememberSaveable: la cámara puede matar el proceso; sin esto la foto se perdería
+    var photoTargetUuid by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingPhotoPath by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+
+    fun createImageFile(): Pair<Uri, String> {
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val storageDir = context.getExternalFilesDir(Environment.DIRECTORY_PICTURES)
+        val imageFile = File.createTempFile("AGRA_ACT_${timeStamp}_", ".jpg", storageDir)
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", imageFile)
+        return Pair(uri, imageFile.absolutePath)
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val path = pendingPhotoPath
+        val uuid = photoTargetUuid
+        if (success && path != null && uuid != null) {
+            scope.launch {
+                repository.addPhoto(uuid, path)
+                Toast.makeText(context, "Foto agregada 📷 (se sube al sincronizar)", Toast.LENGTH_SHORT).show()
+            }
+        }
+        pendingPhotoPath = null
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            val (uri, realPath) = createImageFile()
+            pendingPhotoPath = realPath
+            cameraLauncher.launch(uri)
+        } else {
+            Toast.makeText(context, "Se necesita permiso de cámara", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Diálogo de acciones sobre una actividad pendiente
     confirmActivity?.let { act ->
         val typeUi = activityTypeUi(act.activityType)
         AlertDialog(
             onDismissRequest = { confirmActivity = null },
             title = { Text("${typeUi.emoji} ${typeUi.label}", color = TextPrimary, fontWeight = FontWeight.Bold) },
             text = {
-                Text(
-                    "¿Marcar esta actividad como completada?\n\n\"${act.description.take(120)}\"",
-                    color = TextSecondary,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("\"${act.description.take(120)}\"", color = TextSecondary)
+                    // Acciones secundarias dentro del cuerpo del diálogo
+                    if (act.status == "planificada") {
+                        TextButton(onClick = {
+                            scope.launch {
+                                repository.setStatus(act.clientUuid, "en_progreso")
+                                confirmActivity = null
+                            }
+                        }) {
+                            Text("⏳ Iniciar (en proceso)", color = SyncPending, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    TextButton(onClick = {
+                        photoTargetUuid = act.clientUuid
+                        confirmActivity = null
+                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                    }) {
+                        Text("📷 Tomar foto de evidencia", color = StatusInProgress, fontWeight = FontWeight.SemiBold)
+                    }
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
@@ -124,7 +191,7 @@ fun ActivitiesListScreen(
                         confirmActivity = null
                     }
                 }) {
-                    Text("✅ Completada", color = AgraGreen, fontWeight = FontWeight.SemiBold)
+                    Text("✅ Completar", color = AgraGreen, fontWeight = FontWeight.SemiBold)
                 }
             },
             dismissButton = {
@@ -267,6 +334,10 @@ fun ActivitiesListScreen(
                             onClick = {
                                 if (act.status != "completada" && act.status != "cancelada") {
                                     confirmActivity = act
+                                } else {
+                                    // Completadas: permitir agregar foto de evidencia
+                                    photoTargetUuid = act.clientUuid
+                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
                                 }
                             },
                         )
@@ -277,7 +348,13 @@ fun ActivitiesListScreen(
 
         AgraBottomBar(
             unsyncedCount = unsyncedCount,
-            onSync = { SyncWorker.enqueueImmediateSync(context) },
+            onSync = {
+                // Sync manual = intención explícita: dar otra oportunidad a los rechazados
+                scope.launch {
+                    repository.resetFailedSyncAttempts()
+                    SyncWorker.enqueueImmediateSync(context)
+                }
+            },
             onCreateNote = onCreateActivity,
             onLogout = onLogout,
             createLabel = "Nueva Actividad",
@@ -325,7 +402,14 @@ private fun ActivityCard(activity: FieldActivityEntity, onClick: () -> Unit) {
                 }
                 Spacer(Modifier.height(3.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("📅 ${activity.activityDate}", color = TextTertiary, fontSize = 11.sp)
+                    val days = activity.workSessions()
+                    val timeLabel = when {
+                        days.size > 1 -> "📅 ${activity.activityDate} · ${days.size} días"
+                        !activity.startTime.isNullOrBlank() && !activity.endTime.isNullOrBlank() ->
+                            "📅 ${activity.activityDate} · ${activity.startTime}–${activity.endTime}"
+                        else -> "📅 ${activity.activityDate}"
+                    }
+                    Text(timeLabel, color = TextTertiary, fontSize = 11.sp)
                     if (activity.performedBy.isNotBlank()) {
                         Text("  ·  👤 ${activity.performedBy}", color = TextTertiary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }

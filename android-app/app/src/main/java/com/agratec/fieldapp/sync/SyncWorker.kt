@@ -10,6 +10,7 @@ import com.agratec.fieldapp.data.remote.dto.SyncActivityItem
 import com.agratec.fieldapp.data.remote.dto.SyncNoteItem
 import com.agratec.fieldapp.data.remote.dto.SyncNotesRequest
 import com.agratec.fieldapp.data.remote.dto.TrpcMutationRequest
+import com.agratec.fieldapp.data.remote.dto.WorkSessionDto
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -254,15 +255,55 @@ class SyncWorker(
             return Result.retry()
         }
 
+        // ===== PASO 2.6: Sincronizar colaboradores (antes que las actividades,
+        // para que las asignaciones puedan resolver sus IDs de servidor) =====
+        try {
+            val collabRepo = com.agratec.fieldapp.data.repository.CollaboratorRepository(applicationContext)
+            collabRepo.pushUnsynced()
+            collabRepo.pullFromServer()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error sincronizando colaboradores (no crítico)", e)
+        }
+
         // ===== PASO 3: Subir actividades de la libreta de campo =====
         var activitiesSynced = 0
         try {
-            val unsyncedActivities = db.fieldActivityDao().getUnsynced(limit = 10)
+            val allUnsynced = db.fieldActivityDao().getUnsynced(limit = 10)
+
+            // Resolver colaboradores → IDs de servidor. Solo se pospone la actividad
+            // si un colaborador está PENDIENTE con reintentos vivos; los borrados o
+            // rechazados definitivamente se omiten (la actividad no se atora jamás).
+            val collabDao = db.collaboratorDao()
+            val unsyncedActivities = mutableListOf<com.agratec.fieldapp.data.local.entity.FieldActivityEntity>()
+            val collabIdsByActivity = mutableMapOf<String, List<Int>>()
+            for (act in allUnsynced) {
+                val serverIds = mutableListOf<Int>()
+                var waitForCollaborator = false
+                for (uuid in act.collaboratorUuids()) {
+                    val collab = collabDao.getByUuid(uuid)
+                    when {
+                        collab?.serverId != null -> serverIds.add(collab.serverId)
+                        collab != null && collab.syncAttempts < 8 -> waitForCollaborator = true
+                        else -> Log.w(TAG, "Colaborador $uuid omitido en ${act.clientUuid} (borrado o rechazado)")
+                    }
+                }
+                if (waitForCollaborator) {
+                    Log.i(TAG, "Actividad ${act.clientUuid} pospuesta: colaborador aún sincronizando")
+                    continue
+                }
+                unsyncedActivities.add(act)
+                collabIdsByActivity[act.clientUuid] = serverIds
+            }
 
             if (unsyncedActivities.isNotEmpty()) {
                 Log.i(TAG, "Sincronizando ${unsyncedActivities.size} actividades...")
 
                 val items = unsyncedActivities.map { act ->
+                    // Horas y jornadas SOLO en la primera subida (actividad creada en
+                    // el teléfono, sin serverId). En updates posteriores el teléfono
+                    // solo cambia el estado — si las mandara siempre, un eco del pull
+                    // podría pisar jornadas editadas después en la web.
+                    val isFirstUpload = act.serverId == null
                     SyncActivityItem(
                         clientUuid = act.clientUuid,
                         serverId = act.serverId,
@@ -271,8 +312,14 @@ class SyncWorker(
                         description = act.description.ifBlank { act.activityType },
                         performedBy = act.performedBy.takeIf { it.isNotBlank() }?.take(255),
                         activityDate = act.activityDate,
+                        startTime = if (isFirstUpload) act.startTime else null,
+                        endTime = if (isFirstUpload) act.endTime else null,
                         status = act.status,
                         parcelIds = act.parcelIds().takeIf { it.isNotEmpty() },
+                        collaboratorIds = collabIdsByActivity[act.clientUuid]?.takeIf { it.isNotEmpty() },
+                        workSessions = if (isFirstUpload) act.workSessions().takeIf { it.isNotEmpty() }?.map {
+                            WorkSessionDto(it.workDate, it.startTime, it.endTime)
+                        } else null,
                     )
                 }
 
@@ -284,7 +331,13 @@ class SyncWorker(
                     val data = response.body()?.result?.data?.json
                     if (data?.success == true) {
                         data.results?.forEach { result ->
-                            if (result.status != "error") {
+                            if (result.status == "deleted") {
+                                // La actividad fue eliminada en la web: quitarla del
+                                // teléfono (si quedara, podría "resucitar" al tocarla)
+                                db.activityPhotoDao().deleteForActivity(result.clientUuid)
+                                db.fieldActivityDao().deleteByUuid(result.clientUuid)
+                                Log.i(TAG, "Actividad ${result.clientUuid} eliminada en la web — removida localmente")
+                            } else if (result.status != "error") {
                                 // Solo se marca sincronizada si el estado no cambió
                                 // mientras la subida estaba en vuelo
                                 val uploaded = unsyncedActivities.find { it.clientUuid == result.clientUuid }
@@ -316,6 +369,46 @@ class SyncWorker(
             return Result.retry()
         }
 
+        // ===== PASO 3.5: Subir fotos de actividades (multipart, varias por actividad) =====
+        var activityPhotosSynced = 0
+        try {
+            val photos = db.activityPhotoDao().getUnsyncedUploadable(limit = 10)
+            if (photos.isNotEmpty()) {
+                Log.i(TAG, "Sincronizando ${photos.size} fotos de actividades...")
+                for (photo in photos) {
+                    try {
+                        val file = File(photo.localFilePath)
+                        if (!file.exists()) {
+                            db.activityPhotoDao().markSyncFailed(photo.localPhotoId, "Archivo local no encontrado")
+                            errors++
+                            continue
+                        }
+                        val requestFile = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
+                        val photoPart = MultipartBody.Part.createFormData("photo", file.name, requestFile)
+                        val response = apiService.uploadActivityPhoto(
+                            photo = photoPart,
+                            activityClientUuid = photo.activityClientUuid.toRequestBody("text/plain".toMediaTypeOrNull()),
+                            localPhotoId = photo.localPhotoId.toRequestBody("text/plain".toMediaTypeOrNull()),
+                            photoType = photo.photoType.toRequestBody("text/plain".toMediaTypeOrNull()),
+                        )
+                        if (response.isSuccessful && response.body()?.success == true) {
+                            db.activityPhotoDao().markAsSynced(photo.localPhotoId)
+                            activityPhotosSynced++
+                        } else {
+                            val errorMsg = response.body()?.error ?: "HTTP ${response.code()}"
+                            db.activityPhotoDao().markSyncFailed(photo.localPhotoId, errorMsg)
+                            errors++
+                        }
+                    } catch (e: Exception) {
+                        db.activityPhotoDao().markSyncFailed(photo.localPhotoId, e.message ?: "Error desconocido")
+                        errors++
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Excepción al sincronizar fotos de actividades", e)
+        }
+
         // ===== PASO 4: Bajar actividades del servidor (planificadas en la web) =====
         try {
             val activityRepo = com.agratec.fieldapp.data.repository.FieldActivityRepository(applicationContext)
@@ -324,7 +417,7 @@ class SyncWorker(
             Log.w(TAG, "Error bajando actividades (no crítico)", e)
         }
 
-        Log.i(TAG, "=== Sincronización completada: $notesSynced notas, $photosSynced fotos, $activitiesSynced actividades, $errors errores ===")
+        Log.i(TAG, "=== Sincronización completada: $notesSynced notas, $photosSynced fotos, $activitiesSynced actividades, $activityPhotosSynced fotos de actividad, $errors errores ===")
 
         // Si quedan más items pendientes, programar otro run
         val remainingNotes = db.fieldNoteDao().getUnsyncedCount()

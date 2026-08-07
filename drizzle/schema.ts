@@ -372,6 +372,20 @@ export const fieldActivities = mysqlTable("fieldActivities", {
 export type FieldActivity = typeof fieldActivities.$inferSelect;
 export type InsertFieldActivity = typeof fieldActivities.$inferInsert;
 
+// Jornadas de trabajo de una actividad: una fila por día trabajado con sus horas.
+// Permite actividades de varios días (poda de un huerto completo, etc.)
+export const fieldActivityWorkSessions = mysqlTable("fieldActivityWorkSessions", {
+  id: int("id").autoincrement().primaryKey(),
+  activityId: int("activityId").notNull(),
+  workDate: date("workDate", { mode: "string" }).notNull(), // "YYYY-MM-DD"
+  startTime: varchar("startTime", { length: 8 }), // "HH:MM"
+  endTime: varchar("endTime", { length: 8 }),
+  notes: varchar("notes", { length: 512 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type FieldActivityWorkSession = typeof fieldActivityWorkSessions.$inferSelect;
+
 // Parcelas afectadas por una actividad
 export const fieldActivityParcels = mysqlTable("fieldActivityParcels", {
   id: int("id").autoincrement().primaryKey(),
@@ -427,6 +441,8 @@ export const fieldActivityPhotos = mysqlTable("fieldActivityPhotos", {
   photoType: mysqlEnum("photoType", ["antes", "despues", "durante", "producto", "otro"]).default("durante").notNull(),
   photoUrl: text("photoUrl").notNull(),
   caption: varchar("caption", { length: 512 }),
+  // ID local de la foto en la app móvil (idempotencia del upload)
+  localPhotoId: varchar("localPhotoId", { length: 64 }),
   uploadedByUserId: int("uploadedByUserId").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
@@ -634,6 +650,8 @@ export const collaborators = mysqlTable("collaborators", {
   name: varchar("name", { length: 255 }).notNull(),
   phone: varchar("phone", { length: 32 }),
   role: varchar("role", { length: 128 }), // Ej: "Encargado de riego", "Jornalero"
+  // UUID de la app móvil cuando el colaborador se dio de alta desde el campo
+  clientUuid: varchar("clientUuid", { length: 64 }).unique(),
   telegramChatId: varchar("telegramChatId", { length: 64 }),
   telegramUsername: varchar("telegramUsername", { length: 128 }),
   telegramLinkedAt: timestamp("telegramLinkedAt"),
@@ -673,6 +691,44 @@ export const fieldActivityAssignments = mysqlTable("fieldActivityAssignments", {
 });
 export type FieldActivityAssignment = typeof fieldActivityAssignments.$inferSelect;
 export type InsertFieldActivityAssignment = typeof fieldActivityAssignments.$inferInsert;
+
+// ══════════════════════════════════════
+// RESUMEN SEMANAL CON IA
+// ══════════════════════════════════════
+// Un registro por semana: panorama general generado con IA cruzando
+// actividades de la libreta, clima, datos satelitales y etapa del ciclo.
+export const weeklySummaries = mysqlTable("weeklySummaries", {
+  id: int("id").autoincrement().primaryKey(),
+  // Lunes de la semana resumida — único: una fila por semana (el scheduler y el
+  // botón "Generar ahora" pueden correr a la vez sin duplicar)
+  weekStart: date("weekStart", { mode: "string" }).notNull().unique(),
+  weekEnd: date("weekEnd", { mode: "string" }).notNull(), // Domingo de la semana resumida
+  content: text("content").notNull(), // Resumen generado por la IA (markdown)
+  model: varchar("model", { length: 64 }),
+  cycleId: int("cycleId"), // Ciclo activo al momento de generar
+  cyclePhase: varchar("cyclePhase", { length: 64 }), // Etapa estimada del ciclo
+  statsJson: text("statsJson"), // Datos crudos usados (para depurar/mostrar)
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type WeeklySummary = typeof weeklySummaries.$inferSelect;
+
+// ══════════════════════════════════════
+// VERSIONES DE LA APP MÓVIL (APK)
+// ══════════════════════════════════════
+export const appReleases = mysqlTable("appReleases", {
+  id: int("id").autoincrement().primaryKey(),
+  versionCode: int("versionCode").notNull(), // BuildConfig.VERSION_CODE
+  versionName: varchar("versionName", { length: 32 }).notNull(), // Ej: "1.2.0"
+  fileName: varchar("fileName", { length: 255 }).notNull(),
+  filePath: varchar("filePath", { length: 512 }).notNull(), // Ruta en disco del APK
+  fileSize: int("fileSize"), // Bytes
+  notes: text("notes"), // Notas de la versión
+  uploadedByUserId: int("uploadedByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AppRelease = typeof appReleases.$inferSelect;
 
 // ══════════════════════════════════════
 // LABEL PRINT HISTORY

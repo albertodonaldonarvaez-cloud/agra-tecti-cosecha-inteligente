@@ -140,6 +140,75 @@ async function migrate() {
       await conn.query("ALTER TABLE fieldActivities ADD UNIQUE INDEX fieldActivities_clientUuid_unique (clientUuid)");
       console.log('[Migration] + ADDED unique index fieldActivities.clientUuid');
     }
+
+    // ── Jornadas, fotos móviles, colaboradores móviles, resumen semanal, APK (0020) ──
+    const ensureColumn = async (table, col, ddl) => {
+      const [rows] = await conn.query(
+        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+        [table, col]
+      );
+      if (rows.length === 0) {
+        await conn.query(ddl);
+        console.log(`[Migration] + ADDED ${table}.${col}`);
+      }
+    };
+    const ensureIndex = async (table, indexName, ddl) => {
+      const [rows] = await conn.query(
+        "SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?",
+        [table, indexName]
+      );
+      if (rows.length === 0) {
+        await conn.query(ddl);
+        console.log(`[Migration] + ADDED index ${table}.${indexName}`);
+      }
+    };
+
+    await conn.query(`CREATE TABLE IF NOT EXISTS fieldActivityWorkSessions (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      activityId INT NOT NULL,
+      workDate DATE NOT NULL,
+      startTime VARCHAR(8) NULL,
+      endTime VARCHAR(8) NULL,
+      notes VARCHAR(512) NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_ws_activity (activityId)
+    )`);
+    console.log('[Migration] fieldActivityWorkSessions OK');
+
+    await conn.query(`CREATE TABLE IF NOT EXISTS weeklySummaries (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      weekStart DATE NOT NULL,
+      weekEnd DATE NOT NULL,
+      content TEXT NOT NULL,
+      model VARCHAR(64) NULL,
+      cycleId INT NULL,
+      cyclePhase VARCHAR(64) NULL,
+      statsJson TEXT NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`);
+    console.log('[Migration] weeklySummaries OK');
+
+    await conn.query(`CREATE TABLE IF NOT EXISTS appReleases (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      versionCode INT NOT NULL,
+      versionName VARCHAR(32) NOT NULL,
+      fileName VARCHAR(255) NOT NULL,
+      filePath VARCHAR(512) NOT NULL,
+      fileSize INT NULL,
+      notes TEXT NULL,
+      uploadedByUserId INT NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`);
+    console.log('[Migration] appReleases OK');
+
+    await ensureIndex('weeklySummaries', 'weeklySummaries_weekStart_unique',
+      "ALTER TABLE weeklySummaries ADD UNIQUE INDEX weeklySummaries_weekStart_unique (weekStart)");
+    await ensureColumn('fieldActivityPhotos', 'localPhotoId',
+      "ALTER TABLE fieldActivityPhotos ADD COLUMN localPhotoId VARCHAR(64) NULL");
+    await ensureColumn('collaborators', 'clientUuid',
+      "ALTER TABLE collaborators ADD COLUMN clientUuid VARCHAR(64) NULL");
+    await ensureIndex('collaborators', 'collaborators_clientUuid_unique',
+      "ALTER TABLE collaborators ADD UNIQUE INDEX collaborators_clientUuid_unique (clientUuid)");
   } catch (err) {
     console.error('[Migration] Error:', err.message);
   } finally {
