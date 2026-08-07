@@ -297,3 +297,38 @@ pasado, 7 de pronóstico y las actividades próximas/atrasadas.
 ## Despliegue
 Solo servidor y web: `git pull && docker-compose up -d --build`. Sin migraciones
 ni cambios en la app móvil.
+
+---
+
+# Sexta entrega: se arregla el análisis con IA y botón de actualizaciones
+
+## Por qué fallaba el resumen con IA (y el análisis de parcela y del reporte)
+El modelo configurado **razona antes de responder**, y esos tokens de
+razonamiento cuentan dentro de `max_tokens`. Con el presupuesto que traía el
+código (900 en el resumen, 800 en análisis de parcela, 600 en el reporte) el
+modelo **gastaba TODO pensando** y devolvía el texto final **vacío**, que el
+código interpretaba como fallo.
+
+Comprobado contra la API real: con 900 tokens → `finish_reason: length`,
+`reasoning_tokens: 900`, contenido vacío. Con 4000 → razonamiento ~400 tokens y
+respuesta completa de ~1,500 caracteres en 10 segundos.
+
+**Arreglado** en los tres lugares (resumen semanal, análisis de parcela y reporte
+general): presupuesto de 4000 tokens y manejo explícito de respuesta vacía con
+mensaje claro (*"se quedó sin espacio para responder"*) en vez de un error genérico.
+
+## Botón para buscar actualizaciones
+- En la Libreta, el engrane ahora abre **Ajustes** con la **versión instalada** y
+  un botón **"Buscar actualización"**.
+- Si hay una nueva, ofrece descargarla; si no, avisa *"Ya tienes la última versión"*;
+  si no hay conexión, lo dice claramente.
+
+> **Importante sobre la actualización automática:** sí funciona, pero solo avisa
+> cuando el `versionCode` publicado es MAYOR al instalado. Hasta ahora estaba
+> publicada la 1.2.0 (código 3) y los teléfonos tienen esa misma, por eso nunca
+> ofrecía nada. Al publicar la **1.5.0 (código 6)** los teléfonos la ofrecerán al
+> abrir la app.
+
+## Despliegue
+Servidor y web: `git pull && docker-compose up -d --build` (sin migraciones).
+App: compilar **1.5.0 (versionCode 6)** y publicarla en Configuración → App Móvil.

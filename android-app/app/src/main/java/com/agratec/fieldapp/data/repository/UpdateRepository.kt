@@ -25,30 +25,57 @@ class UpdateRepository(private val context: Context) {
         val downloadUrl: String,
     )
 
+    /** Resultado detallado, para poder informar al usuario cuando lo pide a mano */
+    sealed class CheckResult {
+        data class Available(val info: UpdateInfo) : CheckResult()
+        data class UpToDate(val currentVersion: String) : CheckResult()
+        data class Error(val message: String) : CheckResult()
+    }
+
     /** null = no hay actualización disponible (o no se pudo consultar) */
-    suspend fun checkForUpdate(): UpdateInfo? {
+    suspend fun checkForUpdate(): UpdateInfo? =
+        (check() as? CheckResult.Available)?.info
+
+    /** Consulta con detalle: sirve para el botón "Buscar actualizaciones" */
+    suspend fun check(): CheckResult {
         return try {
             val api = RetrofitClient.getApiService(context)
             val response = api.getAppVersion()
-            if (!response.isSuccessful) return null
-            val body = response.body() ?: return null
-            if (body.available != true) return null
-            val remoteCode = body.versionCode ?: return null
-            if (remoteCode <= BuildConfig.VERSION_CODE) return null
+            if (!response.isSuccessful) {
+                return CheckResult.Error("El servidor respondió ${response.code()}")
+            }
+            val body = response.body()
+                ?: return CheckResult.Error("Respuesta vacía del servidor")
+
+            if (body.available != true) {
+                return CheckResult.UpToDate(BuildConfig.VERSION_NAME)
+            }
+            val remoteCode = body.versionCode
+                ?: return CheckResult.Error("El servidor no informó la versión")
+
+            Log.i(TAG, "Versión instalada: ${BuildConfig.VERSION_CODE} · publicada: $remoteCode")
+            if (remoteCode <= BuildConfig.VERSION_CODE) {
+                return CheckResult.UpToDate(BuildConfig.VERSION_NAME)
+            }
 
             val base = BuildConfig.BASE_URL.trimEnd('/')
-            UpdateInfo(
-                versionCode = remoteCode,
-                versionName = body.versionName ?: remoteCode.toString(),
-                notes = body.notes,
-                fileSizeMb = body.fileSize?.let { it / (1024.0 * 1024.0) },
-                downloadUrl = base + (body.downloadUrl ?: "/api/mobile/app-download"),
+            CheckResult.Available(
+                UpdateInfo(
+                    versionCode = remoteCode,
+                    versionName = body.versionName ?: remoteCode.toString(),
+                    notes = body.notes,
+                    fileSizeMb = body.fileSize?.let { it / (1024.0 * 1024.0) },
+                    downloadUrl = base + (body.downloadUrl ?: "/api/mobile/app-download"),
+                )
             )
         } catch (e: Exception) {
             Log.d(TAG, "Sin conexión o error consultando actualización: ${e.message}")
-            null
+            CheckResult.Error("Sin conexión con el servidor")
         }
     }
+
+    /** Versión instalada, para mostrarla en pantalla */
+    fun currentVersionLabel(): String = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
 
     /** Abre el navegador para descargar el APK (el usuario lo instala al terminar) */
     fun openDownload(info: UpdateInfo) {

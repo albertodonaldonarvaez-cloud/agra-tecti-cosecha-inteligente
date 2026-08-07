@@ -71,10 +71,13 @@ fun PhotoSettingsDialog(
     downloadOnMobile: Boolean,
     onChange: (upload: Boolean, download: Boolean) -> Unit,
     onDismiss: () -> Unit,
+    appVersion: String = "",
+    checkingUpdate: Boolean = false,
+    onCheckUpdate: (() -> Unit)? = null,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Fotos con datos móviles", color = TextPrimary, fontWeight = FontWeight.Bold) },
+        title = { Text("Ajustes", color = TextPrimary, fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
@@ -104,6 +107,30 @@ fun PhotoSettingsDialog(
                         onCheckedChange = { onChange(uploadOnMobile, it) },
                         colors = SwitchDefaults.colors(checkedTrackColor = AgraGreen),
                     )
+                }
+
+                // ── Actualizaciones de la app ──
+                if (onCheckUpdate != null) {
+                    Spacer(Modifier.height(10.dp))
+                    HorizontalDivider(color = CardBorder.copy(alpha = 0.5f))
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Versión de la app", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text(appVersion, color = TextTertiary, fontSize = 11.sp)
+                        }
+                        if (checkingUpdate) {
+                            CircularProgressIndicator(
+                                color = AgraGreen,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        } else {
+                            TextButton(onClick = onCheckUpdate) {
+                                Text("Buscar actualización", color = AgraGreen, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
                 }
             }
         },

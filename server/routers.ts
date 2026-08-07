@@ -562,7 +562,9 @@ IMPORTANTE:
             body: JSON.stringify({
               model: "deepseek-v4-flash",
               messages: [{ role: "system", content: "Eres un ingeniero agronomo senior especializado en agricultura de precision, teledeteccion satelital y manejo integrado de cultivos. Respondes de forma concisa y profesional." }, { role: "user", content: prompt }],
-              max_tokens: 800,
+              // El modelo razona antes de responder y ese consumo cuenta aquí:
+              // con un presupuesto corto se agota pensando y devuelve texto vacío
+              max_tokens: 4000,
               temperature: 0.4,
             }),
           });
@@ -574,7 +576,14 @@ IMPORTANTE:
           }
 
           const result = await response.json();
-          const analysis = result.choices?.[0]?.message?.content || "Sin respuesta del modelo";
+          const analysis = result.choices?.[0]?.message?.content?.trim();
+          if (!analysis) {
+            console.error("[IA] Respuesta vacía:", result.choices?.[0]?.finish_reason);
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "La IA no devolvió análisis (se quedó sin espacio para responder). Intenta de nuevo.",
+            });
+          }
           const model = result.model || "deepseek-v4-flash";
 
           // Guardar en cache
@@ -2448,12 +2457,15 @@ IMPORTANTE:
           });
         }
 
-        const { generateWeeklySummary } = await import("./weeklySummaryService");
+        const { generateWeeklySummary, getLastSummaryError } = await import("./weeklySummaryService");
         const result = await generateWeeklySummary({ force: input?.force ?? false });
         if (!result) {
+          const detail = getLastSummaryError();
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
-            message: "No se pudo generar el resumen (falla temporal de la IA o de red). Intenta de nuevo en unos minutos.",
+            message: detail
+              ? `${detail}. Intenta de nuevo en unos minutos.`
+              : "No se pudo generar el resumen (falla temporal de la IA o de red). Intenta de nuevo en unos minutos.",
           });
         }
         return result;
@@ -4956,13 +4968,21 @@ Da un análisis ejecutivo de 6-8 líneas máximo: estado general de la operació
               body: JSON.stringify({
                 model: "deepseek-v4-flash",
                 messages: [{ role: "system", content: "Eres un ingeniero agrónomo senior. Respondes de forma concisa y profesional en español." }, { role: "user", content: prompt }],
-                max_tokens: 600,
+                // Presupuesto amplio: el modelo razona antes de responder y ese
+                // consumo cuenta aquí (con poco espacio devolvía texto vacío)
+                max_tokens: 4000,
                 temperature: 0.4,
               }),
             });
             if (response.ok) {
               const result = await response.json();
-              aiAnalysis = result.choices?.[0]?.message?.content || null;
+              const text = result.choices?.[0]?.message?.content?.trim();
+              aiAnalysis = text || null;
+              if (!text) {
+                console.error("[Reports] IA devolvió respuesta vacía:", result.choices?.[0]?.finish_reason);
+              }
+            } else {
+              console.error("[Reports] IA HTTP", response.status);
             }
           }
         } catch (e) { console.error("[Reports] Error generating AI analysis:", e); }

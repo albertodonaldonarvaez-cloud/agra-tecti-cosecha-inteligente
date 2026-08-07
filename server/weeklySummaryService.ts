@@ -22,6 +22,17 @@ import { eq, desc, asc, and, gte, lte, inArray, isNull, sql } from "drizzle-orm"
 
 const TAG = "[WeeklySummary]";
 
+/**
+ * Modelo de IA y presupuesto de tokens.
+ *
+ * El modelo razona antes de responder y esos tokens de razonamiento cuentan
+ * dentro de max_tokens. Un presupuesto corto (900) se consumía por completo
+ * pensando y devolvía contenido vacío; con 4000 el razonamiento usa ~400 y
+ * queda espacio de sobra para el texto final.
+ */
+const AI_MODEL = "deepseek-v4-flash";
+const AI_MAX_TOKENS = 4000;
+
 function todayMx(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
 }
@@ -79,7 +90,15 @@ const ACTIVITY_LABELS: Record<string, string> = {
  * Genera (o regenera con force) el resumen de la última semana completa.
  * Devuelve el registro creado, el existente si ya había, o null si no se pudo.
  */
+/** Último motivo de fallo, para poder decírselo al usuario en vez de un mensaje genérico */
+let lastError: string | null = null;
+
+export function getLastSummaryError(): string | null {
+  return lastError;
+}
+
 export async function generateWeeklySummary(options?: { force?: boolean }): Promise<any | null> {
+  lastError = null;
   const drizzle = await getDb();
   if (!drizzle) { console.log(`${TAG} Sin base de datos, omitiendo`); return null; }
 
@@ -314,12 +333,15 @@ Tono profesional de ingeniero agrónomo, directo y útil. Sin saludos ni despedi
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: "deepseek-v4-flash",
+        model: AI_MODEL,
         messages: [
           { role: "system", content: "Eres un ingeniero agrónomo senior especializado en higo. Respondes de forma concisa, profesional y accionable, en español." },
           { role: "user", content: prompt },
         ],
-        max_tokens: 900,
+        // IMPORTANTE: es un modelo de razonamiento — primero "piensa" y esos
+        // tokens también cuentan. Con un presupuesto corto se gasta todo
+        // razonando y la respuesta llega VACÍA (esa era la falla del resumen).
+        max_tokens: AI_MAX_TOKENS,
         temperature: 0.4,
       }),
     });
@@ -328,12 +350,27 @@ Tono profesional de ingeniero agrónomo, directo y útil. Sin saludos ni despedi
     const failResult = () => (options?.force ? null : existing ?? null);
 
     if (!response.ok) {
-      console.error(`${TAG} DeepSeek HTTP ${response.status}`);
+      const errText = await response.text().catch(() => "");
+      console.error(`${TAG} IA HTTP ${response.status}: ${errText.slice(0, 300)}`);
+      lastError = `La IA respondió con error ${response.status}`;
       return failResult();
     }
     const result = await response.json();
-    const content = result.choices?.[0]?.message?.content;
-    if (!content) return failResult();
+    const choice = result.choices?.[0];
+    const content: string = choice?.message?.content?.trim() ?? "";
+
+    if (!content) {
+      // Sin texto: casi siempre porque el razonamiento agotó el presupuesto
+      const reasoningTokens = result.usage?.completion_tokens_details?.reasoning_tokens;
+      if (choice?.finish_reason === "length") {
+        lastError = "La IA se quedó sin espacio para responder (razonamiento demasiado largo)";
+        console.error(`${TAG} Respuesta vacía por límite de tokens (razonamiento: ${reasoningTokens})`);
+      } else {
+        lastError = "La IA devolvió una respuesta vacía";
+        console.error(`${TAG} Respuesta vacía (finish_reason: ${choice?.finish_reason})`);
+      }
+      return failResult();
+    }
 
     const statsJson = JSON.stringify({
       activitiesDone: done.length,
@@ -384,8 +421,9 @@ Tono profesional de ingeniero agrónomo, directo y útil. Sin saludos ni despedi
       .orderBy(desc(weeklySummaries.id)).limit(1);
     console.log(`${TAG} Resumen generado (${weekStart} a ${weekEnd})`);
     return created;
-  } catch (e) {
+  } catch (e: any) {
     console.error(`${TAG} Error generando resumen:`, e);
+    lastError = `No se pudo contactar a la IA (${e?.message ?? "error de red"})`;
     return options?.force ? null : existing ?? null;
   }
 }

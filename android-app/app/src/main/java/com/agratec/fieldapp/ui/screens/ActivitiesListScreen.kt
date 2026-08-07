@@ -149,6 +149,11 @@ fun ActivitiesListScreen(
         )
     }
 
+    // ── Buscar actualizaciones a mano ──
+    val updateRepository = remember { com.agratec.fieldapp.data.repository.UpdateRepository(context) }
+    var checkingUpdate by remember { mutableStateOf(false) }
+    var updateFound by remember { mutableStateOf<com.agratec.fieldapp.data.repository.UpdateRepository.UpdateInfo?>(null) }
+
     if (showPhotoSettings) {
         PhotoSettingsDialog(
             uploadOnMobile = uploadOnMobile,
@@ -161,6 +166,54 @@ fun ActivitiesListScreen(
                 downloadOnMobile = down
             },
             onDismiss = { showPhotoSettings = false },
+            appVersion = updateRepository.currentVersionLabel(),
+            checkingUpdate = checkingUpdate,
+            onCheckUpdate = {
+                scope.launch {
+                    checkingUpdate = true
+                    when (val result = updateRepository.check()) {
+                        is com.agratec.fieldapp.data.repository.UpdateRepository.CheckResult.Available -> {
+                            updateFound = result.info
+                            showPhotoSettings = false
+                        }
+                        is com.agratec.fieldapp.data.repository.UpdateRepository.CheckResult.UpToDate ->
+                            Toast.makeText(context, "Ya tienes la última versión (${result.currentVersion})", Toast.LENGTH_LONG).show()
+                        is com.agratec.fieldapp.data.repository.UpdateRepository.CheckResult.Error ->
+                            Toast.makeText(context, "No se pudo revisar: ${result.message}", Toast.LENGTH_LONG).show()
+                    }
+                    checkingUpdate = false
+                }
+            },
+        )
+    }
+
+    updateFound?.let { info ->
+        AlertDialog(
+            onDismissRequest = { updateFound = null },
+            title = { Text("🚀 Actualización disponible", color = TextPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    buildString {
+                        append("Versión ${info.versionName}")
+                        info.fileSizeMb?.let { append(" (${String.format(Locale.US, "%.1f", it)} MB)") }
+                        append(".\n")
+                        if (!info.notes.isNullOrBlank()) append("\n${info.notes}\n")
+                        append("\nSe descargará con el navegador; al terminar, ábrela para instalarla.")
+                    },
+                    color = TextSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    updateRepository.openDownload(info)
+                    updateFound = null
+                }) { Text("Descargar", color = AgraGreen, fontWeight = FontWeight.SemiBold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { updateFound = null }) { Text("Después", color = TextTertiary) }
+            },
+            containerColor = Color.White,
+            shape = RoundedCornerShape(20.dp),
         )
     }
 
