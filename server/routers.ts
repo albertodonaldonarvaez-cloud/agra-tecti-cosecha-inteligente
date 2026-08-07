@@ -3107,7 +3107,7 @@ IMPORTANTE:
           .slice(0, maxParcels);
 
         const parcelRows = await drizzle
-          .select({ id: parcels.id, code: parcels.code, name: parcels.name })
+          .select({ id: parcels.id, code: parcels.code, name: parcels.name, polygon: parcels.polygon })
           .from(parcels)
           .where(inArray(parcels.id, parcelIds));
 
@@ -3138,6 +3138,9 @@ IMPORTANTE:
             parcelId: pid,
             code: parcel.code,
             name: parcel.name,
+            // El polígono permite dibujar el contorno real de la parcela
+            // encima de la imagen satelital (que cubre su rectángulo)
+            polygon: parcel.polygon,
             hasNdviMap,
             ndviMapDate,
             pendingCount: parcelActs.filter(a => a.status === "planificada" || a.status === "en_progreso").length,

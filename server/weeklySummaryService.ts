@@ -155,22 +155,72 @@ export async function generateWeeklySummary(options?: { force?: boolean }): Prom
     return `- ${dateStr}: ${label}${sub}${parcelStr}${hoursStr} — ${a.description || ""} (${a.performedBy || "sin responsable"})`;
   };
 
-  // ── 2. Clima de la semana ──
+  // ── 2. Clima: lo que pasó (día a día) y lo que viene (pronóstico) ──
   let weatherLine = "Sin datos de clima (ubicación no configurada).";
+  let weatherDailyLines = "";
+  let forecastLines = "";
   let weatherRaw: any[] = [];
+  let forecastRaw: any[] = [];
   try {
     const locationConfig = await dbExt.getLocationConfig();
     if (locationConfig) {
-      const { getWeatherData } = await import("./weatherService");
+      const { getWeatherData, getExtendedForecast } = await import("./weatherService");
       weatherRaw = await getWeatherData(locationConfig.latitude, locationConfig.longitude, weekStart, weekEnd, locationConfig.timezone);
       if (weatherRaw.length > 0) {
         const avgMax = weatherRaw.reduce((s, d) => s + (d.temperatureMax || 0), 0) / weatherRaw.length;
         const avgMin = weatherRaw.reduce((s, d) => s + (d.temperatureMin || 0), 0) / weatherRaw.length;
         const rain = weatherRaw.reduce((s, d) => s + (d.precipitation || 0), 0);
         weatherLine = `Temp máx prom ${avgMax.toFixed(1)}°C, mín prom ${avgMin.toFixed(1)}°C, lluvia acumulada ${rain.toFixed(1)}mm en la semana.`;
+        // Día a día: permite relacionar el clima con la labor de cada día
+        weatherDailyLines = weatherRaw.map((d: any) =>
+          `- ${d.date}: máx ${Number(d.temperatureMax ?? 0).toFixed(0)}°C, mín ${Number(d.temperatureMin ?? 0).toFixed(0)}°C, lluvia ${Number(d.precipitation ?? 0).toFixed(1)}mm`
+        ).join("\n");
+      }
+
+      // Pronóstico de los próximos días (para recomendar cuándo hacer cada labor)
+      forecastRaw = await getExtendedForecast(locationConfig.latitude, locationConfig.longitude, 7, locationConfig.timezone);
+      if (forecastRaw.length > 0) {
+        forecastLines = forecastRaw.map((d: any) =>
+          `- ${d.date}: ${d.conditionText ?? d.condition ?? ""}, máx ${Number(d.temperatureMax ?? 0).toFixed(0)}°C, mín ${Number(d.temperatureMin ?? 0).toFixed(0)}°C, ` +
+          `lluvia ${Number(d.precipitation ?? 0).toFixed(1)}mm (prob. ${Number(d.precipitationProbability ?? 0).toFixed(0)}%), viento ${Number(d.windSpeed ?? 0).toFixed(0)} km/h`
+        ).join("\n");
       }
     }
   } catch (e) { console.log(`${TAG} Clima no disponible:`, e); }
+
+  // ── 2.b Actividades planeadas para los próximos días ──
+  const today = todayMx();
+  const horizon = addDaysStr(today, 14);
+  const upcomingActivities = await drizzle.select().from(fieldActivities)
+    .where(and(
+      gte(fieldActivities.activityDate, today as any),
+      lte(fieldActivities.activityDate, horizon as any),
+      inArray(fieldActivities.status, ["planificada", "en_progreso"]),
+    ))
+    .orderBy(asc(fieldActivities.activityDate));
+
+  // Atrasadas: planificadas con fecha ya pasada y aún sin completar
+  const overdueActivities = await drizzle.select().from(fieldActivities)
+    .where(and(
+      lte(fieldActivities.activityDate, addDaysStr(today, -1) as any),
+      inArray(fieldActivities.status, ["planificada", "en_progreso"]),
+    ))
+    .orderBy(desc(fieldActivities.activityDate))
+    .limit(15);
+
+  // Nombres de parcela de las próximas y atrasadas
+  const futureIds = [...upcomingActivities, ...overdueActivities].map(a => a.id);
+  if (futureIds.length > 0) {
+    const links = await drizzle
+      .select({ activityId: fieldActivityParcels.activityId, name: parcels.name })
+      .from(fieldActivityParcels)
+      .leftJoin(parcels, eq(fieldActivityParcels.parcelId, parcels.id))
+      .where(inArray(fieldActivityParcels.activityId, futureIds));
+    for (const l of links) {
+      if (!parcelsByActivity[l.activityId]) parcelsByActivity[l.activityId] = [];
+      if (l.name) parcelsByActivity[l.activityId].push(l.name);
+    }
+  }
 
   // ── 3. Satelital: último NDVI cacheado por parcela activa ──
   const satelliteLines: string[] = [];
@@ -198,7 +248,6 @@ export async function generateWeeklySummary(options?: { force?: boolean }): Prom
     : "Sin cosecha registrada esta semana.";
 
   // ── 5. Ciclo activo y su etapa ──
-  const today = todayMx();
   const allCycles = await drizzle.select().from(productionCycles)
     .orderBy(desc(productionCycles.startDate)).limit(5);
   const activeCycle = allCycles.find(c => !c.endDate || c.endDate >= today) ?? null;
@@ -215,7 +264,7 @@ export async function generateWeeklySummary(options?: { force?: boolean }): Prom
   }
 
   // ── 6. Prompt y llamada a la IA ──
-  const prompt = `Genera el RESUMEN SEMANAL de una huerta de higo en México para la semana del ${weekStart} al ${weekEnd} (semana pasada).
+  const prompt = `Genera el RESUMEN SEMANAL de una huerta de higo en México para la semana del ${weekStart} al ${weekEnd} (semana pasada). Hoy es ${today}.
 
 ETAPA DEL CULTIVO:
 ${cycleLine}
@@ -223,11 +272,21 @@ ${cycleLine}
 ACTIVIDADES REALIZADAS EN LA SEMANA (${done.length}):
 ${done.length > 0 ? done.map(describeActivity).join("\n") : "- Ninguna registrada"}
 
-ACTIVIDADES QUE QUEDARON PLANIFICADAS O EN PROGRESO (${planned.length}):
+ACTIVIDADES QUE QUEDARON PLANIFICADAS O EN PROGRESO EN ESA SEMANA (${planned.length}):
 ${planned.length > 0 ? planned.map(describeActivity).join("\n") : "- Ninguna"}
 
-CLIMA DE LA SEMANA:
-${weatherLine}
+ACTIVIDADES ATRASADAS (planificadas con fecha vencida y aún sin completar) (${overdueActivities.length}):
+${overdueActivities.length > 0 ? overdueActivities.map(describeActivity).join("\n") : "- Ninguna"}
+
+ACTIVIDADES PLANEADAS PARA LOS PRÓXIMOS 14 DÍAS (${upcomingActivities.length}):
+${upcomingActivities.length > 0 ? upcomingActivities.map(describeActivity).join("\n") : "- Ninguna programada"}
+
+CLIMA DE LA SEMANA PASADA (día a día):
+${weatherDailyLines || weatherLine}
+Resumen: ${weatherLine}
+
+PRONÓSTICO DE LOS PRÓXIMOS DÍAS:
+${forecastLines || "Sin pronóstico disponible."}
 
 DATOS SATELITALES (último NDVI por parcela):
 ${satelliteLines.length > 0 ? satelliteLines.join("\n") : "Sin datos satelitales recientes."}
@@ -235,13 +294,20 @@ ${satelliteLines.length > 0 ? satelliteLines.join("\n") : "Sin datos satelitales
 COSECHA:
 ${harvestLine}
 
-Escribe un panorama ejecutivo en español de 6-10 líneas para el productor:
+Escribe un panorama ejecutivo en español de 8-12 líneas para el productor:
 1) Cómo va el cultivo según la etapa fenológica del higo (considera los días desde la poda y la época del año).
-2) Qué se logró esta semana y qué quedó pendiente.
-3) Cómo afectó (o afectará) el clima.
-4) Estado de vigor según NDVI si hay datos (señala parcelas débiles).
-5) 2-3 recomendaciones concretas para la semana que empieza.
+2) Qué se logró la semana pasada y qué quedó pendiente o atrasado (menciona parcelas por nombre).
+3) Cómo influyó el clima de la semana pasada en las labores realizadas (por ejemplo, si llovió el día de una aplicación).
+4) **Cruza el pronóstico con las actividades planeadas**: di explícitamente qué días convienen o NO convienen para cada labor programada (no aplicar fitosanitarios ni foliares antes de lluvia o con viento fuerte, ajustar riego si viene lluvia, aprovechar días secos para poda, etc.).
+5) Estado de vigor según NDVI si hay datos (señala parcelas débiles).
+6) 2-3 recomendaciones concretas y accionables para los próximos días.
 Tono profesional de ingeniero agrónomo, directo y útil. Sin saludos ni despedidas. Usa párrafos cortos o viñetas.`;
+
+  console.log(
+    `${TAG} Contexto enviado a la IA: ${done.length} labores realizadas, ${planned.length} planificadas de la semana, ` +
+    `${upcomingActivities.length} próximas, ${overdueActivities.length} atrasadas, ` +
+    `${weatherRaw.length} días de clima, ${forecastRaw.length} días de pronóstico, ${satelliteLines.length} parcelas con NDVI`
+  );
 
   try {
     const response = await fetch("https://api.deepseek.com/chat/completions", {
@@ -272,9 +338,13 @@ Tono profesional de ingeniero agrónomo, directo y útil. Sin saludos ni despedi
     const statsJson = JSON.stringify({
       activitiesDone: done.length,
       activitiesPlanned: planned.length,
+      activitiesUpcoming: upcomingActivities.length,
+      activitiesOverdue: overdueActivities.length,
       harvest: harvestStats ? { boxes: harvestStats.total, kg: harvestStats.totalWeight } : null,
       weatherDays: weatherRaw.length,
+      forecastDays: forecastRaw.length,
       satelliteParcels: satelliteLines.length,
+      generatedAt: new Date().toISOString(),
     });
 
     if (existing && options?.force) {

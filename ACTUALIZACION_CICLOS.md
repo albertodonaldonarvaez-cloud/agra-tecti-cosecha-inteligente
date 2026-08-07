@@ -265,3 +265,35 @@ App: compilar **1.4.0 (versionCode 5)** y publicarla en Configuración → App M
 
 > Al instalar la 1.4.0, cada usuario debe iniciar sesión **una última vez** para
 > recibir el token de refresco. A partir de ahí la sesión se mantiene sola.
+
+---
+
+# Quinta entrega: mapas de parcela legibles y resumen con pronóstico
+
+## Los mapitas del dashboard ahora se ven bien
+Antes la imagen satelital se recortaba (`object-cover`) y solo se veía un pedazo
+con pixeles de colores, sin saber qué parte era la parcela. Ahora:
+- **Se ve el mapa completo**, con la **proporción real del terreno** (se corrige
+  incluso la deformación que introduce el muestreo de Sentinel).
+- Se dibuja el **contorno real de la parcela** encima (línea blanca con halo), y
+  **lo que queda fuera se oscurece**: de un vistazo se entiende qué es tu terreno
+  y cómo está el vigor por zonas.
+- **Escala de vigor** (rojo → verde) y fecha de la imagen en la tarjeta.
+- La imagen se sirve desde un endpoint cacheable, así que sigue siendo ligera.
+
+## El resumen de IA ahora ve el futuro
+Al prompt se agregó:
+- **Clima día a día de la semana pasada** (antes solo iba el promedio), para que
+  relacione cada labor con el clima de ese día.
+- **Pronóstico de los próximos 7 días** (temperatura, lluvia, probabilidad y viento).
+- **Actividades planeadas para los próximos 14 días** y **actividades atrasadas**.
+- Instrucción explícita de **cruzar el pronóstico con lo planeado**: qué días
+  convienen o no para cada labor (no fumigar antes de lluvia o con viento, ajustar
+  el riego si viene lluvia, aprovechar días secos para poda, etc.).
+
+Verificado en ejecución: el contexto enviado a la IA incluye 7 días de clima
+pasado, 7 de pronóstico y las actividades próximas/atrasadas.
+
+## Despliegue
+Solo servidor y web: `git pull && docker-compose up -d --build`. Sin migraciones
+ni cambios en la app móvil.

@@ -1261,6 +1261,7 @@ interface ActivityParcel {
   parcelId: number;
   code: string;
   name: string;
+  polygon: string | null;
   hasNdviMap: boolean;
   ndviMapDate: string | null;
   pendingCount: number;
@@ -1274,6 +1275,148 @@ interface ActivityParcel {
     status: string;
     performedBy: string | null;
   }[];
+}
+
+/**
+ * Mapa NDVI de una parcela.
+ *
+ * La imagen satelital cubre el RECTÁNGULO que encierra la parcela, así que se
+ * muestra completa (sin recortar) respetando su proporción geográfica real, y
+ * encima se dibuja el contorno del terreno: lo de afuera se oscurece para que
+ * se distinga de un vistazo qué es la parcela y cómo está su vigor por zonas.
+ */
+function ParcelNdviMap({ parcel }: { parcel: ActivityParcel }) {
+  // Contorno normalizado (0..1) dentro del rectángulo de la imagen
+  const shape = useMemo(() => {
+    if (!parcel.polygon) return null;
+    try {
+      const geo = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon) : parcel.polygon;
+      const ring: [number, number][] =
+        geo?.coordinates?.[0] ?? (Array.isArray(geo) ? geo : null);
+      if (!ring || ring.length < 3) return null;
+
+      let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
+      for (const point of ring) {
+        // Acepta [lng, lat] o {lat, lng}
+        const lng = Array.isArray(point) ? point[0] : (point as any).lng;
+        const lat = Array.isArray(point) ? point[1] : (point as any).lat;
+        if (typeof lng !== "number" || typeof lat !== "number") return null;
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      }
+      const spanLng = maxLng - minLng;
+      const spanLat = maxLat - minLat;
+      if (spanLng <= 0 || spanLat <= 0) return null;
+
+      // Puntos normalizados; Y invertida porque arriba de la imagen es el norte
+      const xy = ring.map((point) => {
+        const lng = Array.isArray(point) ? point[0] : (point as any).lng;
+        const lat = Array.isArray(point) ? point[1] : (point as any).lat;
+        return [
+          Number(((lng - minLng) / spanLng).toFixed(4)),
+          Number(((maxLat - lat) / spanLat).toFixed(4)),
+        ] as [number, number];
+      });
+
+      const points = xy.map(([x, y]) => `${x},${y}`).join(" ");
+      // Rectángulo completo + hueco con la forma de la parcela (fill-rule evenodd)
+      const maskPath =
+        "M0,0 H1 V1 H0 Z M" +
+        xy.map(([x, y]) => `${x},${y}`).join(" L") +
+        " Z";
+
+      // Proporción geográfica real (los grados de longitud "miden" menos según la latitud)
+      const metersLng = spanLng * 111320 * Math.cos(((minLat + maxLat) / 2) * Math.PI / 180);
+      const metersLat = spanLat * 110540;
+      const ratio = metersLat > 0 ? metersLng / metersLat : 1;
+      return { points, maskPath, ratio: Math.min(Math.max(ratio, 0.45), 2.6) };
+    } catch {
+      return null;
+    }
+  }, [parcel.polygon]);
+
+  return (
+    <div className="relative flex h-44 w-full items-center justify-center overflow-hidden bg-gradient-to-br from-slate-100 to-emerald-50 p-2">
+      {parcel.hasNdviMap ? (
+        <div
+          className="relative h-full overflow-hidden rounded-xl shadow-md ring-1 ring-black/10"
+          style={{
+            // Proporción real del terreno: se ve completo, sin recortes ni deformación
+            aspectRatio: String(shape?.ratio ?? 1.4),
+            maxWidth: "100%",
+          }}
+        >
+          {/* La imagen cubre el rectángulo completo: se estira a él sin recortes */}
+          <img
+            src={`/api/parcel-ndvi-map/${parcel.parcelId}`}
+            alt={`NDVI ${parcel.name}`}
+            loading="lazy"
+            className="absolute inset-0 h-full w-full"
+            style={{ objectFit: "fill" }}
+          />
+          {/* Contorno de la parcela + oscurecido de lo que queda fuera */}
+          {shape && (
+            <svg
+              className="absolute inset-0 h-full w-full"
+              viewBox="0 0 1 1"
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
+              <path d={shape.maskPath} fill="rgba(15,23,42,0.45)" fillRule="evenodd" />
+              {/* non-scaling-stroke: el grosor va en píxeles, así el contorno
+                  no se deforma aunque el SVG se estire al rectángulo */}
+              <polygon
+                points={shape.points}
+                fill="none"
+                stroke="rgba(0,0,0,0.55)"
+                strokeWidth={4}
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+              <polygon
+                points={shape.points}
+                fill="none"
+                stroke="white"
+                strokeWidth={2}
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            </svg>
+          )}
+        </div>
+      ) : (
+        <div className="flex h-full w-full flex-col items-center justify-center text-green-500">
+          <MapPin className="h-8 w-8" />
+          <span className="mt-1 text-xs">Sin imagen satelital reciente</span>
+        </div>
+      )}
+
+      <div className="absolute left-2 top-2 rounded-full bg-white/90 px-2.5 py-1 text-xs font-bold text-green-900 shadow">
+        {parcel.name}
+      </div>
+
+      {parcel.hasNdviMap && (
+        <>
+          {/* Escala de vigor NDVI */}
+          <div className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-full bg-white/90 px-2 py-1 shadow">
+            <span className="text-[9px] font-medium text-gray-500">Vigor</span>
+            <span
+              className="h-1.5 w-12 rounded-full"
+              style={{ background: "linear-gradient(90deg,#d73027,#fee08b,#66bd63,#1a9850)" }}
+            />
+            <span className="text-[9px] font-medium text-gray-500">alto</span>
+          </div>
+          {parcel.ndviMapDate && (
+            <div className="absolute bottom-2 right-2 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-medium text-white">
+              {formatShortDate(parcel.ndviMapDate)}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
 }
 
 function ParcelsWithActivitySection({ parcels, onGoAnalysis }: { parcels: ActivityParcel[]; onGoAnalysis: () => void }) {
@@ -1291,25 +1434,8 @@ function ParcelsWithActivitySection({ parcels, onGoAnalysis }: { parcels: Activi
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
         {parcels.map((p) => (
           <GlassCard key={p.parcelId} className="overflow-hidden p-0" hover={false}>
-            {/* Mapa satelital NDVI (cacheado, servido como imagen real) */}
-            <div className="relative h-36 w-full bg-gradient-to-br from-green-100 to-emerald-200">
-              {p.hasNdviMap ? (
-                <img src={`/api/parcel-ndvi-map/${p.parcelId}`} alt={`NDVI ${p.name}`} loading="lazy" className="h-full w-full object-cover" />
-              ) : (
-                <div className="flex h-full w-full flex-col items-center justify-center text-green-500">
-                  <MapPin className="h-8 w-8" />
-                  <span className="mt-1 text-xs">Sin imagen satelital reciente</span>
-                </div>
-              )}
-              <div className="absolute left-2 top-2 rounded-full bg-white/85 px-2.5 py-1 text-xs font-bold text-green-900 shadow">
-                {p.name}
-              </div>
-              {p.ndviMapDate && (
-                <div className="absolute bottom-2 right-2 rounded-full bg-black/50 px-2 py-0.5 text-[10px] font-medium text-white">
-                  NDVI · {formatShortDate(p.ndviMapDate)}
-                </div>
-              )}
-            </div>
+            {/* Mapa satelital NDVI con el contorno real de la parcela */}
+            <ParcelNdviMap parcel={p} />
             {/* Resumen de actividades */}
             <div className="p-3">
               <div className="mb-2 flex items-center gap-2 text-xs">
