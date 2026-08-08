@@ -44,6 +44,10 @@ interface CollaboratorDao {
     @Query("DELETE FROM collaborators_cache WHERE isSynced = 1 AND serverId IS NOT NULL AND serverId NOT IN (:activeServerIds)")
     suspend fun deleteSyncedNotIn(activeServerIds: List<Int>)
 
+    /** El servidor ya no tiene personal activo: se vacía el cache (lo pendiente de subir se conserva) */
+    @Query("DELETE FROM collaborators_cache WHERE isSynced = 1 AND serverId IS NOT NULL")
+    suspend fun deleteAllSynced()
+
     /** Dar otra oportunidad a los rechazados (sync manual del usuario) */
     @Query("UPDATE collaborators_cache SET syncAttempts = 0 WHERE isSynced = 0 AND syncAttempts >= 8")
     suspend fun resetFailedAttempts()

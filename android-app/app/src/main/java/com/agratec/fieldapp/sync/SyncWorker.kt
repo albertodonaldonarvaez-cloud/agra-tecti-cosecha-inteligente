@@ -174,6 +174,9 @@ class SyncWorker(
                         description = note.description,
                         category = note.category,
                         severity = note.severity,
+                        // Una nota puede nacer ya cerrada desde el campo
+                        status = note.status,
+                        resolutionNotes = note.resolutionNotes,
                         parcelId = note.parcelId,
                         latitude = note.latitude,
                         longitude = note.longitude,
@@ -203,6 +206,17 @@ class SyncWorker(
             Log.e(TAG, "Excepción notas", e)
             networkFailed = true
             problems.add("Sin conexión al subir notas")
+        }
+
+        // ── Seguimiento de notas: subir los cierres hechos en el campo y
+        //    bajar las notas del servidor (nuevas, cambios y borrados) ──
+        try {
+            val noteRepo = com.agratec.fieldapp.data.repository.FieldNoteRepository(applicationContext)
+            // Primero se sube: si no, el pull traería el estado viejo del servidor
+            notesSynced += noteRepo.pushStatusChanges()
+            noteRepo.pullFromServer()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error sincronizando el seguimiento de notas", e)
         }
 
         // ── Actividades de la libreta ──

@@ -453,3 +453,73 @@ git pull && docker-compose up -d --build
 
 App: publicar **1.6.0 (versionCode 7)** en Configuración → App Móvil. Los
 teléfonos la ofrecerán al abrir la app.
+
+---
+
+# Octava entrega: los borrados llegan al teléfono y las notas se cierran en campo
+
+## 1. Por qué la app no reflejaba los borrados
+
+Al bajar el personal y el almacén, la app solo quitaba lo eliminado **si el
+servidor devolvía al menos un registro**:
+
+```kotlin
+if (activeIds.isNotEmpty()) dao.deleteSyncedNotIn(activeIds)   // ← el error
+```
+
+Esa guarda era para no vaciar el teléfono si la respuesta venía mal, pero como
+la respuesta ya se valida antes (código HTTP correcto y cuerpo válido), una
+**lista vacía significa de verdad que ya no queda nada activo**. Con la guarda,
+si vaciabas el catálogo en la web el teléfono se quedaba con todo.
+
+Ahora una lista vacía también se refleja: el cache se vacía. Lo que aún no ha
+subido (altas hechas en el campo) **nunca se toca**.
+
+## 2. Lo mismo para las notas de campo
+
+Las notas ni siquiera se bajaban: la app solo mostraba las que ella misma había
+creado. Ahora:
+
+- **Se descargan del servidor**, incluidas las capturadas en la web o por
+  Telegram: en el campo se ve todo lo reportado.
+- **Los borrados llegan al teléfono.** El servidor manda también la lista de
+  folios vivos y la app quita lo que ya no está.
+- Nunca se pisa ni se borra una nota con cambios locales pendientes de subir.
+
+> Detalle técnico: la comparación de folios se hace en memoria y el borrado en
+> lotes de 200. Un `NOT IN` con miles de folios excede el límite de parámetros
+> de SQLite y habría reventado cuando la huerta acumulara notas.
+
+## 3. Seguimiento y cierre de notas desde la app
+
+Tocando una nota se abre su seguimiento:
+
+- Estados: **Abierta · En revisión · En proceso · Resuelta · Descartada**.
+- Al cerrarla se captura **qué se hizo para resolverla**.
+- Queda registrado **quién la cerró y cuándo**, igual que si se hiciera desde la
+  web, y se manda el mismo aviso por Telegram.
+- Funciona **sin señal**: el cambio se aplica al instante en el teléfono y se
+  sube solo al recuperar la red.
+- Si mientras tanto la nota se borró en la web, el servidor lo avisa y la app la
+  quita en lugar de reintentar para siempre.
+
+La lista de notas ahora se filtra por **Abiertas · Cerradas · Todas**, muestra el
+estado de cada una y las cerradas se ven atenuadas con su nota de resolución.
+
+## Cambios en la base de datos
+
+- **Servidor:** ninguno. Se aprovechan las columnas de estado que ya existían en
+  `fieldNotes` (`status`, `resolutionNotes`, `resolvedByUserId`, `resolvedAt`).
+- **Teléfono:** base local a la **versión 6** con migración real (no destructiva);
+  se agregan a las notas el estado, la nota de resolución, el id del servidor y
+  la marca de cambio pendiente. Verificada contra el esquema que Room espera.
+
+## Despliegue
+
+Servidor y web:
+
+```bash
+git pull && docker-compose up -d --build
+```
+
+App: publicar **1.7.0 (versionCode 8)** en Configuración → App Móvil.

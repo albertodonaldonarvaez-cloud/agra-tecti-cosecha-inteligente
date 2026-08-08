@@ -4226,6 +4226,9 @@ IMPORTANTE:
             "infraestructura", "fauna", "otro"
           ]),
           severity: z.enum(["baja", "media", "alta", "critica"]).optional(),
+          // Estado de seguimiento: una nota puede nacer o cerrarse en el campo
+          status: z.enum(["abierta", "en_revision", "en_progreso", "resuelta", "descartada"]).optional(),
+          resolutionNotes: z.string().max(2000).optional(),
           parcelId: z.number().optional(),
           latitude: z.number().optional(),
           longitude: z.number().optional(),
@@ -4246,16 +4249,23 @@ IMPORTANTE:
               .limit(1);
             const isNew = !existingBefore;
 
+            // Si la nota nace ya cerrada desde el campo, se registra quién y cuándo
+            const closing = note.status === "resuelta" || note.status === "descartada";
+
             await drizzle.insert(fieldNotes).values({
               folio: note.folio,
               description: note.description,
               category: note.category as any,
               severity: (note.severity || "media") as any,
+              status: (note.status || "abierta") as any,
+              resolutionNotes: note.resolutionNotes || null,
               syncSource: "mobile" as any,
               parcelId: note.parcelId || null,
               latitude: note.latitude ? String(note.latitude) : null,
               longitude: note.longitude ? String(note.longitude) : null,
               reportedByUserId: userId,
+              resolvedByUserId: closing ? userId : null,
+              resolvedAt: closing ? new Date() : null,
             }).onDuplicateKeyUpdate({
               set: {
                 description: note.description,
@@ -4321,6 +4331,96 @@ IMPORTANTE:
           ? await drizzle.select().from(fieldNotes).where(and(...conditions)).orderBy(desc(fieldNotes.updatedAt)).limit(input.limit)
           : await drizzle.select().from(fieldNotes).orderBy(desc(fieldNotes.updatedAt)).limit(input.limit);
         return notes;
+      }),
+
+    /**
+     * Notas de campo para la app (seguimiento y cierre desde el teléfono).
+     *
+     * Devuelve las notas recientes con su estado y, aparte, TODOS los folios
+     * vivos. Con esa lista el teléfono sabe cuáles se borraron en la web y las
+     * quita de su copia local (la lista de folios pesa muy poco).
+     */
+    getFieldNotes: protectedProcedure
+      .input(z.object({ limit: z.number().max(500).default(200) }).optional())
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new Error("Base de datos no disponible");
+        const limit = input?.limit ?? 200;
+
+        const notes = await drizzle
+          .select({
+            id: fieldNotes.id,
+            folio: fieldNotes.folio,
+            description: fieldNotes.description,
+            category: fieldNotes.category,
+            severity: fieldNotes.severity,
+            status: fieldNotes.status,
+            parcelId: fieldNotes.parcelId,
+            resolutionNotes: fieldNotes.resolutionNotes,
+            createdAt: fieldNotes.createdAt,
+            updatedAt: fieldNotes.updatedAt,
+          })
+          .from(fieldNotes)
+          .orderBy(desc(fieldNotes.createdAt), desc(fieldNotes.id))
+          .limit(limit);
+
+        // Todos los folios vivos: el teléfono borra lo que ya no esté aquí
+        const folioRows = await drizzle.select({ folio: fieldNotes.folio }).from(fieldNotes);
+
+        return {
+          notes: notes.map((n) => ({
+            ...n,
+            createdAt: n.createdAt instanceof Date ? n.createdAt.toISOString() : String(n.createdAt),
+            updatedAt: n.updatedAt instanceof Date ? n.updatedAt.toISOString() : String(n.updatedAt),
+          })),
+          allFolios: folioRows.map((r) => r.folio),
+        };
+      }),
+
+    /**
+     * Cambiar el estado de una nota desde la app (darle seguimiento y cerrarla).
+     * Se identifica por folio, que es la clave que conoce el teléfono.
+     */
+    updateNoteStatus: protectedProcedure
+      .input(z.object({
+        folio: z.string().min(1).max(64),
+        status: z.enum(["abierta", "en_revision", "en_progreso", "resuelta", "descartada"]),
+        resolutionNotes: z.string().max(2000).optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new Error("Base de datos no disponible");
+        const userId = (ctx as any).user?.id || 0;
+
+        const [note] = await drizzle.select({ id: fieldNotes.id })
+          .from(fieldNotes)
+          .where(eq(fieldNotes.folio, input.folio))
+          .limit(1);
+        // La nota ya no existe en el servidor: se le avisa al teléfono para
+        // que la quite en vez de reintentar para siempre
+        if (!note) return { success: true, status: "deleted" as const };
+
+        const updateData: Record<string, unknown> = { status: input.status };
+        if (input.status === "resuelta" || input.status === "descartada") {
+          updateData.resolvedByUserId = userId;
+          updateData.resolvedAt = new Date();
+          if (input.resolutionNotes) updateData.resolutionNotes = input.resolutionNotes;
+        } else if (input.resolutionNotes) {
+          updateData.resolutionNotes = input.resolutionNotes;
+        }
+
+        await drizzle.update(fieldNotes).set(updateData).where(eq(fieldNotes.id, note.id));
+
+        // Mismo aviso por Telegram que cuando se cierra desde la web
+        try {
+          const userName = (ctx as any).user?.name || "App Móvil";
+          const { notifyStatusChange } = await import("./telegramFieldNotesBot");
+          await notifyStatusChange(note.id, input.folio, input.status, userName, input.resolutionNotes);
+        } catch (err) {
+          console.error("[OfflineSync] Error notificando cambio de estado:", err);
+        }
+
+        return { success: true, status: "updated" as const };
       }),
 
     // Obtener parcelas (para selector offline)

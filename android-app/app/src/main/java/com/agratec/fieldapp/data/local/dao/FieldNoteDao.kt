@@ -46,9 +46,51 @@ interface FieldNoteDao {
     @Query("SELECT * FROM field_notes WHERE folio = :folio LIMIT 1")
     suspend fun getByFolio(folio: String): FieldNoteEntity?
 
+    @Update
+    suspend fun update(note: FieldNoteEntity)
+
     /** Eliminar una nota por ID */
     @Query("DELETE FROM field_notes WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    // ── Seguimiento de estado (cerrar notas desde el campo) ──
+
+    /** Cambiar el estado localmente y marcarlo pendiente de subir */
+    @Query("UPDATE field_notes SET status = :status, resolutionNotes = :resolutionNotes, statusDirty = 1 WHERE folio = :folio")
+    suspend fun setStatusLocally(folio: String, status: String, resolutionNotes: String?)
+
+    /** Notas con cambio de estado pendiente de subir (solo las que ya existen en el servidor) */
+    @Query("SELECT * FROM field_notes WHERE statusDirty = 1 AND isSynced = 1 ORDER BY id ASC LIMIT :limit")
+    suspend fun getStatusDirty(limit: Int = 20): List<FieldNoteEntity>
+
+    @Query("SELECT COUNT(*) FROM field_notes WHERE statusDirty = 1")
+    suspend fun getStatusDirtyCount(): Int
+
+    @Query("UPDATE field_notes SET statusDirty = 0 WHERE folio = :folio")
+    suspend fun clearStatusDirty(folio: String)
+
+    // ── Reconciliación con el servidor ──
+
+    /**
+     * Folios ya sincronizados y sin cambios locales pendientes.
+     * Se comparan en memoria contra los folios vivos del servidor: así el
+     * borrado no depende de un NOT IN gigante (SQLite limita los parámetros
+     * de una consulta y con muchas notas fallaría).
+     */
+    @Query("SELECT folio FROM field_notes WHERE isSynced = 1 AND statusDirty = 0")
+    suspend fun getReconcilableFolios(): List<String>
+
+    /** Borrar por folio, en lotes pequeños */
+    @Query("DELETE FROM field_notes WHERE folio IN (:folios)")
+    suspend fun deleteByFolios(folios: List<String>)
+
+    /** El servidor se quedó sin notas: se vacía lo ya sincronizado */
+    @Query("DELETE FROM field_notes WHERE isSynced = 1 AND statusDirty = 0")
+    suspend fun deleteAllSynced()
+
+    /** Borrar una nota por folio (el servidor la eliminó) */
+    @Query("DELETE FROM field_notes WHERE folio = :folio")
+    suspend fun deleteByFolio(folio: String)
 
     /** Contar total de notas */
     @Query("SELECT COUNT(*) FROM field_notes")

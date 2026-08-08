@@ -186,12 +186,11 @@ class ProductRepository(private val context: Context) {
                 }
             }
 
-            // Quitar del selector los dados de baja en la web
-            // (solo los ya sincronizados; los pendientes locales no se tocan)
+            // Quitar los dados de baja en la web. La respuesta llegó bien, así
+            // que una lista vacía significa de verdad "el almacén quedó vacío":
+            // también hay que reflejarlo. Lo pendiente de subir no se toca.
             val activeIds = remote.map { it.id }
-            if (activeIds.isNotEmpty()) {
-                dao.deleteSyncedNotIn(activeIds)
-            }
+            if (activeIds.isEmpty()) dao.deleteAllSynced() else dao.deleteSyncedNotIn(activeIds)
 
             Log.i(TAG, "Productos sincronizados: ${remote.size}")
             true

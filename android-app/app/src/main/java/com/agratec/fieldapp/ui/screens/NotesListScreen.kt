@@ -6,11 +6,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,8 +38,32 @@ import com.agratec.fieldapp.ui.components.*
 import com.agratec.fieldapp.ui.theme.*
 import kotlinx.coroutines.launch
 
+/** Estados de seguimiento de una nota, en el orden en que avanzan */
+private val NOTE_STATUSES = listOf(
+    "abierta" to "Abierta",
+    "en_revision" to "En revisión",
+    "en_progreso" to "En proceso",
+    "resuelta" to "Resuelta",
+    "descartada" to "Descartada",
+)
+
+fun noteStatusLabel(status: String): String =
+    NOTE_STATUSES.find { it.first == status }?.second ?: status
+
+fun noteStatusColor(status: String): Color = when (status) {
+    "resuelta" -> StatusResolved
+    "descartada" -> TextTertiary
+    "en_progreso" -> SyncPending
+    "en_revision" -> StatusInProgress
+    else -> StatusOpen
+}
+
+/** Una nota cerrada ya no necesita seguimiento */
+private fun isNoteClosed(status: String) = status == "resuelta" || status == "descartada"
+
 /**
- * Notas de campo: observaciones rápidas del recorrido (plagas, riego, daños…).
+ * Notas de campo: observaciones rápidas del recorrido (plagas, riego, daños…),
+ * con seguimiento para cerrarlas desde el propio campo.
  */
 @Composable
 fun NotesListScreen(
@@ -46,7 +73,7 @@ fun NotesListScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repository = remember { FieldNoteRepository(context) }
-    val notes by repository.getAllNotes().collectAsState(initial = emptyList())
+    val allNotes by repository.getAllNotes().collectAsState(initial = emptyList())
     var unsyncedCount by remember { mutableIntStateOf(0) }
     var unsyncedPhotoCount by remember { mutableIntStateOf(0) }
     var failedPhotoCount by remember { mutableIntStateOf(0) }
@@ -54,16 +81,44 @@ fun NotesListScreen(
     var diagnostics by remember { mutableStateOf<PhotoDiagnostics?>(null) }
     var diagLoading by remember { mutableStateOf(false) }
 
+    var filter by rememberSaveable { mutableStateOf("abiertas") } // abiertas | cerradas | todas
+    var followUpNote by remember { mutableStateOf<FieldNoteEntity?>(null) }
+
     val syncStatus by SyncStatus.state.collectAsState()
 
-    LaunchedEffect(notes) {
+    LaunchedEffect(allNotes) {
         unsyncedCount = repository.getUnsyncedNoteCount()
         unsyncedPhotoCount = repository.getUnsyncedPhotoCount()
         failedPhotoCount = repository.getFailedPhotoCount()
     }
 
-    val criticalCount = notes.count { it.severity == "critica" }
-    val highCount = notes.count { it.severity == "alta" }
+    // Al entrar: traer del servidor las notas nuevas, los cambios y los borrados
+    LaunchedEffect(Unit) { repository.pullFromServer() }
+
+    val openCount = allNotes.count { !isNoteClosed(it.status) }
+    val closedCount = allNotes.size - openCount
+    val notes = when (filter) {
+        "abiertas" -> allNotes.filter { !isNoteClosed(it.status) }
+        "cerradas" -> allNotes.filter { isNoteClosed(it.status) }
+        else -> allNotes
+    }
+
+    val criticalCount = allNotes.count { it.severity == "critica" && !isNoteClosed(it.status) }
+    val highCount = allNotes.count { it.severity == "alta" && !isNoteClosed(it.status) }
+
+    // ── Seguimiento: cambiar el estado de una nota ──
+    followUpNote?.let { note ->
+        NoteFollowUpDialog(
+            note = note,
+            onDismiss = { followUpNote = null },
+            onSave = { status, resolution ->
+                scope.launch {
+                    repository.setNoteStatus(note.folio, status, resolution)
+                    followUpNote = null
+                }
+            },
+        )
+    }
 
     // ===== DIAGNÓSTICO DE FOTOS =====
     if (showDiagDialog) {
@@ -147,7 +202,7 @@ fun NotesListScreen(
     Column(Modifier.fillMaxSize()) {
         AgraHeader(
             title = "Notas de Campo",
-            subtitle = "${notes.size} nota${if (notes.size == 1) "" else "s"} registrada${if (notes.size == 1) "" else "s"}",
+            subtitle = "$openCount abierta${if (openCount == 1) "" else "s"} · $closedCount cerrada${if (closedCount == 1) "" else "s"}",
             badge = if (unsyncedCount > 0) "$unsyncedCount sin subir" else null,
             actions = {
                 AgraSyncAction(unsyncedCount = unsyncedCount, onClick = onSync)
@@ -165,8 +220,19 @@ fun NotesListScreen(
             )
         }
 
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            AgraChip("📌 Abiertas ($openCount)", filter == "abiertas", onClick = { filter = "abiertas" })
+            AgraChip("✅ Cerradas", filter == "cerradas", onClick = { filter = "cerradas" })
+            AgraChip("Todas", filter == "todas", onClick = { filter = "todas" })
+        }
+
         LazyColumn(
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 160.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 160.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
@@ -207,17 +273,17 @@ fun NotesListScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     StatCard(
-                        label = "Total", value = notes.size, icon = Icons.Default.Description,
+                        label = "Abiertas", value = openCount, icon = Icons.Default.Description,
                         iconColor = AgraGreen, iconBgColor = AgraGreen.copy(alpha = 0.12f),
                         modifier = Modifier.weight(1f),
                     )
                     StatCard(
-                        label = "Pendientes", value = unsyncedCount, icon = Icons.Default.CloudUpload,
+                        label = "Sin subir", value = unsyncedCount, icon = Icons.Default.CloudUpload,
                         iconColor = SyncPending, iconBgColor = SyncPending.copy(alpha = 0.12f),
                         modifier = Modifier.weight(1f),
                     )
                     StatCard(
-                        label = "Críticas", value = criticalCount + highCount, icon = Icons.Default.Warning,
+                        label = "Urgentes", value = criticalCount + highCount, icon = Icons.Default.Warning,
                         iconColor = SeverityCritical, iconBgColor = SeverityCritical.copy(alpha = 0.12f),
                         modifier = Modifier.weight(1f),
                     )
@@ -228,30 +294,40 @@ fun NotesListScreen(
                 item {
                     AgraEmptyState(
                         emoji = "📝",
-                        title = "No hay notas de campo",
-                        message = "Crea una nota para reportar lo que observaste en el recorrido.",
+                        title = when (filter) {
+                            "abiertas" -> "No hay notas abiertas"
+                            "cerradas" -> "Todavía no hay notas cerradas"
+                            else -> "No hay notas de campo"
+                        },
+                        message = if (filter == "abiertas" && allNotes.isNotEmpty())
+                            "Todo lo reportado ya quedó atendido."
+                        else "Crea una nota para reportar lo que observaste en el recorrido.",
                         modifier = Modifier.fillParentMaxHeight(0.55f),
                     )
                 }
             }
 
-            items(notes, key = { it.id }) { note -> NoteCard(note) }
+            items(notes, key = { it.id }) { note ->
+                NoteCard(note, onClick = { followUpNote = note })
+            }
         }
     }
 }
 
 @Composable
-private fun NoteCard(note: FieldNoteEntity) {
+private fun NoteCard(note: FieldNoteEntity, onClick: () -> Unit) {
     val catColor = getCatColor(note.category)
-    val isHighPriority = note.severity == "critica" || note.severity == "alta"
+    val closed = isNoteClosed(note.status)
+    val isHighPriority = !closed && (note.severity == "critica" || note.severity == "alta")
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .shadow(elevation = 3.dp, shape = RoundedCornerShape(20.dp), ambientColor = Color.Black.copy(alpha = 0.06f))
             .clip(RoundedCornerShape(20.dp))
-            .background(Color.White.copy(alpha = 0.8f))
+            .background(Color.White.copy(alpha = if (closed) 0.55f else 0.8f))
             .border(0.5.dp, CardBorder.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick)
             // Franja de prioridad a la izquierda
             .then(
                 if (isHighPriority) Modifier.drawBehind {
@@ -293,6 +369,11 @@ private fun NoteCard(note: FieldNoteEntity) {
                         },
                         showDot = true,
                     )
+                    Spacer(Modifier.width(6.dp))
+                    StatusBadge(
+                        text = noteStatusLabel(note.status),
+                        color = noteStatusColor(note.status),
+                    )
                 }
 
                 Spacer(Modifier.height(6.dp))
@@ -302,6 +383,15 @@ private fun NoteCard(note: FieldNoteEntity) {
                     fontSize = 13.sp, color = TextSecondary, maxLines = 2,
                     overflow = TextOverflow.Ellipsis, lineHeight = 18.sp,
                 )
+
+                if (!note.resolutionNotes.isNullOrBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "✔ ${note.resolutionNotes}",
+                        fontSize = 12.sp, color = AgraEmerald600, maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
 
                 Spacer(Modifier.height(10.dp))
 
@@ -322,11 +412,12 @@ private fun NoteCard(note: FieldNoteEntity) {
                         Text(note.folio.take(8), fontSize = 10.sp, fontWeight = FontWeight.Medium, color = TextTertiary)
                     }
 
+                    val pending = !note.isSynced || note.statusDirty
                     StatusBadge(
-                        text = if (note.isSynced) "Sincronizado" else "Pendiente",
-                        color = if (note.isSynced) SyncOk else SyncPending,
+                        text = if (pending) "Pendiente" else "Sincronizado",
+                        color = if (pending) SyncPending else SyncOk,
                         showDot = true,
-                        backgroundColor = if (note.isSynced) SyncOk.copy(alpha = 0.06f) else SyncPending.copy(alpha = 0.06f),
+                        backgroundColor = if (pending) SyncPending.copy(alpha = 0.06f) else SyncOk.copy(alpha = 0.06f),
                     )
                 }
             }
@@ -353,6 +444,89 @@ private fun getCatLabel(c: String): String = when (c) {
     "riego_drenaje" -> "Riego/Drenaje"; "dano_mecanico" -> "Daño Mecánico"
     "maleza" -> "Maleza"; "fertilizacion" -> "Fertilización"; "suelo" -> "Suelo"
     "infraestructura" -> "Infraestructura"; "fauna" -> "Fauna"; else -> "Otro"
+}
+
+/**
+ * Seguimiento de una nota: avanzar su estado y cerrarla desde el campo.
+ * Funciona sin señal; el cambio se sube en cuanto hay red.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun NoteFollowUpDialog(
+    note: FieldNoteEntity,
+    onDismiss: () -> Unit,
+    onSave: (status: String, resolutionNotes: String?) -> Unit,
+) {
+    var status by remember { mutableStateOf(note.status) }
+    var resolution by remember { mutableStateOf(note.resolutionNotes ?: "") }
+    val closing = isNoteClosed(status)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Seguimiento de la nota", color = TextPrimary, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(getCatIcon(note.category), null, tint = getCatColor(note.category), modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(getCatLabel(note.category), color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Text("\"${note.description.take(200)}\"", color = TextSecondary, fontSize = 13.sp)
+
+                Text("¿Cómo va?", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    NOTE_STATUSES.forEach { (value, label) ->
+                        AgraChip(
+                            label = label,
+                            selected = status == value,
+                            onClick = { status = value },
+                            color = noteStatusColor(value),
+                        )
+                    }
+                }
+
+                if (closing) {
+                    AgraTextField(
+                        value = resolution,
+                        onValueChange = { resolution = it.take(2000) },
+                        label = "¿Qué se hizo para resolverla?",
+                        singleLine = false,
+                        minLines = 2,
+                    )
+                }
+
+                if (!note.isSynced) {
+                    Text(
+                        "Esta nota todavía no sube al servidor; el cambio viajará junto con ella.",
+                        color = TextTertiary, fontSize = 11.sp,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(status, resolution.ifBlank { null }) },
+                enabled = status != note.status || resolution != (note.resolutionNotes ?: ""),
+            ) {
+                Text(
+                    if (closing) "Cerrar nota" else "Guardar",
+                    color = AgraGreen,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancelar", color = TextTertiary) }
+        },
+        containerColor = Color.White,
+        shape = RoundedCornerShape(20.dp),
+    )
 }
 
 @Composable

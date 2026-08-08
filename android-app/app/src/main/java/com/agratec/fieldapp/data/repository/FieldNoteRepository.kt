@@ -81,8 +81,146 @@ class FieldNoteRepository(private val context: Context) {
     /** Eliminar nota por ID */
     suspend fun deleteNote(id: Long) = noteDao.deleteById(id)
 
-    /** Contar notas pendientes de sync */
-    suspend fun getUnsyncedNoteCount(): Int = noteDao.getUnsyncedCount()
+    /** Contar notas pendientes de sync (altas + cambios de estado) */
+    suspend fun getUnsyncedNoteCount(): Int =
+        noteDao.getUnsyncedCount() + noteDao.getStatusDirtyCount()
+
+    // ============================================
+    // SEGUIMIENTO DE NOTAS (cerrar desde el campo)
+    // ============================================
+
+    /**
+     * Cambiar el estado de una nota desde el teléfono.
+     * Se aplica de inmediato en local y queda marcado para subir; funciona
+     * igual sin señal.
+     */
+    suspend fun setNoteStatus(folio: String, status: String, resolutionNotes: String? = null) {
+        noteDao.setStatusLocally(folio, status, resolutionNotes?.takeIf { it.isNotBlank() })
+        Log.i(TAG, "Nota $folio -> $status (pendiente de subir)")
+        com.agratec.fieldapp.sync.SyncWorker.enqueueImmediateSync(context)
+    }
+
+    /**
+     * Subir los cambios de estado hechos en el campo.
+     * Si el servidor responde que la nota ya no existe, se borra localmente
+     * en vez de reintentar para siempre.
+     */
+    suspend fun pushStatusChanges(): Int {
+        val dirty = noteDao.getStatusDirty()
+        if (dirty.isEmpty()) return 0
+        val api = com.agratec.fieldapp.data.remote.RetrofitClient.getApiService(context)
+        var pushed = 0
+        for (note in dirty) {
+            try {
+                val response = api.updateNoteStatus(
+                    com.agratec.fieldapp.data.remote.dto.TrpcMutationRequest(
+                        com.agratec.fieldapp.data.remote.dto.UpdateNoteStatusRequest(
+                            folio = note.folio,
+                            status = note.status,
+                            resolutionNotes = note.resolutionNotes,
+                        )
+                    )
+                )
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "Error HTTP subiendo estado de ${note.folio}: ${response.code()}")
+                    continue
+                }
+                val data = response.body()?.result?.data?.json
+                if (data?.status == "deleted") {
+                    noteDao.deleteByFolio(note.folio)
+                    Log.i(TAG, "Nota ${note.folio} ya no existe en el servidor: eliminada del teléfono")
+                } else {
+                    noteDao.clearStatusDirty(note.folio)
+                    pushed++
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error subiendo estado de ${note.folio}", e)
+            }
+        }
+        return pushed
+    }
+
+    /**
+     * Bajar las notas del servidor y fundirlas con las locales.
+     *
+     * - Las notas creadas en la web o por Telegram aparecen en el teléfono.
+     * - Las que se borraron en la web se quitan de aquí.
+     * - Nunca se pisa una nota con cambios locales pendientes de subir.
+     */
+    suspend fun pullFromServer(): Boolean {
+        return try {
+            val api = com.agratec.fieldapp.data.remote.RetrofitClient.getApiService(context)
+            val response = api.getFieldNotes("""{"json":{"limit":200}}""")
+            if (!response.isSuccessful) {
+                Log.w(TAG, "Error HTTP al bajar notas: ${response.code()}")
+                return false
+            }
+            val body = response.body()?.result?.data?.json ?: return false
+            val remote = body.notes ?: emptyList()
+
+            var created = 0
+            var updated = 0
+            for (r in remote) {
+                val local = noteDao.getByFolio(r.folio)
+                if (local == null) {
+                    noteDao.insert(
+                        FieldNoteEntity(
+                            folio = r.folio,
+                            description = r.description ?: "",
+                            category = r.category ?: "otro",
+                            severity = r.severity ?: "media",
+                            parcelId = r.parcelId,
+                            createdAtLocal = r.createdAt ?: Instant.now().toString(),
+                            serverId = r.id,
+                            status = r.status ?: "abierta",
+                            resolutionNotes = r.resolutionNotes,
+                            statusDirty = false,
+                            isSynced = true,
+                        )
+                    )
+                    created++
+                } else if (local.isSynced && !local.statusDirty) {
+                    // Sin cambios locales pendientes: manda la versión del servidor
+                    noteDao.update(
+                        local.copy(
+                            serverId = r.id,
+                            description = r.description ?: local.description,
+                            category = r.category ?: local.category,
+                            severity = r.severity ?: local.severity,
+                            parcelId = r.parcelId ?: local.parcelId,
+                            status = r.status ?: local.status,
+                            resolutionNotes = r.resolutionNotes,
+                        )
+                    )
+                    updated++
+                }
+            }
+
+            // Borrados en la web: se quitan del teléfono. La respuesta llegó
+            // bien, así que una lista vacía significa que ya no queda ninguna.
+            // Lo pendiente de subir (altas o cambios de estado) nunca se toca.
+            var removed = 0
+            val liveFolios = body.allFolios
+            if (liveFolios != null) {
+                if (liveFolios.isEmpty()) {
+                    noteDao.deleteAllSynced()
+                } else {
+                    // La comparación va en memoria y el borrado por lotes: un
+                    // NOT IN con miles de folios excede el límite de SQLite
+                    val live = liveFolios.toHashSet()
+                    val obsolete = noteDao.getReconcilableFolios().filterNot { live.contains(it) }
+                    obsolete.chunked(200).forEach { noteDao.deleteByFolios(it) }
+                    removed = obsolete.size
+                }
+            }
+
+            Log.i(TAG, "Pull de notas: $created nuevas, $updated actualizadas, $removed eliminadas en la web")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Error bajando notas", e)
+            false
+        }
+    }
 
     // ============================================
     // FOTOS

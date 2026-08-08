@@ -1,5 +1,6 @@
 package com.agratec.fieldapp.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -11,6 +12,9 @@ import androidx.room.PrimaryKey
  *
  * [isSynced] indica si la nota ya fue enviada exitosamente al backend.
  * El SyncWorker lee las notas con isSynced = false y las envía en batch.
+ *
+ * Las notas también se BAJAN del servidor (las capturadas en la web o por
+ * Telegram), para poder darles seguimiento y cerrarlas desde el campo.
  */
 @Entity(
     tableName = "field_notes",
@@ -41,6 +45,24 @@ data class FieldNoteEntity(
 
     /** Timestamp local (ISO 8601) de cuando se creó la nota */
     val createdAtLocal: String,
+
+    /** ID en el servidor (null si la nota nació en el teléfono y aún no sube) */
+    val serverId: Int? = null,
+
+    /** Estado de seguimiento: abierta, en_revision, en_progreso, resuelta, descartada */
+    @ColumnInfo(defaultValue = "abierta")
+    val status: String = "abierta",
+
+    /** Qué se hizo para resolverla (se captura al cerrarla) */
+    val resolutionNotes: String? = null,
+
+    /**
+     * Hay un cambio de estado hecho en el campo pendiente de subir.
+     * Se maneja aparte de [isSynced] para no reenviar la nota completa: al
+     * cerrar una nota solo viaja su nuevo estado.
+     */
+    @ColumnInfo(defaultValue = "0")
+    val statusDirty: Boolean = false,
 
     /** Flag de sincronización: false = pendiente, true = enviado OK */
     val isSynced: Boolean = false,

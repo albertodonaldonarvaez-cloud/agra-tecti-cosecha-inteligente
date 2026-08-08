@@ -178,12 +178,12 @@ class CollaboratorRepository(private val context: Context) {
             // Los puestos en uso también alimentan el selector
             CatalogPreferences.setRolesFromServer(context, remote.mapNotNull { it.role })
 
-            // Quitar del selector a los dados de baja/desactivados en la web
-            // (solo los ya sincronizados; los pendientes locales no se tocan)
+            // Quitar a los dados de baja en la web. La respuesta llegó bien
+            // (isSuccessful + cuerpo válido), así que una lista vacía significa
+            // de verdad "ya no queda nadie activo": también hay que reflejarlo.
+            // Solo se borran los ya sincronizados; lo pendiente de subir no se toca.
             val activeIds = remote.map { it.id }
-            if (activeIds.isNotEmpty()) {
-                dao.deleteSyncedNotIn(activeIds)
-            }
+            if (activeIds.isEmpty()) dao.deleteAllSynced() else dao.deleteSyncedNotIn(activeIds)
 
             Log.i(TAG, "Colaboradores sincronizados: ${remote.size}")
             true

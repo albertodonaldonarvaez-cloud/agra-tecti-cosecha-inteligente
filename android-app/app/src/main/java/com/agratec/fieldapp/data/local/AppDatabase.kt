@@ -33,12 +33,14 @@ import com.agratec.fieldapp.data.local.entity.ProductEntity
  *          y fotos de actividades.
  * v4 → v5: almacén de productos (products_cache) y consumo de productos en
  *          actividades (planeado vs utilizado).
+ * v5 → v6: seguimiento de notas de campo (estado, notas de resolución y
+ *          vínculo con el servidor) para poder cerrarlas desde el teléfono.
  * Las migraciones son REALES (no destructivas) para no perder datos pendientes
  * de sincronizar en los dispositivos de campo.
  */
 @Database(
     entities = [FieldNoteEntity::class, PhotoEntity::class, ParcelEntity::class, FieldActivityEntity::class, CollaboratorEntity::class, ActivityPhotoEntity::class, ProductEntity::class],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -150,6 +152,16 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v5 → v6: estado y seguimiento de las notas de campo */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `field_notes` ADD COLUMN `serverId` INTEGER")
+                db.execSQL("ALTER TABLE `field_notes` ADD COLUMN `status` TEXT NOT NULL DEFAULT 'abierta'")
+                db.execSQL("ALTER TABLE `field_notes` ADD COLUMN `resolutionNotes` TEXT")
+                db.execSQL("ALTER TABLE `field_notes` ADD COLUMN `statusDirty` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -157,7 +169,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "agra_field_notes.db"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     // Solo como último recurso para saltos sin ruta de migración
                     .fallbackToDestructiveMigration()
                     .build()

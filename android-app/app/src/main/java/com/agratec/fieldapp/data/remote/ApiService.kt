@@ -60,6 +60,22 @@ interface ApiService {
         @Body body: TrpcMutationRequest<SyncNotesRequest>
     ): Response<TrpcResponse<SyncNotesResponseData>>
 
+    /**
+     * Descargar las notas del servidor (incluidas las capturadas en la web o
+     * por Telegram) junto con todos los folios vivos, para poder darles
+     * seguimiento en el campo y borrar localmente lo que ya se eliminó.
+     */
+    @GET("api/trpc/offlineSync.getFieldNotes")
+    suspend fun getFieldNotes(
+        @Query("input") inputJson: String
+    ): Response<TrpcResponse<FieldNotesResponseData>>
+
+    /** Cambiar el estado de una nota desde el campo (darle seguimiento / cerrarla) */
+    @POST("api/trpc/offlineSync.updateNoteStatus")
+    suspend fun updateNoteStatus(
+        @Body body: TrpcMutationRequest<UpdateNoteStatusRequest>
+    ): Response<TrpcResponse<UpdateNoteStatusResponseData>>
+
     // ============================================
     // OFFLINE SYNC — FOTOS
     // ============================================
