@@ -269,6 +269,42 @@ async function migrate() {
     };
     // Las nuevas van al FINAL: MySQL guarda los ENUM por índice y así ningún
     // valor ya almacenado cambia de significado.
+    // ── Fecha real de la pasada satelital (0022) ──────────────
+    // mapDate es la clave del cache ('latest'); captureDate es cuándo pasó de
+    // verdad el satélite, que es lo que se le muestra al productor.
+    await ensureColumn('parcelSatelliteCache', 'captureDate',
+      "ALTER TABLE parcelSatelliteCache ADD COLUMN captureDate VARCHAR(32) NULL");
+    await ensureColumn('parcelSatelliteCache', 'clearPct',
+      "ALTER TABLE parcelSatelliteCache ADD COLUMN clearPct INT NULL");
+    // Sin índice único, cada sync insertaba una fila más y la tabla crecía sin
+    // control (son imágenes en base64). El índice permite que el upsert que ya
+    // usaba el código funcione de verdad.
+    try {
+      const [dupes] = await conn.query(
+        `SELECT parcelId, dataType, indexType, mapDate, COUNT(*) n
+           FROM parcelSatelliteCache
+          GROUP BY parcelId, dataType, indexType, mapDate HAVING n > 1`
+      );
+      if (dupes.length > 0) {
+        // Conservar solo la fila más reciente de cada combinación
+        await conn.query(
+          `DELETE c FROM parcelSatelliteCache c
+             JOIN (SELECT MAX(id) keepId, parcelId, dataType, indexType, mapDate
+                     FROM parcelSatelliteCache
+                    GROUP BY parcelId, dataType, indexType, mapDate) k
+               ON c.parcelId = k.parcelId AND c.dataType = k.dataType
+              AND c.indexType = k.indexType
+              AND (c.mapDate <=> k.mapDate)
+            WHERE c.id <> k.keepId`
+        );
+        console.log(`[Migration] parcelSatelliteCache: ${dupes.length} grupo(s) duplicado(s) depurado(s)`);
+      }
+      await ensureIndex('parcelSatelliteCache', 'parcelSatelliteCache_slot_unique',
+        "ALTER TABLE parcelSatelliteCache ADD UNIQUE INDEX parcelSatelliteCache_slot_unique (parcelId, dataType, indexType, mapDate)");
+    } catch (e) {
+      console.log('[Migration] parcelSatelliteCache sin deduplicar:', e.message);
+    }
+
     const UNITS_SQL = "'kg','g','lt','ml','ton','bulto','saco','unidad','otro','oz','lb','gal'";
     await ensureEnumValue('warehouseProducts', 'unit', 'oz',
       `ALTER TABLE warehouseProducts MODIFY COLUMN unit ENUM(${UNITS_SQL}) NOT NULL DEFAULT 'kg'`);

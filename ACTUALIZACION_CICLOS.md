@@ -523,3 +523,79 @@ git pull && docker-compose up -d --build
 ```
 
 App: publicar **1.7.0 (versionCode 8)** en Configuración → App Móvil.
+
+---
+
+# Novena entrega: la imagen satelital es la última pasada realmente despejada
+
+## Qué significaba la fecha del Dashboard (y por qué casi nunca aparecía)
+
+El recuadro con la fecha mostraba `parcelSatelliteCache.mapDate`, que **no es
+cuándo pasó el satélite**: es la fecha que se pidió cuando se guardó la imagen.
+Peor aún, la imagen tampoco era de un día concreto: se pedía un **mosaico de los
+15 días previos** quedándose con lo menos nublado de cada píxel.
+
+Además:
+
+- El sync semanal guardaba `mapDate = 'latest'`, y como eso no es una fecha, el
+  Dashboard ocultaba el recuadro. Por eso solo dos parcelas mostraban fecha: las
+  que alguien había consultado a mano desde Análisis de Parcela.
+- Esas dos fechas (24 oct y 25 nov de 2025) eran de esa consulta manual, no de
+  la imagen que se estaba viendo.
+
+## Ahora se busca la última pasada despejada de ESA parcela
+
+Antes de traer la imagen, el sistema pregunta a Copernicus **qué días pasó el
+satélite sobre la parcela y qué tan despejada se veía cada vez**, usando la banda
+de clasificación de escena (SCL) de Sentinel-2 para descartar nubes, sombras de
+nube, cirros y nieve.
+
+Lo importante: **la nubosidad se mide sobre el polígono de la parcela**, no sobre
+la escena completa (que cubre unos 110 km). Una escena puede venir marcada como
+muy nublada y tener la huerta perfectamente despejada — y al revés. El filtro
+anterior (`maxCloudCoverage: 30` sobre la escena) descartaba pasadas buenas solo
+porque había nubes a kilómetros de distancia.
+
+Con eso:
+
+1. Se elige la **pasada más reciente con al menos 85% de la parcela despejada**.
+2. Se trae la imagen **de ese día exacto** (una sola pasada, ya no un mosaico).
+3. Se guarda la **fecha real de captura** y el porcentaje despejado.
+4. Si en 60 días no hubo ninguna pasada que llegue al 85% (temporada de lluvias),
+   se usa la mejor disponible; y si no hubo ninguna, se cae al mosaico de antes y
+   **no se muestra fecha**, para no enseñar una que no corresponde.
+
+El recuadro del Dashboard ahora muestra la fecha real con un icono de satélite, y
+al pasar el cursor dice cuánto se veía despejada la parcela ese día.
+
+> La búsqueda de la pasada depende de la parcela, no del índice: en el sync
+> semanal se hace **una vez por parcela** y se reutiliza para NDVI, NDRE y NDMI.
+
+## Un problema de fondo que apareció de paso
+
+`parcelSatelliteCache` **no tenía índice único**, así que el `ON DUPLICATE KEY
+UPDATE` que usaba el código nunca aplicaba: cada sincronización **insertaba una
+fila más** con la imagen en base64 y la tabla crecía sin control. La migración:
+
+1. Depura los duplicados conservando la fila más reciente de cada combinación.
+2. Crea el índice único `(parcelId, dataType, indexType, mapDate)`.
+
+Verificado con datos sembrados: de 7 filas con duplicados quedaron las 4
+correctas (la imagen más reciente de cada ranura, la de fecha manual y la de la
+otra parcela), y a partir de ahí el guardado reemplaza en lugar de duplicar.
+
+## Cambios en la base de datos (automáticos)
+
+- `parcelSatelliteCache.captureDate` — fecha real de la pasada del satélite.
+- `parcelSatelliteCache.clearPct` — porcentaje de la parcela despejado ese día.
+- Índice único + depuración de duplicados (descrito arriba).
+
+## Despliegue
+
+```bash
+git pull && docker-compose up -d --build
+```
+
+Las fechas correctas aparecen conforme se refresque el cache: en la
+sincronización satelital semanal, o de inmediato al entrar a Análisis de Parcela
+(el cache de mapas dura 7 días). Sin cambios en la app móvil.

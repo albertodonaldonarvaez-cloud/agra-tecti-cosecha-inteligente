@@ -347,6 +347,126 @@ export async function getIndexHistory(
 export const getNDVIHistory = (polygon: any, from: string, to: string) =>
   getIndexHistory(polygon, from, to, "NDVI");
 
+// ============ BÚSQUEDA DE LA ÚLTIMA PASADA DESPEJADA ============
+
+/**
+ * Evalscript que marca cada píxel como despejado (1) o tapado (0) usando la
+ * banda SCL de clasificación de escena de Sentinel-2 L2A.
+ *
+ * El promedio de esta banda sobre el polígono es directamente el porcentaje de
+ * la parcela que se ve limpio ese día.
+ */
+const CLEAR_FRACTION_EVALSCRIPT = `//VERSION=3
+function setup() {
+  return {
+    input: ["SCL", "dataMask"],
+    output: [
+      { id: "clear", bands: 1, sampleType: "FLOAT32" },
+      { id: "dataMask", bands: 1 }
+    ]
+  };
+}
+function evaluatePixel(s) {
+  // Clases SCL que NO sirven: 0 sin datos, 1 saturado, 3 sombra de nube,
+  // 8 nube probabilidad media, 9 nube probabilidad alta, 10 cirros, 11 nieve
+  var tapado = s.SCL === 0 || s.SCL === 1 || s.SCL === 3 ||
+               s.SCL === 8 || s.SCL === 9 || s.SCL === 10 || s.SCL === 11;
+  return { clear: [tapado ? 0 : 1], dataMask: [s.dataMask] };
+}`;
+
+export interface ClearPass {
+  /** Fecha real de la pasada del satélite (YYYY-MM-DD) */
+  date: string;
+  /** Porcentaje de la parcela que se ve despejado ese día (0-100) */
+  clearPct: number;
+}
+
+/**
+ * Lista las pasadas de Sentinel-2 sobre ESTA parcela, con qué tan despejada
+ * se ve cada una, de la más reciente a la más antigua.
+ *
+ * Importante: la nubosidad se mide sobre el polígono de la parcela, no sobre
+ * la escena completa (que cubre ~110 km). Una escena puede venir marcada como
+ * muy nublada y aun así tener la huerta perfectamente despejada, y al revés.
+ */
+export async function listClearPasses(
+  polygon: any,
+  days = 60,
+): Promise<ClearPass[]> {
+  const token = await getAccessToken();
+  const to = new Date();
+  const from = new Date(to.getTime() - days * 86400000);
+  const fmt = (d: Date) => d.toISOString().split("T")[0];
+
+  const requestBody = {
+    input: {
+      bounds: { geometry: { type: "Polygon", coordinates: polygon.coordinates } },
+      data: [{ type: "sentinel-2-l2a" }],
+    },
+    aggregation: {
+      timeRange: { from: `${fmt(from)}T00:00:00Z`, to: `${fmt(to)}T23:59:59Z` },
+      // Un intervalo por día: así cada resultado es una pasada real del satélite
+      aggregationInterval: { of: "P1D" },
+      resx: 20, // SCL es de 20 m
+      resy: 20,
+      evalscript: CLEAR_FRACTION_EVALSCRIPT,
+    },
+  };
+
+  const res = await fetch(STATS_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error("[Copernicus] Error buscando pasadas despejadas:", res.status, errText.slice(0, 300));
+    return [];
+  }
+
+  const data = await res.json();
+  const passes: ClearPass[] = [];
+  for (const interval of data.data ?? []) {
+    // Los días sin pasada vienen con error o sin estadísticas: se ignoran
+    const stats = interval.outputs?.clear?.bands?.B0?.stats;
+    if (!stats || !stats.sampleCount) continue;
+    const date = interval.interval?.from?.split("T")[0];
+    if (!date) continue;
+    passes.push({ date, clearPct: Math.round((stats.mean ?? 0) * 100) });
+  }
+
+  // De la más reciente a la más antigua
+  passes.sort((a, b) => b.date.localeCompare(a.date));
+  return passes;
+}
+
+/**
+ * Última pasada utilizable sobre la parcela.
+ *
+ * Se busca la más reciente que supere [minClearPct]; si en la ventana no hubo
+ * ninguna así (temporada de lluvias, por ejemplo), se devuelve la más despejada
+ * de todas para no dejar la parcela sin imagen.
+ */
+export async function findLatestClearPass(
+  polygon: any,
+  options?: { days?: number; minClearPct?: number },
+): Promise<ClearPass | null> {
+  const minClearPct = options?.minClearPct ?? 85;
+  const passes = await listClearPasses(polygon, options?.days ?? 60);
+  if (passes.length === 0) return null;
+
+  const clear = passes.find((p) => p.clearPct >= minClearPct);
+  if (clear) return clear;
+
+  // Ninguna llegó al umbral: la mejor disponible (empates → la más reciente)
+  return passes.reduce((mejor, p) => (p.clearPct > mejor.clearPct ? p : mejor), passes[0]);
+}
+
 // ============ PROCESS API ============
 
 /**
@@ -405,14 +525,30 @@ export async function getTrueColorImage(polygon: any, date?: string): Promise<Bu
 export async function getIndexMapImage(
   polygon: any,
   indexType: IndexType = "NDVI",
-  date?: string
+  date?: string,
+  /**
+   * true = la imagen es EXACTAMENTE la de ese día (una sola pasada).
+   * false = mosaico de los 15 días previos escogiendo lo menos nublado.
+   */
+  exactDay = false,
 ): Promise<Buffer | null> {
   const token = await getAccessToken();
   const cfg = INDEX_CONFIGS[indexType];
   const { minLng, maxLng, minLat, maxLat, pixelsW, pixelsH } = getPolygonBoundsAndResolution(polygon, cfg.resolution);
 
   const targetDate = date || new Date().toISOString().split("T")[0];
-  const fromDate = new Date(new Date(targetDate).getTime() - 15 * 86400000).toISOString().split("T")[0];
+  const fromDate = exactDay
+    ? targetDate
+    : new Date(new Date(targetDate).getTime() - 15 * 86400000).toISOString().split("T")[0];
+
+  // Con día exacto ya sabemos que la PARCELA se ve despejada, así que no se
+  // filtra por nubosidad de la escena completa: ese filtro descartaría pasadas
+  // buenas solo porque hay nubes a kilómetros de distancia.
+  const dataFilter: Record<string, unknown> = {
+    timeRange: { from: `${fromDate}T00:00:00Z`, to: `${targetDate}T23:59:59Z` },
+    mosaickingOrder: "leastCC",
+  };
+  if (!exactDay) dataFilter.maxCloudCoverage = 30;
 
   const requestBody = {
     input: {
@@ -421,11 +557,7 @@ export async function getIndexMapImage(
         properties: { crs: "http://www.opengis.net/def/crs/EPSG/0/4326" },
       },
       data: [{
-        dataFilter: {
-          timeRange: { from: `${fromDate}T00:00:00Z`, to: `${targetDate}T23:59:59Z` },
-          mosaickingOrder: "leastCC",
-          maxCloudCoverage: 30,
-        },
+        dataFilter,
         type: "sentinel-2-l2a",
       }],
     },
@@ -436,7 +568,9 @@ export async function getIndexMapImage(
     evalscript: buildColorMapEvalscript(indexType),
   };
 
-  console.log(`[Copernicus] ${indexType} Map: ${fromDate} → ${targetDate} (${pixelsW}x${pixelsH}px)`);
+  console.log(
+    `[Copernicus] ${indexType} Map: ${exactDay ? `pasada del ${targetDate}` : `${fromDate} → ${targetDate}`} (${pixelsW}x${pixelsH}px)`
+  );
   const res = await fetch(PROCESS_URL, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "image/png" },
@@ -451,6 +585,40 @@ export async function getIndexMapImage(
   }
 
   return Buffer.from(await res.arrayBuffer());
+}
+
+/**
+ * Mapa del índice con la ÚLTIMA pasada despejada sobre la parcela.
+ *
+ * Es lo que se muestra en el Dashboard: en vez de un mosaico de dos semanas
+ * fechado con "hoy", se busca cuándo pasó el satélite por última vez viendo la
+ * huerta sin nubes y se trae esa imagen, con su fecha real.
+ *
+ * Si no hay ninguna pasada utilizable, cae al mosaico de siempre y devuelve
+ * captureDate = null (para no mostrar una fecha que no corresponde).
+ */
+export async function getLatestClearIndexMap(
+  polygon: any,
+  indexType: IndexType = "NDVI",
+  options?: { days?: number; minClearPct?: number },
+): Promise<{ buffer: Buffer | null; captureDate: string | null; clearPct: number | null }> {
+  let pass: ClearPass | null = null;
+  try {
+    pass = await findLatestClearPass(polygon, options);
+  } catch (e: any) {
+    console.error("[Copernicus] No se pudo buscar la última pasada despejada:", e?.message);
+  }
+
+  if (pass) {
+    console.log(`[Copernicus] Última pasada sobre la parcela: ${pass.date} (${pass.clearPct}% despejado)`);
+    const buffer = await getIndexMapImage(polygon, indexType, pass.date, true);
+    if (buffer) return { buffer, captureDate: pass.date, clearPct: pass.clearPct };
+    console.warn(`[Copernicus] La pasada del ${pass.date} no devolvió imagen; se usa el mosaico`);
+  }
+
+  // Respaldo: comportamiento anterior (mosaico de 15 días)
+  const buffer = await getIndexMapImage(polygon, indexType);
+  return { buffer, captureDate: null, clearPct: null };
 }
 
 // Backward compatibility

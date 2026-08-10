@@ -1263,7 +1263,10 @@ interface ActivityParcel {
   name: string;
   polygon: string | null;
   hasNdviMap: boolean;
+  /** Fecha real de la pasada del satélite que se ve en la imagen */
   ndviMapDate: string | null;
+  /** Qué tan despejada se veía la parcela en esa pasada (0-100) */
+  ndviClearPct?: number | null;
   pendingCount: number;
   doneCount: number;
   activities: {
@@ -1409,7 +1412,16 @@ function ParcelNdviMap({ parcel }: { parcel: ActivityParcel }) {
             <span className="text-[9px] font-medium text-gray-500">alto</span>
           </div>
           {parcel.ndviMapDate && (
-            <div className="absolute bottom-2 right-2 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-medium text-white">
+            <div
+              className="absolute bottom-2 right-2 flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-medium text-white"
+              title={
+                `Captura del satélite del ${formatShortDate(parcel.ndviMapDate)}` +
+                (parcel.ndviClearPct != null
+                  ? ` · la parcela se veía ${parcel.ndviClearPct}% despejada`
+                  : "")
+              }
+            >
+              <Satellite className="h-2.5 w-2.5" />
               {formatShortDate(parcel.ndviMapDate)}
             </div>
           )}

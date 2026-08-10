@@ -397,20 +397,31 @@ export const appRouter = router({
           } else if (polyData.type === "Polygon") { geoPolygon = polyData; }
           else { throw new Error("Formato no reconocido"); }
         } catch { throw new TRPCError({ code: "BAD_REQUEST", message: "Error al parsear el polígono" }); }
-        const { getIndexMapImage } = await import("./copernicusService");
-        const buffer = await getIndexMapImage(geoPolygon, input.indexType as any, input.date);
+        // Sin fecha pedida a mano: se trae la última pasada en que la parcela
+        // se vio despejada. Con fecha explícita se respeta lo que pidió el usuario.
+        const { getIndexMapImage, getLatestClearIndexMap } = await import("./copernicusService");
+        let buffer: Buffer | null;
+        let captureDate: string | null;
+        let clearPct: number | null;
+        if (input.date) {
+          buffer = await getIndexMapImage(geoPolygon, input.indexType as any, input.date);
+          captureDate = input.date;
+          clearPct = null;
+        } else {
+          ({ buffer, captureDate, clearPct } = await getLatestClearIndexMap(geoPolygon, input.indexType as any));
+        }
         if (!buffer) return { image: null, message: `Sin mapa ${input.indexType} disponible` };
         const imageB64 = `data:image/png;base64,${buffer.toString("base64")}`;
 
         // 3. Guardar en cache
         try {
           await drizzle.execute(
-            sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, data, fetchedAt) VALUES (${input.parcelId}, 'map', ${input.indexType}, ${mapDateKey}, ${imageB64}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), fetchedAt = NOW()`
+            sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, captureDate, clearPct, data, fetchedAt) VALUES (${input.parcelId}, 'map', ${input.indexType}, ${mapDateKey}, ${captureDate}, ${clearPct}, ${imageB64}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), captureDate = VALUES(captureDate), clearPct = VALUES(clearPct), fetchedAt = NOW()`
           );
           console.log(`[Copernicus] Cache SAVED map ${input.indexType} parcela ${input.parcelId}`);
         } catch (e) { console.log("[Copernicus] Cache save error:", e); }
 
-        return { image: imageB64, message: null, cached: false };
+        return { image: imageB64, message: null, cached: false, captureDate, clearPct };
       }),
 
     // Backward compat: getNDVIMap
@@ -653,7 +664,21 @@ IMPORTANTE:
           from = firstBox?.submissionTime ? new Date(firstBox.submissionTime).toISOString().split("T")[0] : new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0];
         } catch { from = new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0]; }
 
-        const { getIndexHistory, getIndexMapImage } = await import("./copernicusService");
+        const { getIndexHistory, getIndexMapImage, findLatestClearPass } = await import("./copernicusService");
+
+        // La última pasada despejada depende de la PARCELA, no del índice:
+        // se busca una sola vez y se reutiliza para NDVI, NDRE y NDMI.
+        let clearPass: { date: string; clearPct: number } | null = null;
+        try {
+          clearPass = await findLatestClearPass(geoPolygon);
+          if (clearPass) {
+            console.log(`[Satellite Sync] ${parcelLabel}: última pasada despejada ${clearPass.date} (${clearPass.clearPct}%)`);
+          } else {
+            console.warn(`[Satellite Sync] ${parcelLabel}: sin pasadas utilizables, se usa el mosaico`);
+          }
+        } catch (e: any) {
+          console.error(`[Satellite Sync] ${parcelLabel}: error buscando la pasada:`, e?.message);
+        }
 
         for (const idx of indices) {
           try {
@@ -661,11 +686,23 @@ IMPORTANTE:
             await drizzle.execute(
               sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, data, fromDate, toDate, fetchedAt) VALUES (${parcel.id}, 'stats', ${idx}, NULL, ${JSON.stringify(data)}, ${from}, ${to}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), fromDate = VALUES(fromDate), toDate = VALUES(toDate), fetchedAt = NOW()`
             );
-            const buffer = await getIndexMapImage(geoPolygon, idx);
+
+            // Imagen de esa pasada exacta; si no hubo, mosaico de respaldo
+            let buffer = clearPass
+              ? await getIndexMapImage(geoPolygon, idx, clearPass.date, true)
+              : null;
+            let captureDate: string | null = clearPass?.date ?? null;
+            let clearPct: number | null = clearPass?.clearPct ?? null;
+            if (!buffer) {
+              buffer = await getIndexMapImage(geoPolygon, idx);
+              captureDate = null;
+              clearPct = null;
+            }
+
             if (buffer) {
               const imageB64 = `data:image/png;base64,${buffer.toString("base64")}`;
               await drizzle.execute(
-                sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, data, fetchedAt) VALUES (${parcel.id}, 'map', ${idx}, 'latest', ${imageB64}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), fetchedAt = NOW()`
+                sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, captureDate, clearPct, data, fetchedAt) VALUES (${parcel.id}, 'map', ${idx}, 'latest', ${captureDate}, ${clearPct}, ${imageB64}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), captureDate = VALUES(captureDate), clearPct = VALUES(clearPct), fetchedAt = NOW()`
               );
             }
             console.log(`[Satellite Sync] ✓ ${parcelLabel} - ${idx}`);
@@ -3157,16 +3194,21 @@ IMPORTANTE:
           // /api/parcel-ndvi-map/:parcelId (no se inyecta base64 en el payload)
           let hasNdviMap = false;
           let ndviMapDate: string | null = null;
+          let ndviClearPct: number | null = null;
           try {
             const rows: any = await drizzle.execute(
-              sql`SELECT mapDate FROM parcelSatelliteCache WHERE parcelId = ${pid} AND dataType = 'map' AND indexType = 'NDVI' ORDER BY fetchedAt DESC LIMIT 1`
+              sql`SELECT mapDate, captureDate, clearPct FROM parcelSatelliteCache WHERE parcelId = ${pid} AND dataType = 'map' AND indexType = 'NDVI' ORDER BY fetchedAt DESC LIMIT 1`
             );
             const row = (rows as any)?.[0]?.[0] ?? (rows as any)?.rows?.[0];
             if (row) {
               hasNdviMap = true;
-              // mapDate puede ser 'latest' (sync semanal) — solo fechas reales
-              const rawDate = String(row.mapDate ?? "");
+              // captureDate es la fecha REAL de la pasada del satélite.
+              // mapDate es solo la clave del cache ('latest' o la fecha pedida
+              // a mano); se usa de respaldo para las imágenes guardadas antes.
+              const capture = String(row.captureDate ?? "");
+              const rawDate = /^\d{4}-\d{2}-\d{2}/.test(capture) ? capture : String(row.mapDate ?? "");
               ndviMapDate = /^\d{4}-\d{2}-\d{2}/.test(rawDate) ? rawDate.slice(0, 10) : null;
+              ndviClearPct = row.clearPct != null ? Number(row.clearPct) : null;
             }
           } catch { /* sin cache */ }
 
@@ -3180,6 +3222,7 @@ IMPORTANTE:
             polygon: parcel.polygon,
             hasNdviMap,
             ndviMapDate,
+            ndviClearPct,
             pendingCount: parcelActs.filter(a => a.status === "planificada" || a.status === "en_progreso").length,
             doneCount: parcelActs.filter(a => a.status === "completada").length,
             activities: parcelActs.slice(0, 5).map(a => ({

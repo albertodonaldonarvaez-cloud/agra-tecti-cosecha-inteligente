@@ -275,7 +275,13 @@ export const parcelSatelliteCache = mysqlTable("parcelSatelliteCache", {
   parcelId: int("parcelId").notNull(),
   dataType: varchar("dataType", { length: 16 }).notNull(), // 'stats' or 'map'
   indexType: varchar("indexType", { length: 8 }).notNull(), // 'NDVI', 'NDRE', 'NDMI'
+  // Clave del cache: 'latest' o la fecha que se pidió a mano
   mapDate: varchar("mapDate", { length: 32 }),
+  // Fecha REAL de la pasada del satélite que se ve en la imagen.
+  // Distinta de mapDate: 'latest' solo dice "la más reciente", no cuándo se tomó.
+  captureDate: varchar("captureDate", { length: 32 }),
+  // Porcentaje de la parcela que se veía despejado en esa pasada
+  clearPct: int("clearPct"),
   data: text("data").notNull(), // JSON string or base64
   fromDate: varchar("fromDate", { length: 32 }),
   toDate: varchar("toDate", { length: 32 }),
