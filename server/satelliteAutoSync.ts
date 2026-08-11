@@ -12,14 +12,108 @@
  * las 2:00 AM, para que la IA lea datos satelitales frescos.
  */
 import { getDb } from "./db";
-import { parcels, boxes } from "../drizzle/schema";
-import { eq, sql } from "drizzle-orm";
+import { parcels, boxes, productionCycles } from "../drizzle/schema";
+import { eq, desc, sql } from "drizzle-orm";
 
 const TIMEZONE = "America/Mexico_City";
 const TAG = "[Satellite Sync]";
 
 /** Si la imagen más nueva tiene más de esto, se considera vencida */
 const MAX_AGE_DAYS = 8;
+
+/**
+ * Cuánto vale la lista de pasadas antes de volver a preguntarle al satélite.
+ * Sentinel-2 repite cada ~5 días: con 3 días nunca se pierde una pasada nueva
+ * y se evitan consultas repetidas cuando alguien navega por la web.
+ */
+const PASSES_TTL_HOURS = 72;
+
+/**
+ * A qué ciclo de producción pertenece una fecha.
+ * Sirve para saber "de cuándo es esta imagen" en términos del cultivo, no solo
+ * del calendario: una foto de agosto puede ser del ciclo pasado o del nuevo.
+ */
+export async function resolveCycleForDate(dateStr: string): Promise<{ id: number; name: string } | null> {
+  const drizzle = await getDb();
+  if (!drizzle) return null;
+  try {
+    const cycles = await drizzle
+      .select({ id: productionCycles.id, name: productionCycles.name, startDate: productionCycles.startDate, endDate: productionCycles.endDate })
+      .from(productionCycles)
+      .orderBy(desc(productionCycles.startDate));
+    const found = cycles.find((c) => c.startDate <= dateStr && (!c.endDate || c.endDate >= dateStr));
+    return found ? { id: found.id, name: found.name } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Pasadas del satélite sobre la parcela, con cache local.
+ *
+ * Se guarda la lista en la base y solo se vuelve a preguntar a Copernicus
+ * cuando vence: así abrir el Dashboard o Análisis de Parcela varias veces no
+ * genera una consulta al satélite cada vez.
+ */
+export async function getClearPassesCached(
+  parcelId: number,
+  geoPolygon: any,
+  force = false,
+): Promise<{ date: string; clearPct: number }[]> {
+  const drizzle = await getDb();
+  if (!drizzle) return [];
+
+  if (!force) {
+    try {
+      const rows: any = await drizzle.execute(
+        sql`SELECT data, fetchedAt FROM parcelSatelliteCache WHERE parcelId = ${parcelId} AND dataType = 'passes' AND indexType = 'NDVI' AND mapDate = 'latest' LIMIT 1`
+      );
+      const row = (rows as any)?.[0]?.[0] ?? (rows as any)?.rows?.[0];
+      if (row?.data && row.fetchedAt) {
+        const ageHours = (Date.now() - new Date(row.fetchedAt).getTime()) / 3600000;
+        if (ageHours < PASSES_TTL_HOURS) {
+          console.log(`${TAG} Pasadas desde cache local (parcela ${parcelId}, ${Math.round(ageHours)}h)`);
+          return JSON.parse(row.data);
+        }
+      }
+    } catch { /* cache ilegible: se vuelve a consultar */ }
+  }
+
+  const { listClearPasses } = await import("./copernicusService");
+  const passes = await listClearPasses(geoPolygon, 60);
+  if (passes.length > 0) {
+    try {
+      await drizzle.execute(
+        sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, data, fetchedAt) VALUES (${parcelId}, 'passes', 'NDVI', 'latest', ${JSON.stringify(passes)}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), fetchedAt = NOW()`
+      );
+    } catch (e) {
+      console.error(`${TAG} No se pudo guardar la lista de pasadas:`, e);
+    }
+  }
+  return passes;
+}
+
+/** Análisis de vigor por zonas guardado para una parcela (sin tocar el satélite) */
+export async function getCachedVigor(parcelId: number): Promise<
+  { captureDate: string | null; cycleId: number | null; vigor: any } | null
+> {
+  const drizzle = await getDb();
+  if (!drizzle) return null;
+  try {
+    const rows: any = await drizzle.execute(
+      sql`SELECT data, captureDate, cycleId FROM parcelSatelliteCache WHERE parcelId = ${parcelId} AND dataType = 'zones' AND indexType = 'NDVI' AND mapDate = 'latest' LIMIT 1`
+    );
+    const row = (rows as any)?.[0]?.[0] ?? (rows as any)?.rows?.[0];
+    if (!row?.data) return null;
+    return {
+      captureDate: row.captureDate ?? null,
+      cycleId: row.cycleId ?? null,
+      vigor: JSON.parse(row.data),
+    };
+  } catch {
+    return null;
+  }
+}
 
 export interface SatelliteSyncResult {
   updated: number;
@@ -80,7 +174,7 @@ export async function runSatelliteSync(): Promise<SatelliteSyncResult> {
   const errorDetails: string[] = [];
   const indices: ("NDVI" | "NDRE" | "NDMI")[] = ["NDVI", "NDRE", "NDMI"];
 
-  const { getIndexHistory, getIndexMapImage, findLatestClearPass } = await import("./copernicusService");
+  const { getIndexHistory, getIndexMapImage, getParcelVigor } = await import("./copernicusService");
 
   for (const parcel of withPolygon) {
     const parcelLabel = parcel.name || parcel.code || `ID:${parcel.id}`;
@@ -109,9 +203,13 @@ export async function runSatelliteSync(): Promise<SatelliteSyncResult> {
 
     // La última pasada despejada depende de la PARCELA, no del índice:
     // se busca una sola vez y se reutiliza para NDVI, NDRE y NDMI.
+    // force = true: el sync semanal sí quiere la lista fresca.
     let clearPass: { date: string; clearPct: number } | null = null;
     try {
-      clearPass = await findLatestClearPass(geoPolygon);
+      const passes = await getClearPassesCached(parcel.id, geoPolygon, true);
+      clearPass = passes.find((p) => p.clearPct >= 85)
+        ?? passes.reduce<{ date: string; clearPct: number } | null>(
+          (mejor, p) => (!mejor || p.clearPct > mejor.clearPct ? p : mejor), null);
       if (clearPass) {
         console.log(`${TAG} ${parcelLabel}: última pasada despejada ${clearPass.date} (${clearPass.clearPct}%)`);
       } else {
@@ -119,6 +217,29 @@ export async function runSatelliteSync(): Promise<SatelliteSyncResult> {
       }
     } catch (e: any) {
       console.error(`${TAG} ${parcelLabel}: error buscando la pasada:`, e?.message);
+    }
+
+    // Ciclo al que pertenece la imagen: así se sabe si el dato es del ciclo
+    // en curso o todavía del anterior
+    const cycle = clearPass ? await resolveCycleForDate(clearPass.date) : null;
+
+    // Vigor por zonas: se calcula UNA vez por pasada y se guarda. Es lo que
+    // alimenta a la IA con el detalle de qué parte se ve seca.
+    if (clearPass) {
+      try {
+        const vigor = await getParcelVigor(geoPolygon, clearPass.date);
+        if (vigor) {
+          await drizzle.execute(
+            sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, captureDate, clearPct, cycleId, data, fetchedAt) VALUES (${parcel.id}, 'zones', 'NDVI', 'latest', ${clearPass.date}, ${clearPass.clearPct}, ${cycle?.id ?? null}, ${JSON.stringify(vigor)}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), captureDate = VALUES(captureDate), clearPct = VALUES(clearPct), cycleId = VALUES(cycleId), fetchedAt = NOW()`
+          );
+          console.log(
+            `${TAG} ${parcelLabel}: NDVI ${vigor.meanNdvi} · seco ${vigor.distribution.suelo}% · ` +
+            `zona más débil: ${vigor.driest?.name ?? "n/d"} (${vigor.driest?.meanNdvi ?? "n/d"})`
+          );
+        }
+      } catch (e: any) {
+        console.error(`${TAG} ${parcelLabel}: error analizando el vigor por zonas:`, e?.message);
+      }
     }
 
     for (const idx of indices) {
@@ -141,7 +262,7 @@ export async function runSatelliteSync(): Promise<SatelliteSyncResult> {
         if (buffer) {
           const imageB64 = `data:image/png;base64,${buffer.toString("base64")}`;
           await drizzle.execute(
-            sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, captureDate, clearPct, data, fetchedAt) VALUES (${parcel.id}, 'map', ${idx}, 'latest', ${captureDate}, ${clearPct}, ${imageB64}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), captureDate = VALUES(captureDate), clearPct = VALUES(clearPct), fetchedAt = NOW()`
+            sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, captureDate, clearPct, cycleId, data, fetchedAt) VALUES (${parcel.id}, 'map', ${idx}, 'latest', ${captureDate}, ${clearPct}, ${cycle?.id ?? null}, ${imageB64}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), captureDate = VALUES(captureDate), clearPct = VALUES(clearPct), cycleId = VALUES(cycleId), fetchedAt = NOW()`
           );
         }
         console.log(`${TAG} ✓ ${parcelLabel} - ${idx}`);

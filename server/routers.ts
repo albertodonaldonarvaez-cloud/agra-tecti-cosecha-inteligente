@@ -399,7 +399,8 @@ export const appRouter = router({
         } catch { throw new TRPCError({ code: "BAD_REQUEST", message: "Error al parsear el polígono" }); }
         // Sin fecha pedida a mano: se trae la última pasada en que la parcela
         // se vio despejada. Con fecha explícita se respeta lo que pidió el usuario.
-        const { getIndexMapImage, getLatestClearIndexMap } = await import("./copernicusService");
+        const { getIndexMapImage } = await import("./copernicusService");
+        const { getClearPassesCached, resolveCycleForDate } = await import("./satelliteAutoSync");
         let buffer: Buffer | null;
         let captureDate: string | null;
         let clearPct: number | null;
@@ -408,20 +409,45 @@ export const appRouter = router({
           captureDate = input.date;
           clearPct = null;
         } else {
-          ({ buffer, captureDate, clearPct } = await getLatestClearIndexMap(geoPolygon, input.indexType as any));
+          // La lista de pasadas sale del cache local mientras siga vigente:
+          // así abrir la vista satelital varias veces no consulta al satélite
+          const passes = await getClearPassesCached(input.parcelId, geoPolygon);
+          const pass = passes.find(p => p.clearPct >= 85)
+            ?? passes.reduce<{ date: string; clearPct: number } | null>(
+              (mejor, p) => (!mejor || p.clearPct > mejor.clearPct ? p : mejor), null);
+          if (pass) {
+            buffer = await getIndexMapImage(geoPolygon, input.indexType as any, pass.date, true);
+            captureDate = pass.date;
+            clearPct = pass.clearPct;
+          } else {
+            buffer = null;
+            captureDate = null;
+            clearPct = null;
+          }
+          // Sin pasada utilizable: mosaico de respaldo, sin fecha (no se inventa)
+          if (!buffer) {
+            buffer = await getIndexMapImage(geoPolygon, input.indexType as any);
+            captureDate = null;
+            clearPct = null;
+          }
         }
         if (!buffer) return { image: null, message: `Sin mapa ${input.indexType} disponible` };
         const imageB64 = `data:image/png;base64,${buffer.toString("base64")}`;
 
+        const cycle = captureDate ? await resolveCycleForDate(captureDate) : null;
+
         // 3. Guardar en cache
         try {
           await drizzle.execute(
-            sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, captureDate, clearPct, data, fetchedAt) VALUES (${input.parcelId}, 'map', ${input.indexType}, ${mapDateKey}, ${captureDate}, ${clearPct}, ${imageB64}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), captureDate = VALUES(captureDate), clearPct = VALUES(clearPct), fetchedAt = NOW()`
+            sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, captureDate, clearPct, cycleId, data, fetchedAt) VALUES (${input.parcelId}, 'map', ${input.indexType}, ${mapDateKey}, ${captureDate}, ${clearPct}, ${cycle?.id ?? null}, ${imageB64}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), captureDate = VALUES(captureDate), clearPct = VALUES(clearPct), cycleId = VALUES(cycleId), fetchedAt = NOW()`
           );
           console.log(`[Copernicus] Cache SAVED map ${input.indexType} parcela ${input.parcelId}`);
         } catch (e) { console.log("[Copernicus] Cache save error:", e); }
 
-        return { image: imageB64, message: null, cached: false, captureDate, clearPct };
+        return {
+          image: imageB64, message: null, cached: false,
+          captureDate, clearPct, cycleName: cycle?.name ?? null,
+        };
       }),
 
     // Backward compat: getNDVIMap

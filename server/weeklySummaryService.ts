@@ -345,10 +345,46 @@ export async function generateWeeklySummary(options?: { force?: boolean }): Prom
     return `- ${d}: [${n.severity}] ${NOTE_LABELS[n.category] ?? n.category}${where} — ${(n.description || "").slice(0, 160)} (${state})`;
   });
 
-  // ── 3. Satelital: último NDVI cacheado por parcela activa ──
+  // ── 3. Satelital: vigor por zonas dentro de cada parcela ──
+  //
+  // No basta el promedio: esconde justo lo que hay que atender. Se manda el
+  // reparto del área por nivel de vigor y qué zona de la parcela está más
+  // débil, para que la IA pueda decir "el noreste está seco" y no una
+  // generalidad. Todo sale del cache local, sin pedirle nada al satélite.
   const satelliteLines: string[] = [];
+  const parcelsWithActivityNames = new Set<string>();
   try {
+    const { getCachedVigor } = await import("./satelliteAutoSync");
     for (const p of activeParcels.slice(0, 12)) {
+      const cached = await getCachedVigor(p.id);
+      if (cached?.vigor) {
+        const v = cached.vigor;
+        const delCiclo = cached.cycleId && activeCycle && cached.cycleId === activeCycle.id
+          ? "de este ciclo"
+          : cached.cycleId
+            ? "de un ciclo anterior"
+            : "sin ciclo asignado";
+        const zonas = (v.zones ?? [])
+          .map((z: any) => `${z.name} ${z.meanNdvi}`)
+          .join(", ");
+        let linea = `- ${p.name} (captura ${cached.captureDate ?? "sin fecha"}, ${delCiclo}): ` +
+          `NDVI promedio ${v.meanNdvi} (mín ${v.minNdvi}, máx ${v.maxNdvi}). ` +
+          `Reparto del terreno: ${v.distribution.suelo}% suelo/seco (NDVI<0.2), ` +
+          `${v.distribution.bajo}% vigor bajo (0.2-0.4), ${v.distribution.medio}% medio (0.4-0.6), ` +
+          `${v.distribution.alto}% alto (>0.6).`;
+        if (zonas) linea += ` Por zona: ${zonas}.`;
+        if (v.driest && v.strongest && v.spread >= 0.1) {
+          linea += ` La zona MÁS DÉBIL es el ${v.driest.name} (NDVI ${v.driest.meanNdvi}) ` +
+            `y la más vigorosa el ${v.strongest.name} (NDVI ${v.strongest.meanNdvi}); ` +
+            `diferencia de ${v.spread}, el lote NO es uniforme.`;
+        } else if (v.spread < 0.1) {
+          linea += " El vigor es parejo en toda la parcela.";
+        }
+        satelliteLines.push(linea);
+        continue;
+      }
+
+      // Respaldo: si aún no hay análisis por zonas, al menos el promedio
       const rows: any = await drizzle.execute(
         sql`SELECT data, fetchedAt FROM parcelSatelliteCache WHERE parcelId = ${p.id} AND dataType = 'stats' AND indexType = 'NDVI' ORDER BY fetchedAt DESC LIMIT 1`
       );
@@ -356,11 +392,16 @@ export async function generateWeeklySummary(options?: { force?: boolean }): Prom
       if (row?.data) {
         const mean = extractNdviMean(row.data);
         if (mean !== null) {
-          satelliteLines.push(`${p.name}: NDVI ${mean} (medición del ${String(row.fetchedAt).slice(0, 10)})`);
+          satelliteLines.push(`- ${p.name}: NDVI ${mean} (medición del ${String(row.fetchedAt).slice(0, 10)})`);
         }
       }
     }
   } catch (e) { console.log(`${TAG} Satelital no disponible:`, e); }
+
+  // Parcelas donde sí se está trabajando: la IA debe centrarse en ellas
+  for (const a of [...weekActivities, ...upcomingActivities, ...overdueActivities]) {
+    for (const nombre of parcelsByActivity[a.id] ?? []) parcelsWithActivityNames.add(nombre);
+  }
 
   // ── 4. Cosecha de la semana ──
   const harvestStats = await db.getDashboardStats(weekStart, weekEnd);
@@ -428,8 +469,16 @@ ${forecastLines || "Sin pronóstico disponible."}
 NOTAS DE CAMPO DEL CICLO ACTUAL (${cycleNotes.length}, ${openNotes.length} sin resolver):
 ${noteLines.length > 0 ? noteLines.join("\n") : "- Ninguna registrada en este ciclo"}
 
-DATOS SATELITALES (último NDVI por parcela):
+ESTADO SATELITAL POR PARCELA (NDVI = vigor vegetativo; la parcela está dividida
+en zonas para saber DÓNDE mirar, no solo el promedio):
 ${satelliteLines.length > 0 ? satelliteLines.join("\n") : "Sin datos satelitales recientes."}
+
+Guía para leer el NDVI en higo: menos de 0.2 es suelo desnudo o planta seca;
+0.2-0.4 vigor bajo (estrés, poda reciente o brotación incipiente); 0.4-0.6
+desarrollo medio; más de 0.6 follaje denso y sano.
+
+PARCELAS DONDE SE ESTÁ TRABAJANDO EN ESTE CICLO:
+${parcelsWithActivityNames.size > 0 ? Array.from(parcelsWithActivityNames).join(", ") : "Ninguna con labores registradas"}
 
 COSECHA:
 ${harvestLine}
@@ -439,7 +488,7 @@ Escribe un panorama ejecutivo en español de 8-12 líneas para el productor:
 2) Qué se logró la semana pasada y qué quedó pendiente o atrasado (menciona parcelas por nombre). Recuerda: una parcela sin poda en este ciclo NO está atrasada, apenas va a comenzar.
 3) Cómo influyó el clima de la semana pasada en las labores realizadas (por ejemplo, si llovió el día de una aplicación).
 4) **Cruza el pronóstico con las actividades planeadas**: di explícitamente qué días convienen o NO convienen para cada labor programada (no aplicar fitosanitarios ni foliares antes de lluvia o con viento fuerte, ajustar riego si viene lluvia, aprovechar días secos para poda, etc.).
-5) Estado de vigor según NDVI si hay datos (señala parcelas débiles) y atiende las notas de campo abiertas (plagas, riego, daños) que sigan sin resolver.
+5) **Diagnóstico satelital concreto**: para cada parcela con datos di CÓMO se ve y sobre todo DÓNDE. Nombra la zona débil tal como viene ("el noreste de Micaela está seco, NDVI 0.18, contra 0.55 del resto") y cruza esa zona con las labores: si ahí se regó hace poco puede ser falla de riego; si está recién podada, el vigor bajo es normal y NO es un problema. Si el reparto muestra buena parte del terreno bajo 0.2, dilo claro. Si el vigor es parejo, dilo también en vez de inventar problemas. Atiende además las notas de campo abiertas que sigan sin resolver.
 6) 2-3 recomendaciones concretas y accionables para los próximos días.
 Tono profesional de ingeniero agrónomo, directo y útil. Sin saludos ni despedidas. Usa párrafos cortos o viñetas.`;
 

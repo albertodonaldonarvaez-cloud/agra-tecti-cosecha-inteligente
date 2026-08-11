@@ -282,6 +282,9 @@ export const parcelSatelliteCache = mysqlTable("parcelSatelliteCache", {
   captureDate: varchar("captureDate", { length: 32 }),
   // Porcentaje de la parcela que se veía despejado en esa pasada
   clearPct: int("clearPct"),
+  // Ciclo de producción al que pertenece la captura: permite saber si el dato
+  // es del ciclo en curso o todavía del anterior
+  cycleId: int("cycleId"),
   data: text("data").notNull(), // JSON string or base64
   fromDate: varchar("fromDate", { length: 32 }),
   toDate: varchar("toDate", { length: 32 }),

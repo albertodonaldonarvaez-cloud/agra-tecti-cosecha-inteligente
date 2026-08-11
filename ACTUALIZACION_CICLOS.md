@@ -676,3 +676,79 @@ git pull && docker-compose up -d --build
 ```
 
 Sin migraciones nuevas ni cambios en la app móvil.
+
+---
+
+# Undécima entrega: menos peticiones al satélite y diagnóstico por zonas para la IA
+
+## Todo se guarda en local; al satélite se le pregunta lo mínimo
+
+La lista de pasadas de cada parcela ahora se **guarda en la base y se reutiliza
+72 horas**. Abrir el Dashboard o la vista satelital varias veces ya no genera una
+consulta a Copernicus cada vez: solo se vuelve a preguntar cuando la lista vence
+o cuando corre el refresco semanal, que sí exige datos frescos.
+
+Verificado: tres consultas seguidas → **una sola petición al satélite**; las otras
+dos salieron del cache local. El sync semanal sí fuerza el refresco.
+
+Sentinel-2 repite cada ~5 días, así que con 72 horas nunca se pierde una pasada
+nueva. Sumado al refresco de los lunes y al cache de imágenes de 7 días, el
+consumo queda acotado.
+
+## La información queda separada por ciclo
+
+Cada captura guardada ahora anota **a qué ciclo de producción pertenece**
+(`cycleId`), resuelto por la fecha real de la pasada. Así se sabe si un dato es
+del ciclo en curso o todavía del anterior — importante porque una imagen de
+agosto puede pertenecer a cualquiera de los dos según cuándo se podó.
+
+Eso se refleja también en lo que lee la IA: cada parcela llega etiquetada como
+*"captura 2026-08-05, de este ciclo"* o *"de un ciclo anterior"*.
+
+## La IA ahora sabe DÓNDE se ve seco
+
+Antes recibía un solo número por parcela (*"Micaela: NDVI 0.57"*), que esconde
+justo lo que hay que atender: un promedio bueno puede tapar una esquina seca.
+
+Ahora, de cada parcela se calcula el **vigor por zonas**: se baja un raster
+pequeño del NDVI y se mide sobre una cuadrícula de 3×3 con los nombres que usaría
+cualquiera en el campo (noroeste, norte, noreste, oeste, centro…). A la IA le
+llega:
+
+- NDVI promedio, mínimo y máximo.
+- **Reparto del terreno por nivel de vigor**: qué % está en suelo/seco (<0.2),
+  vigor bajo (0.2-0.4), medio (0.4-0.6) y alto (>0.6).
+- **El NDVI de cada zona**, y explícitamente cuál es la más débil y cuál la más
+  vigorosa, con la diferencia entre ambas para saber si el lote es parejo.
+- Una guía de interpretación del NDVI para higo.
+- La lista de **parcelas donde sí se está trabajando**, para que se centre ahí.
+
+Y se le pide un diagnóstico concreto: decir **dónde** (*"el noreste de Micaela
+está seco, NDVI 0.18, contra 0.55 del resto"*) y **cruzarlo con las labores**: si
+ahí se regó hace poco puede ser falla de riego; si está recién podada, el vigor
+bajo es normal y no hay que alarmar. Si el vigor es parejo, que lo diga en vez de
+inventar problemas.
+
+El análisis por zonas se calcula **una sola vez por pasada** y se guarda: la IA
+lo lee del cache local sin tocar el satélite.
+
+Verificado con un raster de prueba con la esquina noreste seca: detectó el
+noreste como zona más débil (0.15 contra 0.62 del resto), calculó el 11.5% del
+área como seca, ignoró los píxeles fuera del polígono y marcó el lote como no
+uniforme. Y se comprobó que ese detalle llega íntegro al prompt de la IA.
+
+## Cambios en la base de datos (automáticos)
+
+- `parcelSatelliteCache.cycleId` — ciclo al que pertenece cada captura.
+- Nuevas ranuras de cache en la misma tabla: `passes` (lista de pasadas) y
+  `zones` (vigor por zonas). No hacen falta tablas nuevas.
+
+## Despliegue
+
+```bash
+git pull && docker-compose up -d --build
+```
+
+El detalle por zonas aparece en el resumen con IA después del primer refresco
+satelital (automático al arrancar si las imágenes están vencidas, o desde el
+botón de Configuración). Sin cambios en la app móvil.

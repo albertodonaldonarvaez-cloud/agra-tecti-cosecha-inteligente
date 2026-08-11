@@ -276,6 +276,9 @@ async function migrate() {
       "ALTER TABLE parcelSatelliteCache ADD COLUMN captureDate VARCHAR(32) NULL");
     await ensureColumn('parcelSatelliteCache', 'clearPct',
       "ALTER TABLE parcelSatelliteCache ADD COLUMN clearPct INT NULL");
+    // Ciclo al que pertenece la captura: saber si el dato es del ciclo en curso
+    await ensureColumn('parcelSatelliteCache', 'cycleId',
+      "ALTER TABLE parcelSatelliteCache ADD COLUMN cycleId INT NULL");
     // Sin índice único, cada sync insertaba una fila más y la tabla crecía sin
     // control (son imágenes en base64). El índice permite que el upsert que ya
     // usaba el código funcione de verdad.

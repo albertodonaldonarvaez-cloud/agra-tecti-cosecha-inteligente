@@ -621,6 +621,175 @@ export async function getLatestClearIndexMap(
   return { buffer, captureDate: null, clearPct: null };
 }
 
+// ============ VIGOR POR ZONAS DENTRO DE LA PARCELA ============
+
+/**
+ * Evalscript que devuelve el NDVI como imagen en escala de grises + máscara.
+ * El valor -1..1 se guarda en 0..250 para poder leerlo píxel por píxel.
+ */
+const NDVI_RAW_EVALSCRIPT = `//VERSION=3
+function setup() {
+  return {
+    input: ["B04", "B08", "dataMask"],
+    output: { bands: 2, sampleType: "UINT8" }
+  };
+}
+function evaluatePixel(s) {
+  var suma = s.B08 + s.B04;
+  var ndvi = suma === 0 ? 0 : (s.B08 - s.B04) / suma;
+  var v = Math.round((ndvi + 1) / 2 * 250);
+  return [Math.max(0, Math.min(250, v)), s.dataMask * 255];
+}`;
+
+/** Las nueve zonas de la parcela, tal como las nombraría alguien en el campo */
+const ZONE_NAMES = [
+  "noroeste", "norte", "noreste",
+  "oeste", "centro", "este",
+  "suroeste", "sur", "sureste",
+];
+
+export interface VigorZone {
+  name: string;
+  meanNdvi: number;
+  /** Qué porcentaje de la parcela ocupa esta zona */
+  areaPct: number;
+}
+
+export interface ParcelVigor {
+  meanNdvi: number;
+  minNdvi: number;
+  maxNdvi: number;
+  /** Reparto de la parcela por nivel de vigor (% del área) */
+  distribution: { suelo: number; bajo: number; medio: number; alto: number };
+  zones: VigorZone[];
+  driest: VigorZone | null;
+  strongest: VigorZone | null;
+  /** Diferencia entre la zona más vigorosa y la más seca (uniformidad) */
+  spread: number;
+}
+
+/**
+ * Analiza el NDVI **por zonas dentro de la parcela**.
+ *
+ * En vez de un solo promedio (que esconde los problemas), se baja un raster
+ * pequeño del índice y se mide zona por zona en una cuadrícula de 3x3. Así se
+ * puede decir "el noreste está seco y el resto va bien" en lugar de un número
+ * suelto que no dice dónde mirar.
+ */
+export async function getParcelVigor(
+  polygon: any,
+  date: string,
+): Promise<ParcelVigor | null> {
+  const token = await getAccessToken();
+  const { minLng, maxLng, minLat, maxLat } = getPolygonBoundsAndResolution(polygon, 10);
+  // Resolución baja a propósito: alcanza para ver zonas y pesa poquísimo
+  const size = 96;
+
+  const requestBody = {
+    input: {
+      bounds: {
+        bbox: [minLng, minLat, maxLng, maxLat],
+        properties: { crs: "http://www.opengis.net/def/crs/EPSG/0/4326" },
+      },
+      data: [{
+        dataFilter: {
+          timeRange: { from: `${date}T00:00:00Z`, to: `${date}T23:59:59Z` },
+          mosaickingOrder: "leastCC",
+        },
+        type: "sentinel-2-l2a",
+      }],
+    },
+    output: {
+      width: size, height: size,
+      responses: [{ identifier: "default", format: { type: "image/png" } }],
+    },
+    evalscript: NDVI_RAW_EVALSCRIPT,
+  };
+
+  const res = await fetch(PROCESS_URL, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "image/png" },
+    body: JSON.stringify(requestBody),
+  });
+  if (!res.ok) {
+    console.error("[Copernicus] Error obteniendo el raster de vigor:", res.status);
+    return null;
+  }
+
+  const sharp = (await import("sharp")).default;
+  const png = Buffer.from(await res.arrayBuffer());
+  const { data, info } = await sharp(png).raw().toBuffer({ resolveWithObject: true });
+  const channels = info.channels; // gris + máscara (2), o RGBA si el servidor expande
+
+  // Recolectar el NDVI de cada píxel válido y a qué zona pertenece
+  const zoneSums = new Array(9).fill(0);
+  const zoneCounts = new Array(9).fill(0);
+  let total = 0, sum = 0, min = 1, max = -1;
+  const bands = { suelo: 0, bajo: 0, medio: 0, alto: 0 };
+
+  for (let y = 0; y < info.height; y++) {
+    for (let x = 0; x < info.width; x++) {
+      const i = (y * info.width + x) * channels;
+      const mask = data[i + (channels - 1)]; // última banda = máscara/alfa
+      if (mask === 0) continue; // fuera de la parcela o sin dato
+
+      const ndvi = (data[i] / 250) * 2 - 1;
+      sum += ndvi;
+      total++;
+      if (ndvi < min) min = ndvi;
+      if (ndvi > max) max = ndvi;
+
+      // Reparto por nivel de vigor
+      if (ndvi < 0.2) bands.suelo++;
+      else if (ndvi < 0.4) bands.bajo++;
+      else if (ndvi < 0.6) bands.medio++;
+      else bands.alto++;
+
+      // Cuadrícula 3x3 — la fila 0 es el norte (las imágenes vienen con el
+      // norte arriba), así que el índice mapea directo a los nombres
+      const zx = Math.min(2, Math.floor((x / info.width) * 3));
+      const zy = Math.min(2, Math.floor((y / info.height) * 3));
+      const zi = zy * 3 + zx;
+      zoneSums[zi] += ndvi;
+      zoneCounts[zi]++;
+    }
+  }
+
+  if (total === 0) return null;
+
+  const pct = (n: number) => Math.round((n / total) * 1000) / 10;
+  const zones: VigorZone[] = [];
+  for (let i = 0; i < 9; i++) {
+    // Zonas con muy pocos píxeles (esquinas fuera del polígono) no son fiables
+    if (zoneCounts[i] < Math.max(4, total * 0.02)) continue;
+    zones.push({
+      name: ZONE_NAMES[i],
+      meanNdvi: Math.round((zoneSums[i] / zoneCounts[i]) * 100) / 100,
+      areaPct: pct(zoneCounts[i]),
+    });
+  }
+
+  const ordered = [...zones].sort((a, b) => a.meanNdvi - b.meanNdvi);
+  const driest = ordered[0] ?? null;
+  const strongest = ordered[ordered.length - 1] ?? null;
+
+  return {
+    meanNdvi: Math.round((sum / total) * 100) / 100,
+    minNdvi: Math.round(min * 100) / 100,
+    maxNdvi: Math.round(max * 100) / 100,
+    distribution: {
+      suelo: pct(bands.suelo),
+      bajo: pct(bands.bajo),
+      medio: pct(bands.medio),
+      alto: pct(bands.alto),
+    },
+    zones,
+    driest,
+    strongest,
+    spread: driest && strongest ? Math.round((strongest.meanNdvi - driest.meanNdvi) * 100) / 100 : 0,
+  };
+}
+
 // Backward compatibility
 export const getNDVIMapImage = (polygon: any, date?: string) =>
   getIndexMapImage(polygon, "NDVI", date);
