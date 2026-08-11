@@ -487,173 +487,63 @@ export const appRouter = router({
         forceRefresh: z.boolean().optional(),
       }))
       .mutation(async ({ input }) => {
+        // Toda la lógica vive en parcelAnalysisService: así el botón de la
+        // pantalla y la revisión diaria automática usan exactamente el mismo
+        // contexto (satélite por zonas + libreta de campo + notas + cosecha).
+        const { generateParcelAnalysis } = await import("./parcelAnalysisService");
+        try {
+          const result = await generateParcelAnalysis(input.parcelId, input.parcelName, {
+            force: input.forceRefresh,
+            ndviData: input.ndviData,
+            ndreData: input.ndreData,
+            ndmiData: input.ndmiData,
+            fromDate: input.fromDate,
+            toDate: input.toDate,
+          });
+          if (!result) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "No se ha configurado la API Key de IA en Configuraciones",
+            });
+          }
+          return result;
+        } catch (err: any) {
+          if (err?.code) throw err;
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: err?.message || "Error generando el análisis" });
+        }
+      }),
+
+    /**
+     * Historial satelital de la parcela: una entrada por captura, con su ciclo.
+     * Alimenta la línea de tiempo de Telemetría Satelital.
+     */
+    getVigorHistory: protectedProcedure
+      .input(z.object({ parcelId: z.number(), limit: z.number().max(60).default(30) }))
+      .query(async ({ input }) => {
         const drizzle = await getDb();
         if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-        const from = input.fromDate || "";
-        const to = input.toDate || new Date().toISOString().split("T")[0];
-
-        // Buscar analisis cacheado (menos de 7 dias de antiguedad)
-        if (!input.forceRefresh) {
-          const [cached] = await drizzle
-            .select()
-            .from(parcelAiAnalysis)
-            .where(eq(parcelAiAnalysis.parcelId, input.parcelId))
-            .orderBy(sql`createdAt DESC`)
-            .limit(1);
-          if (cached) {
-            const ageMs = Date.now() - new Date(cached.createdAt).getTime();
-            const sevenDays = 7 * 24 * 60 * 60 * 1000;
-            if (ageMs < sevenDays && cached.fromDate === from && cached.toDate === to) {
-              return { analysis: cached.analysis, model: cached.model, cached: true, cachedAt: cached.createdAt };
-            }
-          }
-        }
-
-        // Generar nuevo analisis
-        const { getGlobalSetting } = await import("./globalSettings");
-        let apiKey = await getGlobalSetting("deepseekApiKey");
-        if (!apiKey) throw new TRPCError({ code: "BAD_REQUEST", message: "No se ha configurado la API Key de IA en Configuraciones" });
-
-        try {
-          const { decryptSecret, isEncrypted } = await import("./encryption");
-          if (isEncrypted(apiKey)) apiKey = decryptSecret(apiKey);
-        } catch (e) {
-          console.error("[IA] Error desencriptando API key:", e);
-        }
-
-        const formatData = (data: any[] | undefined, label: string) => {
-          if (!data?.length) return `${label}: Sin datos`;
-          return `${label} (${data.length} muestras, ${data[0].date} a ${data[data.length-1].date}):\n` +
-            data.map((d: any) => `  ${d.date}: media=${d.mean?.toFixed(3)}, min=${d.min?.toFixed(3)}, max=${d.max?.toFixed(3)}`).join("\n");
-        };
-
-        // Buscar datos de cosecha de la parcela
-        let harvestInfo = "";
-        try {
-          const [parcelRow] = await drizzle.select({ code: parcels.code }).from(parcels).where(eq(parcels.id, input.parcelId));
-          const parcelCode = parcelRow?.code || "";
-          if (parcelCode) {
-            const harvestData = await drizzle
-              .select({ weight: boxes.weight, submissionTime: boxes.submissionTime })
-              .from(boxes)
-              .where(eq(boxes.parcelCode, parcelCode))
-              .orderBy(boxes.submissionTime);
-            if (harvestData.length > 0) {
-              const weeklyMap: Record<string, { totalKg: number; count: number }> = {};
-              for (const h of harvestData) {
-                const d = new Date(h.submissionTime);
-                const weekStart = new Date(d);
-                weekStart.setDate(d.getDate() - d.getDay());
-                const weekKey = weekStart.toISOString().split("T")[0];
-                if (!weeklyMap[weekKey]) weeklyMap[weekKey] = { totalKg: 0, count: 0 };
-                weeklyMap[weekKey].totalKg += (h.weight || 0) / 1000;
-                weeklyMap[weekKey].count++;
-              }
-              const firstDate = new Date(harvestData[0].submissionTime).toLocaleDateString("es-MX");
-              const lastDate = new Date(harvestData[harvestData.length - 1].submissionTime).toLocaleDateString("es-MX");
-              const totalKg = harvestData.reduce((s, h) => s + (h.weight || 0), 0) / 1000;
-              const totalBoxes = harvestData.length;
-              const weeks = Object.entries(weeklyMap).sort(([a], [b]) => a.localeCompare(b));
-              const weeklyStr = weeks.map(([w, d]) => `  Semana ${w}: ${d.totalKg.toFixed(1)} kg (${d.count} cajas)`).join("\n");
-              harvestInfo = `\n\nDatos de cosecha (${firstDate} a ${lastDate}):\nTotal: ${totalKg.toFixed(1)} kg en ${totalBoxes} cajas\nDesglose semanal:\n${weeklyStr}`;
-            }
-          }
-        } catch (e) {
-          console.log("[IA] No se pudo obtener datos de cosecha:", e);
-        }
-
-        // Buscar info del cultivo y variedad de la parcela
-        let cropInfo = "";
-        try {
-          const [details] = await drizzle.select().from(parcelDetails).where(eq(parcelDetails.parcelId, input.parcelId));
-          if (details) {
-            let cropName = "", varietyName = "";
-            if (details.cropId) {
-              const [crop] = await drizzle.select({ name: crops.name }).from(crops).where(eq(crops.id, details.cropId));
-              cropName = crop?.name || "";
-            }
-            if (details.varietyId) {
-              const [variety] = await drizzle.select({ name: cropVarieties.name }).from(cropVarieties).where(eq(cropVarieties.id, details.varietyId));
-              varietyName = variety?.name || "";
-            }
-            const parts = [];
-            if (cropName) parts.push(`Cultivo: ${cropName}`);
-            if (varietyName) parts.push(`Variedad: ${varietyName}`);
-            if (details.totalHectares) parts.push(`Superficie: ${details.totalHectares} ha`);
-            if (details.totalTrees) parts.push(`Arboles: ${details.totalTrees}`);
-            if (details.productiveTrees) parts.push(`Productivos: ${details.productiveTrees}`);
-            if (details.establishedAt) parts.push(`Establecida: ${details.establishedAt}`);
-            if (parts.length) cropInfo = `\nInformacion de la parcela: ${parts.join(" | ")}`;
-          }
-        } catch (e) {
-          console.log("[IA] No se pudo obtener info del cultivo:", e);
-        }
-
-        const prompt = `Eres un ingeniero agronomo experto en agricultura de precision y teledeteccion con 20 anos de experiencia. Analiza los siguientes datos de la parcela "${input.parcelName}" y genera un resumen ejecutivo de 6-7 lineas maximo. Tu analisis debe correlacionar los indices espectrales con los datos reales de produccion (cosecha) para dar una perspectiva REALISTA de como se fue desarrollando la parcela durante la temporada.${cropInfo}${harvestInfo}
-
-Datos espectrales (periodo: ${from || "N/A"} a ${to || "N/A"}):
-
-${formatData(input.ndviData, "NDVI (Vigor Vegetativo)")}
-
-${formatData(input.ndreData, "NDRE (Nitrogeno/Clorofila)")}
-
-${formatData(input.ndmiData, "NDMI (Estres Hidrico)")}
-
-IMPORTANTE:
-- Correlaciona indices espectrales con produccion real: cuando subio/bajo el NDVI que paso con la cosecha?
-- Considera el tipo de cultivo y variedad para contextualizar rangos optimos
-- Resume tendencias principales y su impacto directo en kg producidos
-- Identifica alertas criticas: caidas de NDVI + baja produccion = problema real
-- Da 1-2 recomendaciones practicas para la proxima temporada
-- MAXIMO 6-7 renglones, tono profesional de ingeniero agronomo
-- Responde en espanol`;
-
-        try {
-          const response = await fetch("https://api.deepseek.com/chat/completions", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
-            body: JSON.stringify({
-              model: "deepseek-v4-flash",
-              messages: [{ role: "system", content: "Eres un ingeniero agronomo senior especializado en agricultura de precision, teledeteccion satelital y manejo integrado de cultivos. Respondes de forma concisa y profesional." }, { role: "user", content: prompt }],
-              // El modelo razona antes de responder y ese consumo cuenta aquí:
-              // con un presupuesto corto se agota pensando y devuelve texto vacío
-              max_tokens: 4000,
-              temperature: 0.4,
-            }),
-          });
-
-          if (!response.ok) {
-            const errText = await response.text();
-            console.error("[IA] Error:", response.status, errText);
-            throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Error de API IA: ${response.status}` });
-          }
-
-          const result = await response.json();
-          const analysis = result.choices?.[0]?.message?.content?.trim();
-          if (!analysis) {
-            console.error("[IA] Respuesta vacía:", result.choices?.[0]?.finish_reason);
-            throw new TRPCError({
-              code: "INTERNAL_SERVER_ERROR",
-              message: "La IA no devolvió análisis (se quedó sin espacio para responder). Intenta de nuevo.",
-            });
-          }
-          const model = result.model || "deepseek-v4-flash";
-
-          // Guardar en cache
-          await drizzle.insert(parcelAiAnalysis).values({
-            parcelId: input.parcelId,
-            analysis,
-            fromDate: from,
-            toDate: to,
-            model,
-          });
-          return { analysis, model, cached: false };
-        } catch (err: any) {
-          if (err.code === "BAD_REQUEST" || err.code === "INTERNAL_SERVER_ERROR") throw err;
-          console.error("[IA] Fetch error:", err);
-          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Error conectando con API de IA" });
-        }
+        const rows: any = await drizzle.execute(sql`
+          SELECT h.captureDate, h.cycleId, h.clearPct, h.ndviMean, h.ndviMin, h.ndviMax,
+                 h.distributionJson, h.zonesJson, c.name AS cycleName
+            FROM parcelSatelliteHistory h
+            LEFT JOIN productionCycles c ON c.id = h.cycleId
+           WHERE h.parcelId = ${input.parcelId}
+           ORDER BY h.captureDate DESC
+           LIMIT ${input.limit}
+        `);
+        const list = ((rows as any)?.[0] ?? (rows as any)?.rows ?? []) as any[];
+        return list.map((r) => ({
+          captureDate: String(r.captureDate),
+          cycleId: r.cycleId ?? null,
+          cycleName: r.cycleName ?? null,
+          clearPct: r.clearPct ?? null,
+          ndviMean: r.ndviMean != null ? Number(r.ndviMean) : null,
+          ndviMin: r.ndviMin != null ? Number(r.ndviMin) : null,
+          ndviMax: r.ndviMax != null ? Number(r.ndviMax) : null,
+          distribution: r.distributionJson ? JSON.parse(r.distributionJson) : null,
+          zones: r.zonesJson ? JSON.parse(r.zonesJson) : null,
+        }));
       }),
 
     // Sincronización semanal de datos satelitales para todas las parcelas.

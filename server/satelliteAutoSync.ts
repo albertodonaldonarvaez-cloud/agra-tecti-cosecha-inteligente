@@ -1,15 +1,16 @@
 /**
  * Sincronización satelital automática.
  *
- * Sentinel-2 vuelve a pasar sobre la misma zona cada ~5 días, así que una vez
- * por semana se busca la pasada más reciente en que cada parcela se vio
- * despejada y se refresca su imagen y sus índices.
+ * Cada 72 horas se busca la pasada más reciente en que cada parcela se vio
+ * despejada y se refresca su imagen, sus índices y su vigor por zonas. Además
+ * se revisa al arrancar el sistema, por si estuvo apagado cuando tocaba.
+ *
+ * Cada captura nueva se guarda en el historial (parcelSatelliteHistory), así se
+ * puede ver cómo evolucionó la parcela a lo largo del ciclo y no solo su foto
+ * más reciente.
  *
  * Antes esto solo ocurría si alguien apretaba el botón en Configuración: por eso
  * el Dashboard podía quedarse meses mostrando una imagen vieja.
- *
- * Corre los lunes a la 1:00 AM (hora de México), antes que el resumen con IA de
- * las 2:00 AM, para que la IA lea datos satelitales frescos.
  */
 import { getDb } from "./db";
 import { parcels, boxes, productionCycles } from "../drizzle/schema";
@@ -18,8 +19,11 @@ import { eq, desc, sql } from "drizzle-orm";
 const TIMEZONE = "America/Mexico_City";
 const TAG = "[Satellite Sync]";
 
-/** Si la imagen más nueva tiene más de esto, se considera vencida */
-const MAX_AGE_DAYS = 8;
+/**
+ * Cada cuánto se refrescan las parcelas. Sentinel-2 repite cada ~5 días, así
+ * que con 72 horas nunca se pierde una pasada y no se satura a Copernicus.
+ */
+const REFRESH_HOURS = 72;
 
 /**
  * Cuánto vale la lista de pasadas antes de volver a preguntarle al satélite.
@@ -122,21 +126,6 @@ export interface SatelliteSyncResult {
   total: number;
 }
 
-function getMexicoTime(date?: Date): { hour: number; minute: number; dayOfWeek: number; dateStr: string } {
-  const d = date || new Date();
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: TIMEZONE, hour: "numeric", minute: "numeric", hour12: false, weekday: "short",
-  }).formatToParts(d);
-  const hour = parseInt(parts.find(p => p.type === "hour")?.value || "0");
-  const minute = parseInt(parts.find(p => p.type === "minute")?.value || "0");
-  const weekday = parts.find(p => p.type === "weekday")?.value || "";
-  const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-  const dateStr = new Intl.DateTimeFormat("en-CA", {
-    timeZone: TIMEZONE, year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(d);
-  return { hour, minute, dayOfWeek: dayMap[weekday] ?? d.getDay(), dateStr };
-}
-
 /** Convierte el polígono guardado (varios formatos históricos) a GeoJSON */
 function toGeoPolygon(raw: unknown): any | null {
   try {
@@ -157,7 +146,7 @@ function toGeoPolygon(raw: unknown): any | null {
 
 /**
  * Refresca los datos satelitales de todas las parcelas con polígono.
- * La usa tanto el scheduler semanal como el botón de Configuración.
+ * La usan el refresco automático y el botón de Configuración.
  */
 export async function runSatelliteSync(): Promise<SatelliteSyncResult> {
   const drizzle = await getDb();
@@ -203,7 +192,7 @@ export async function runSatelliteSync(): Promise<SatelliteSyncResult> {
 
     // La última pasada despejada depende de la PARCELA, no del índice:
     // se busca una sola vez y se reutiliza para NDVI, NDRE y NDMI.
-    // force = true: el sync semanal sí quiere la lista fresca.
+    // force = true: el refresco automático sí quiere la lista fresca.
     let clearPass: { date: string; clearPct: number } | null = null;
     try {
       const passes = await getClearPassesCached(parcel.id, geoPolygon, true);
@@ -232,6 +221,13 @@ export async function runSatelliteSync(): Promise<SatelliteSyncResult> {
           await drizzle.execute(
             sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, captureDate, clearPct, cycleId, data, fetchedAt) VALUES (${parcel.id}, 'zones', 'NDVI', 'latest', ${clearPass.date}, ${clearPass.clearPct}, ${cycle?.id ?? null}, ${JSON.stringify(vigor)}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), captureDate = VALUES(captureDate), clearPct = VALUES(clearPct), cycleId = VALUES(cycleId), fetchedAt = NOW()`
           );
+
+          // Historial: una fila por captura. Si esa fecha ya estaba se
+          // actualiza en vez de duplicar (la clave única es parcela+fecha).
+          await drizzle.execute(
+            sql`INSERT INTO parcelSatelliteHistory (parcelId, captureDate, cycleId, clearPct, ndviMean, ndviMin, ndviMax, distributionJson, zonesJson) VALUES (${parcel.id}, ${clearPass.date}, ${cycle?.id ?? null}, ${clearPass.clearPct}, ${vigor.meanNdvi}, ${vigor.minNdvi}, ${vigor.maxNdvi}, ${JSON.stringify(vigor.distribution)}, ${JSON.stringify(vigor.zones)}) ON DUPLICATE KEY UPDATE cycleId = VALUES(cycleId), clearPct = VALUES(clearPct), ndviMean = VALUES(ndviMean), ndviMin = VALUES(ndviMin), ndviMax = VALUES(ndviMax), distributionJson = VALUES(distributionJson), zonesJson = VALUES(zonesJson)`
+          );
+
           console.log(
             `${TAG} ${parcelLabel}: NDVI ${vigor.meanNdvi} · seco ${vigor.distribution.suelo}% · ` +
             `zona más débil: ${vigor.driest?.name ?? "n/d"} (${vigor.driest?.meanNdvi ?? "n/d"})`
@@ -309,8 +305,8 @@ async function notifyTelegram(updated: number, errorCount: number, errorDetails:
   }
 }
 
-/** ¿Hace cuántos días se refrescó la imagen más nueva? null = nunca */
-async function daysSinceLastSync(): Promise<number | null> {
+/** ¿Hace cuántas horas se refrescó la imagen más nueva? null = nunca */
+async function hoursSinceLastSync(): Promise<number | null> {
   const drizzle = await getDb();
   if (!drizzle) return null;
   try {
@@ -319,7 +315,7 @@ async function daysSinceLastSync(): Promise<number | null> {
     );
     const row = (rows as any)?.[0]?.[0] ?? (rows as any)?.rows?.[0];
     if (!row?.last) return null;
-    return (Date.now() - new Date(row.last).getTime()) / 86400000;
+    return (Date.now() - new Date(row.last).getTime()) / 3600000;
   } catch {
     return null;
   }
@@ -327,7 +323,6 @@ async function daysSinceLastSync(): Promise<number | null> {
 
 // ── Scheduler ──
 let syncInterval: ReturnType<typeof setInterval> | null = null;
-let lastRunDate: string | null = null;
 let running = false;
 
 async function runOnce(motivo: string): Promise<void> {
@@ -339,7 +334,6 @@ async function runOnce(motivo: string): Promise<void> {
   try {
     console.log(`${TAG} Ejecutando: ${motivo}`);
     await runSatelliteSync();
-    lastRunDate = getMexicoTime().dateStr;
   } catch (e) {
     console.error(`${TAG} Error en la sincronización:`, e);
   } finally {
@@ -347,35 +341,41 @@ async function runOnce(motivo: string): Promise<void> {
   }
 }
 
-function checkAndRun(): void {
-  const { hour, minute, dayOfWeek, dateStr } = getMexicoTime();
-  // Lunes a la 1:00 AM (antes del resumen con IA de las 2:00 AM)
-  if (dayOfWeek === 1 && hour === 1 && minute === 0 && lastRunDate !== dateStr) {
-    runOnce("lunes 1:00 AM, refresco semanal").catch(console.error);
+/**
+ * Revisa si toca refrescar. Se decide por la antigüedad real de los datos
+ * (no por día de la semana): si el servidor estuvo apagado, al volver se pone
+ * al día solo.
+ */
+async function checkAndRun(): Promise<void> {
+  if (running) return;
+  const age = await hoursSinceLastSync();
+  if (age === null) {
+    await runOnce("nunca se han descargado imágenes");
+  } else if (age >= REFRESH_HOURS) {
+    await runOnce(`la última revisión fue hace ${Math.round(age)} horas`);
   }
 }
 
 /**
- * Inicia el refresco semanal. Al arrancar revisa si las imágenes están
- * vencidas (por ejemplo si el servidor estuvo apagado el lunes) y, en ese caso,
- * las actualiza; si están frescas no gasta llamadas a Copernicus.
+ * Inicia el refresco cada 72 horas.
+ * Revisa al arrancar el sistema y luego cada hora comprueba si ya toca; si los
+ * datos están frescos no gasta llamadas a Copernicus.
  */
 export function startSatelliteAutoSync(): void {
   if (syncInterval) clearInterval(syncInterval);
-  console.log(`🛰️ ${TAG} Scheduler iniciado (lunes 1:00 AM hora de México)`);
+  console.log(`🛰️ ${TAG} Scheduler iniciado (revisión de parcelas cada ${REFRESH_HOURS} horas)`);
 
-  syncInterval = setInterval(checkAndRun, 60 * 1000);
+  // Cada hora se pregunta si ya pasaron las 72 horas
+  syncInterval = setInterval(() => { checkAndRun().catch(console.error); }, 60 * 60 * 1000);
 
-  // Puesta al día al arrancar, con margen para que la base esté lista
+  // Revisión al arrancar, con margen para que la base esté lista
   setTimeout(async () => {
-    const age = await daysSinceLastSync();
-    if (age === null) {
-      await runOnce("nunca se han descargado imágenes");
-    } else if (age > MAX_AGE_DAYS) {
-      await runOnce(`la imagen más nueva tiene ${Math.round(age)} días`);
-    } else {
-      console.log(`${TAG} Imágenes al día (${Math.round(age)} días), no se descarga nada`);
+    const age = await hoursSinceLastSync();
+    if (age !== null && age < REFRESH_HOURS) {
+      console.log(`${TAG} Parcelas al día (última revisión hace ${Math.round(age)} h), no se descarga nada`);
+      return;
     }
+    await checkAndRun();
   }, 3 * 60 * 1000);
 }
 
@@ -388,11 +388,12 @@ export function stopSatelliteAutoSync(): void {
 }
 
 export async function getSatelliteSyncStatus() {
-  const age = await daysSinceLastSync();
+  const age = await hoursSinceLastSync();
   return {
     isActive: syncInterval !== null,
-    daysSinceLastSync: age === null ? null : Math.round(age * 10) / 10,
-    schedule: "Lunes 1:00 AM hora de México",
+    hoursSinceLastSync: age === null ? null : Math.round(age * 10) / 10,
+    nextRefreshInHours: age === null ? 0 : Math.max(0, Math.round((REFRESH_HOURS - age) * 10) / 10),
+    schedule: `Cada ${REFRESH_HOURS} horas y al arrancar el sistema`,
     timezone: TIMEZONE,
   };
 }

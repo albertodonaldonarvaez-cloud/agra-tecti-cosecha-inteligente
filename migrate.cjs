@@ -279,6 +279,33 @@ async function migrate() {
     // Ciclo al que pertenece la captura: saber si el dato es del ciclo en curso
     await ensureColumn('parcelSatelliteCache', 'cycleId',
       "ALTER TABLE parcelSatelliteCache ADD COLUMN cycleId INT NULL");
+
+    // ── Historial satelital y trazabilidad del análisis con IA (0023) ──
+    // Una fila por captura: permite ver la evolución del vigor en el ciclo
+    await conn.query(`CREATE TABLE IF NOT EXISTS parcelSatelliteHistory (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      parcelId INT NOT NULL,
+      captureDate VARCHAR(32) NOT NULL,
+      cycleId INT NULL,
+      clearPct INT NULL,
+      ndviMean DECIMAL(5,3) NULL,
+      ndviMin DECIMAL(5,3) NULL,
+      ndviMax DECIMAL(5,3) NULL,
+      distributionJson TEXT NULL,
+      zonesJson TEXT NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY parcelSatelliteHistory_capture_unique (parcelId, captureDate),
+      INDEX idx_history_parcel (parcelId)
+    )`);
+    console.log('[Migration] parcelSatelliteHistory OK');
+
+    // De qué datos salió cada análisis: para regenerarlo solo si hay algo nuevo
+    await ensureColumn('parcelAiAnalysis', 'cycleId',
+      "ALTER TABLE parcelAiAnalysis ADD COLUMN cycleId INT NULL");
+    await ensureColumn('parcelAiAnalysis', 'lastCaptureDate',
+      "ALTER TABLE parcelAiAnalysis ADD COLUMN lastCaptureDate VARCHAR(32) NULL");
+    await ensureColumn('parcelAiAnalysis', 'lastNotebookStamp',
+      "ALTER TABLE parcelAiAnalysis ADD COLUMN lastNotebookStamp VARCHAR(32) NULL");
     // Sin índice único, cada sync insertaba una fila más y la tabla crecía sin
     // control (son imágenes en base64). El índice permite que el upsert que ya
     // usaba el código funcione de verdad.

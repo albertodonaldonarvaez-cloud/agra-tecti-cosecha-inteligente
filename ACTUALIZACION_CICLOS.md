@@ -752,3 +752,82 @@ git pull && docker-compose up -d --build
 El detalle por zonas aparece en el resumen con IA después del primer refresco
 satelital (automático al arrancar si las imágenes están vencidas, o desde el
 botón de Configuración). Sin cambios en la app móvil.
+
+---
+
+# Duodécima entrega: revisión cada 72 h, historial por parcela e IA que sí conoce la libreta
+
+## Revisión de parcelas cada 72 horas
+
+El refresco pasó de "lunes a la 1 AM" a **cada 72 horas**, y ya no depende del
+día de la semana sino de la antigüedad real de los datos:
+
+- **Revisa al arrancar el sistema.** Si los datos tienen menos de 72 horas no
+  gasta llamadas; si están vencidos, se pone al día solo.
+- Después comprueba cada hora si ya toca. Si el servidor estuvo apagado varios
+  días, al volver actualiza sin esperar al lunes.
+- Todo se guarda en el servidor: imágenes, índices, vigor por zonas y la lista
+  de pasadas.
+
+## Historial de cada parcela
+
+Cada captura nueva se guarda en `parcelSatelliteHistory` (una fila por parcela y
+fecha, sin duplicar), con su NDVI, el reparto del terreno, el detalle por zonas,
+qué tan despejada se veía y **a qué ciclo pertenece**.
+
+En **Análisis de Parcela → Telemetría Satelital** hay una tarjeta nueva,
+*Historial de capturas*: una barra por captura con su NDVI, el % de terreno seco,
+la zona más débil de ese día y la nubosidad, **agrupadas por ciclo** y con un
+indicador de si el vigor subió o bajó respecto de la captura anterior. Así se ve
+la evolución del ciclo, no solo la última foto.
+
+## El análisis de IA de la parcela ahora sí sabe qué se hizo ahí
+
+Antes el prompt solo llevaba los índices espectrales y la cosecha: la IA hablaba
+del NDVI sin tener idea de las labores. Ahora recibe, **de esa parcela en
+concreto**:
+
+- Ficha: cultivo, variedad, superficie, árboles, densidad, fecha de plantación.
+- Ciclo en curso y días transcurridos desde la poda.
+- Estado satelital **por zonas** (dónde está débil, dónde vigorosa, si el lote es
+  parejo) y la **evolución del vigor** captura tras captura.
+- **Libreta de campo de la parcela**: labores realizadas y pendientes, con fecha,
+  responsable, horas trabajadas y **productos aplicados con lo planeado contra lo
+  realmente usado**.
+- **Notas de campo** de la parcela, marcando las que siguen sin resolver.
+- Cosecha de la parcela: histórico y la del ciclo actual, semana por semana.
+- Clima de los últimos 14 días y pronóstico de los próximos 5.
+
+Y se le pide explícitamente **cruzar el satélite con la libreta**: si una zona
+está débil y ahí se regó hace poco, sospechar falla de riego; si la parcela está
+recién podada, el vigor bajo es normal y no hay que alarmar; si se aplicó
+fertilizante y el NDVI no subió, señalarlo; si se usó menos producto del
+planeado, considerarlo.
+
+## Se regenera a diario, pero solo si hay algo nuevo
+
+Cada madrugada (3-5 AM hora de México, después del refresco satelital) se revisan
+las parcelas activas y **se regenera solo el análisis de las que tienen
+información nueva**: una captura satelital más reciente o movimiento en la
+libreta de campo (labores o notas, incluidos borrados). Si nada cambió, no se
+gasta una llamada a la IA.
+
+Verificado: primera generación → 1 llamada; repetir sin novedades → 0 llamadas
+(devuelve el guardado); al entrar una labor nueva → regenera. Y se comprobó que
+el prompt lleva ciclo, zonas, evolución, labores, productos con planeado vs
+usado, notas sin resolver y las instrucciones de cruzar todo.
+
+## Cambios en la base de datos (automáticos)
+
+- Tabla `parcelSatelliteHistory` con clave única por parcela y fecha de captura.
+- `parcelAiAnalysis`: `cycleId`, `lastCaptureDate` y `lastNotebookStamp` (de qué
+  datos salió cada análisis, que es lo que permite no regenerarlo de más).
+
+## Despliegue
+
+```bash
+git pull && docker-compose up -d --build
+```
+
+Unos 3 minutos después de arrancar se dispara la revisión satelital si toca, y el
+historial se va llenando con cada captura. Sin cambios en la app móvil.

@@ -1,5 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { GlassCard } from "@/components/GlassCard";
+import { VigorHistoryCard } from "@/components/VigorHistoryCard";
 import { ProtectedPage } from "@/components/ProtectedPage";
 import { APP_LOGO } from "@/const";
 import { trpc } from "@/lib/trpc";
@@ -2799,6 +2800,9 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
           </GlassCard>
         ))}
       </div>
+
+      {/* HISTORIAL DE CAPTURAS — cómo viene el vigor, captura tras captura */}
+      <VigorHistoryCard parcelId={parcel.id} />
 
       {/* ANALISIS IA — IA Tecti */}
       <AIAnalysisCard parcelId={parcel.id} parcelName={parcel.name || parcel.code} ndviStats={ndviStats} ndreStats={ndreStats} ndmiStats={ndmiStats} />

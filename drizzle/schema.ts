@@ -266,8 +266,39 @@ export const parcelAiAnalysis = mysqlTable("parcelAiAnalysis", {
   fromDate: varchar("fromDate", { length: 32 }).notNull(),
   toDate: varchar("toDate", { length: 32 }).notNull(),
   model: varchar("model", { length: 64 }),
+  // Ciclo de producción al que corresponde el análisis
+  cycleId: int("cycleId"),
+  // De qué datos salió: sirve para regenerarlo solo cuando hay algo nuevo
+  // (última captura satelital usada y última modificación de la libreta)
+  lastCaptureDate: varchar("lastCaptureDate", { length: 32 }),
+  lastNotebookStamp: varchar("lastNotebookStamp", { length: 32 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+// ══════════════════════════════════════
+// HISTORIAL SATELITAL POR PARCELA
+// ══════════════════════════════════════
+// Una fila por captura del satélite: así se ve cómo evoluciona el vigor a lo
+// largo del ciclo en vez de solo la foto más reciente.
+export const parcelSatelliteHistory = mysqlTable("parcelSatelliteHistory", {
+  id: int("id").autoincrement().primaryKey(),
+  parcelId: int("parcelId").notNull(),
+  // Fecha real de la pasada del satélite
+  captureDate: varchar("captureDate", { length: 32 }).notNull(),
+  // Ciclo de producción al que pertenece la captura
+  cycleId: int("cycleId"),
+  // Qué tan despejada se veía la parcela ese día
+  clearPct: int("clearPct"),
+  ndviMean: decimal("ndviMean", { precision: 5, scale: 3 }),
+  ndviMin: decimal("ndviMin", { precision: 5, scale: 3 }),
+  ndviMax: decimal("ndviMax", { precision: 5, scale: 3 }),
+  // Reparto del área por nivel de vigor y detalle por zona (JSON)
+  distributionJson: text("distributionJson"),
+  zonesJson: text("zonesJson"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ParcelSatelliteHistory = typeof parcelSatelliteHistory.$inferSelect;
 
 // Cache de datos satelitales (Copernicus) por parcela
 export const parcelSatelliteCache = mysqlTable("parcelSatelliteCache", {

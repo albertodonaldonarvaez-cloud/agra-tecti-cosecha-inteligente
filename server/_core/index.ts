@@ -704,13 +704,20 @@ async function startServer() {
       console.error("Error al iniciar HarvestNotifier:", err);
     });
 
-    // Iniciar refresco semanal de imágenes satelitales
-    // Lunes 1:00 AM hora de México (antes del resumen con IA de las 2:00 AM);
-    // al arrancar se pone al día si las imágenes están vencidas
+    // Revisión satelital de las parcelas cada 72 horas
+    // También revisa al arrancar, por si el servidor estuvo apagado
     import("../satelliteAutoSync").then(({ startSatelliteAutoSync }) => {
       startSatelliteAutoSync();
     }).catch((err) => {
       console.error("Error al iniciar SatelliteAutoSync:", err);
+    });
+
+    // Análisis con IA de cada parcela: revisión diaria de madrugada, que solo
+    // regenera las parcelas con información nueva (satélite o libreta de campo)
+    import("../parcelAnalysisService").then(({ startParcelAnalysisScheduler }) => {
+      startParcelAnalysisScheduler();
+    }).catch((err) => {
+      console.error("Error al iniciar ParcelAnalysisScheduler:", err);
     });
 
     // Iniciar generador del resumen semanal con IA
