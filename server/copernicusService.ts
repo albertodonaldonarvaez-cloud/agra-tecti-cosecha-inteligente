@@ -21,6 +21,9 @@ import { decryptSecret, isEncrypted } from "./encryption";
 const AUTH_URL = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token";
 const STATS_URL = "https://sh.dataspace.copernicus.eu/api/v1/statistics";
 const PROCESS_URL = "https://sh.dataspace.copernicus.eu/api/v1/process";
+// Catálogo: qué escenas hay y de qué día. Es la fuente de respaldo para
+// conocer la fecha real de la pasada cuando la medición fina falla.
+const CATALOG_URL = "https://sh.dataspace.copernicus.eu/api/v1/catalog/1.0.0/search";
 
 // ============ TIPOS ============
 export type IndexType = "NDVI" | "NDRE" | "NDMI";
@@ -379,6 +382,66 @@ export interface ClearPass {
   date: string;
   /** Porcentaje de la parcela que se ve despejado ese día (0-100) */
   clearPct: number;
+  /**
+   * De dónde salió el dato de nubosidad:
+   * - "parcela": medido sobre el polígono con la banda SCL (lo más preciso)
+   * - "escena": tomado del catálogo, es de la escena completa (~110 km)
+   */
+  source?: "parcela" | "escena";
+}
+
+/**
+ * Pasadas del satélite tomadas del CATÁLOGO de Copernicus.
+ *
+ * Es la red de seguridad: no usa evalscript ni estadísticas sobre el polígono,
+ * solo pregunta "¿qué escenas de Sentinel-2 cubren este rectángulo y cuándo?".
+ * Si la medición fina sobre la parcela falla (polígono raro, error del servicio),
+ * de aquí sale igual la FECHA REAL de la pasada, que es lo que importa.
+ *
+ * La nubosidad que devuelve es de la escena completa, no de la parcela.
+ */
+export async function listPassesFromCatalog(
+  polygon: any,
+  days = 60,
+): Promise<ClearPass[]> {
+  const token = await getAccessToken();
+  const { minLng, maxLng, minLat, maxLat } = getPolygonBoundsAndResolution(polygon, 10);
+  const to = new Date();
+  const from = new Date(to.getTime() - days * 86400000);
+  const fmt = (d: Date) => d.toISOString().split("T")[0];
+
+  const res = await fetch(CATALOG_URL, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({
+      bbox: [minLng, minLat, maxLng, maxLat],
+      datetime: `${fmt(from)}T00:00:00Z/${fmt(to)}T23:59:59Z`,
+      collections: ["sentinel-2-l2a"],
+      limit: 100,
+      fields: { include: ["properties.datetime", "properties.eo:cloud_cover"] },
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.error("[Copernicus] Catálogo no disponible:", res.status, errText.slice(0, 200));
+    return [];
+  }
+
+  const data = await res.json();
+  const porFecha = new Map<string, number>();
+  for (const f of data.features ?? []) {
+    const fecha = String(f.properties?.datetime ?? "").slice(0, 10);
+    if (!fecha) continue;
+    const nubes = Number(f.properties?.["eo:cloud_cover"] ?? 0);
+    const despejado = Math.max(0, Math.min(100, Math.round(100 - nubes)));
+    // Si el mismo día hay varias escenas, se queda la más despejada
+    if (!porFecha.has(fecha) || despejado > porFecha.get(fecha)!) porFecha.set(fecha, despejado);
+  }
+
+  return Array.from(porFecha.entries())
+    .map(([date, clearPct]) => ({ date, clearPct, source: "escena" as const }))
+    .sort((a, b) => b.date.localeCompare(a.date));
 }
 
 /**
@@ -425,8 +488,10 @@ export async function listClearPasses(
 
   if (!res.ok) {
     const errText = await res.text();
-    console.error("[Copernicus] Error buscando pasadas despejadas:", res.status, errText.slice(0, 300));
-    return [];
+    console.error("[Copernicus] Medición de nubosidad sobre la parcela falló:", res.status, errText.slice(0, 300));
+    // Red de seguridad: aunque no se pueda medir la parcela, el catálogo sí
+    // sabe QUÉ DÍA pasó el satélite, que es el dato que hay que mostrar
+    return listPassesFromCatalog(polygon, days);
   }
 
   const data = await res.json();
@@ -437,7 +502,12 @@ export async function listClearPasses(
     if (!stats || !stats.sampleCount) continue;
     const date = interval.interval?.from?.split("T")[0];
     if (!date) continue;
-    passes.push({ date, clearPct: Math.round((stats.mean ?? 0) * 100) });
+    passes.push({ date, clearPct: Math.round((stats.mean ?? 0) * 100), source: "parcela" });
+  }
+
+  if (passes.length === 0) {
+    console.warn("[Copernicus] Sin pasadas medibles sobre la parcela; se consulta el catálogo");
+    return listPassesFromCatalog(polygon, days);
   }
 
   // De la más reciente a la más antigua
@@ -448,16 +518,25 @@ export async function listClearPasses(
 /**
  * Última pasada utilizable sobre la parcela.
  *
- * Se busca la más reciente que supere [minClearPct]; si en la ventana no hubo
- * ninguna así (temporada de lluvias, por ejemplo), se devuelve la más despejada
- * de todas para no dejar la parcela sin imagen.
+ * Prioridad: la más reciente que supere [minClearPct]. Si en la ventana no hubo
+ * ninguna así, se amplía la búsqueda; y si aun así nada, se toma la más
+ * despejada disponible. La idea es no quedarse NUNCA sin fecha de pasada:
+ * una imagen sin fecha no le sirve de nada al productor.
  */
 export async function findLatestClearPass(
   polygon: any,
   options?: { days?: number; minClearPct?: number },
 ): Promise<ClearPass | null> {
   const minClearPct = options?.minClearPct ?? 85;
-  const passes = await listClearPasses(polygon, options?.days ?? 60);
+  const ventanaInicial = options?.days ?? 60;
+
+  let passes = await listClearPasses(polygon, ventanaInicial);
+
+  // Sin nada en la ventana normal: se busca más atrás antes de rendirse
+  if (passes.length === 0) {
+    console.warn(`[Copernicus] Sin pasadas en ${ventanaInicial} días; se amplía a 120`);
+    passes = await listClearPasses(polygon, 120);
+  }
   if (passes.length === 0) return null;
 
   const clear = passes.find((p) => p.clearPct >= minClearPct);

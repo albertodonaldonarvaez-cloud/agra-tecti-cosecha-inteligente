@@ -84,7 +84,10 @@ export async function getClearPassesCached(
   }
 
   const { listClearPasses } = await import("./copernicusService");
-  const passes = await listClearPasses(geoPolygon, 60);
+  let passes = await listClearPasses(geoPolygon, 60);
+  // Sin nada en 60 días se busca más atrás: quedarse sin fecha de pasada es
+  // peor que mostrar una captura algo más vieja
+  if (passes.length === 0) passes = await listClearPasses(geoPolygon, 120);
   if (passes.length > 0) {
     try {
       await drizzle.execute(
@@ -193,14 +196,20 @@ export async function runSatelliteSync(): Promise<SatelliteSyncResult> {
     // La última pasada despejada depende de la PARCELA, no del índice:
     // se busca una sola vez y se reutiliza para NDVI, NDRE y NDMI.
     // force = true: el refresco automático sí quiere la lista fresca.
-    let clearPass: { date: string; clearPct: number } | null = null;
+    let clearPass: { date: string; clearPct: number; source?: string } | null = null;
+    // Candidatas ordenadas: primero las despejadas, luego el resto de más
+    // reciente a más antigua. Si una no devuelve imagen se prueba la siguiente,
+    // en vez de perder la fecha al primer tropiezo.
+    let candidatas: { date: string; clearPct: number; source?: string }[] = [];
     try {
       const passes = await getClearPassesCached(parcel.id, geoPolygon, true);
-      clearPass = passes.find((p) => p.clearPct >= 85)
-        ?? passes.reduce<{ date: string; clearPct: number } | null>(
-          (mejor, p) => (!mejor || p.clearPct > mejor.clearPct ? p : mejor), null);
+      const despejadas = passes.filter((p) => p.clearPct >= 85);
+      const resto = passes.filter((p) => p.clearPct < 85).sort((a, b) => b.clearPct - a.clearPct);
+      candidatas = [...despejadas, ...resto].slice(0, 4);
+      clearPass = candidatas[0] ?? null;
       if (clearPass) {
-        console.log(`${TAG} ${parcelLabel}: última pasada despejada ${clearPass.date} (${clearPass.clearPct}%)`);
+        const origen = clearPass.source === "escena" ? " (nubosidad de la escena)" : "";
+        console.log(`${TAG} ${parcelLabel}: última pasada ${clearPass.date} (${clearPass.clearPct}% despejado)${origen}`);
       } else {
         console.warn(`${TAG} ${parcelLabel}: sin pasadas utilizables, se usa el mosaico`);
       }
@@ -245,20 +254,36 @@ export async function runSatelliteSync(): Promise<SatelliteSyncResult> {
           sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, data, fromDate, toDate, fetchedAt) VALUES (${parcel.id}, 'stats', ${idx}, NULL, ${JSON.stringify(data)}, ${from}, ${to}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), fromDate = VALUES(fromDate), toDate = VALUES(toDate), fetchedAt = NOW()`
         );
 
-        // Imagen de esa pasada exacta; si no hubo, mosaico de respaldo
-        let buffer = clearPass ? await getIndexMapImage(geoPolygon, idx, clearPass.date, true) : null;
-        let captureDate: string | null = clearPass?.date ?? null;
-        let clearPct: number | null = clearPass?.clearPct ?? null;
+        // Imagen de una pasada concreta. Si esa fecha no devuelve nada se
+        // prueba la siguiente candidata: lo importante es conservar la FECHA
+        // real, no caer al mosaico (que se queda sin fecha).
+        let buffer: Buffer | null = null;
+        let captureDate: string | null = null;
+        let clearPct: number | null = null;
+        for (const cand of candidatas) {
+          buffer = await getIndexMapImage(geoPolygon, idx, cand.date, true);
+          if (buffer) {
+            captureDate = cand.date;
+            clearPct = cand.clearPct;
+            break;
+          }
+          console.warn(`${TAG} ${parcelLabel} - ${idx}: la pasada del ${cand.date} no trajo imagen, se prueba la anterior`);
+        }
+
+        // Último recurso: mosaico de 15 días, que no tiene una fecha única
         if (!buffer) {
           buffer = await getIndexMapImage(geoPolygon, idx);
           captureDate = null;
           clearPct = null;
+          if (buffer) console.warn(`${TAG} ${parcelLabel} - ${idx}: sin pasada utilizable, se guarda el mosaico SIN fecha`);
         }
 
         if (buffer) {
           const imageB64 = `data:image/png;base64,${buffer.toString("base64")}`;
+          // El ciclo se resuelve con la fecha que de verdad se usó
+          const cicloImagen = captureDate ? await resolveCycleForDate(captureDate) : cycle;
           await drizzle.execute(
-            sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, captureDate, clearPct, cycleId, data, fetchedAt) VALUES (${parcel.id}, 'map', ${idx}, 'latest', ${captureDate}, ${clearPct}, ${cycle?.id ?? null}, ${imageB64}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), captureDate = VALUES(captureDate), clearPct = VALUES(clearPct), cycleId = VALUES(cycleId), fetchedAt = NOW()`
+            sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, captureDate, clearPct, cycleId, data, fetchedAt) VALUES (${parcel.id}, 'map', ${idx}, 'latest', ${captureDate}, ${clearPct}, ${cicloImagen?.id ?? null}, ${imageB64}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), captureDate = VALUES(captureDate), clearPct = VALUES(clearPct), cycleId = VALUES(cycleId), fetchedAt = NOW()`
           );
         }
         console.log(`${TAG} ✓ ${parcelLabel} - ${idx}`);

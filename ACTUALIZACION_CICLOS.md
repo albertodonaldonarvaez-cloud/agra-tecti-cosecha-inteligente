@@ -877,3 +877,65 @@ git pull && docker-compose up -d --build
 ```
 
 Sin migraciones ni cambios en la app móvil.
+
+---
+
+# Decimocuarta entrega: la fecha de la pasada, ahora sí casi siempre
+
+## Qué faltaba
+
+Una parcela mostraba "descarga hoy" pero sin fecha de pasada. Eso significa que
+para esa parcela la detección de pasadas no devolvió nada y el sistema cayó al
+**mosaico de 15 días**, que por definición no tiene una fecha única. La imagen se
+veía bien, pero el dato importante —de cuándo es— se perdía.
+
+Había tres formas de quedarse sin fecha y las tres están cubiertas:
+
+## 1. Segunda fuente: el catálogo de Copernicus
+
+La medición fina de nubosidad se hace sobre el polígono de la parcela con la
+banda SCL. Es lo más preciso, pero si falla (polígono con geometría rara, error
+del servicio) antes se devolvía una lista vacía y adiós fecha.
+
+Ahora, si esa medición falla **o responde vacía**, se consulta el **catálogo**:
+un endpoint distinto y mucho más simple que solo responde "qué escenas cubren
+este rectángulo y de qué día son". De ahí sale igual la **fecha real de la
+pasada**, aunque la nubosidad sea la de la escena completa y no la de la parcela.
+El origen queda registrado para no confundir un dato con el otro.
+
+## 2. Ventana más amplia antes de rendirse
+
+Si en 60 días no aparece ninguna pasada, se busca en **120** antes de darse por
+vencido. Más vale una captura algo más vieja pero fechada, que una imagen sin
+fecha.
+
+## 3. Varias candidatas, no solo una
+
+Antes se elegía una única pasada y, si el satélite no devolvía imagen para ese
+día exacto, se caía al mosaico y se perdía la fecha. Ahora se prueban **hasta 4
+pasadas** (primero las despejadas, luego las demás de más a menos despejada)
+hasta obtener imagen. El mosaico sin fecha queda como último recurso y se
+registra en el log cuando ocurre.
+
+Verificado simulando las cuatro situaciones:
+
+| Situación | Resultado |
+|---|---|
+| Todo bien | Usa la medición fina sobre la parcela |
+| La medición falla (error 400) | Saca la fecha del catálogo |
+| La medición responde vacía | Saca la fecha del catálogo |
+| Nada en 60 días | Amplía a 120 y encuentra fecha |
+
+Además, en los tres casos con catálogo se descarta la escena nublada (55%) y se
+toma la despejada (96%).
+
+## Despliegue
+
+```bash
+git pull && docker-compose up -d --build
+```
+
+La fecha aparece en cuanto corra la revisión satelital (unos 3 minutos después de
+arrancar, o desde el botón de Configuración). En el log de cada parcela se ve la
+línea `última pasada AAAA-MM-DD (NN% despejado)`, y si se usó el catálogo lo dice
+con "(nubosidad de la escena)". Sin migraciones ni cambios en la app móvil.
