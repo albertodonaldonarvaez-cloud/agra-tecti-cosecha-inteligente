@@ -1265,8 +1265,12 @@ interface ActivityParcel {
   hasNdviMap: boolean;
   /** Fecha real de la pasada del satélite que se ve en la imagen */
   ndviMapDate: string | null;
+  /** Cuándo se descargó la imagen (respaldo si no se conoce la pasada) */
+  ndviFetchedAt?: string | null;
   /** Qué tan despejada se veía la parcela en esa pasada (0-100) */
   ndviClearPct?: number | null;
+  /** Ciclo al que pertenece la captura */
+  ndviCycleName?: string | null;
   pendingCount: number;
   doneCount: number;
   activities: {
@@ -1278,6 +1282,52 @@ interface ActivityParcel {
     status: string;
     performedBy: string | null;
   }[];
+}
+
+/**
+ * Sello con la fecha de la captura satelital.
+ *
+ * Siempre dice de cuándo es lo que se está viendo:
+ * - Si se conoce la pasada del satélite, muestra su fecha y qué tan reciente es.
+ * - Si todavía no se conoce (imágenes guardadas antes o sin pasada despejada),
+ *   dice cuándo se descargó, en vez de dejar el hueco vacío o inventar una fecha.
+ */
+function SatelliteCaptureBadge({ parcel }: { parcel: ActivityParcel }) {
+  if (!parcel.hasNdviMap) return null;
+
+  const captura = parcel.ndviMapDate;
+  const descarga = parcel.ndviFetchedAt;
+  const fecha = captura ?? descarga ?? null;
+  if (!fecha) return null;
+
+  // Días transcurridos, calculados a mediodía para evitar corrimientos
+  const dias = Math.max(
+    0,
+    Math.round((Date.now() - new Date(fecha + "T12:00:00").getTime()) / 86400000)
+  );
+  const antiguedad = dias === 0 ? "hoy" : dias === 1 ? "ayer" : `hace ${dias} días`;
+
+  // Más de 10 días sin captura nueva: el satélite no ha vuelto a ver la parcela
+  const vieja = dias > 10;
+
+  const titulo = captura
+    ? `Captura del satélite del ${formatShortDate(captura)} (${antiguedad})` +
+      (parcel.ndviClearPct != null ? ` · la parcela se veía ${parcel.ndviClearPct}% despejada` : "") +
+      (parcel.ndviCycleName ? ` · ciclo ${parcel.ndviCycleName}` : "")
+    : `Imagen descargada el ${formatShortDate(descarga)}. La fecha exacta de la pasada aparecerá en la próxima revisión satelital.`;
+
+  return (
+    <div
+      className={`absolute bottom-2 right-2 flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-white ${
+        vieja ? "bg-amber-600/80" : "bg-black/55"
+      }`}
+      title={titulo}
+    >
+      <Satellite className="h-2.5 w-2.5" />
+      {captura ? formatShortDate(captura) : `descarga ${formatShortDate(descarga)}`}
+      <span className="opacity-70">· {antiguedad}</span>
+    </div>
+  );
 }
 
 /**
@@ -1411,20 +1461,7 @@ function ParcelNdviMap({ parcel }: { parcel: ActivityParcel }) {
             />
             <span className="text-[9px] font-medium text-gray-500">alto</span>
           </div>
-          {parcel.ndviMapDate && (
-            <div
-              className="absolute bottom-2 right-2 flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-medium text-white"
-              title={
-                `Captura del satélite del ${formatShortDate(parcel.ndviMapDate)}` +
-                (parcel.ndviClearPct != null
-                  ? ` · la parcela se veía ${parcel.ndviClearPct}% despejada`
-                  : "")
-              }
-            >
-              <Satellite className="h-2.5 w-2.5" />
-              {formatShortDate(parcel.ndviMapDate)}
-            </div>
-          )}
+          <SatelliteCaptureBadge parcel={parcel} />
         </>
       )}
     </div>

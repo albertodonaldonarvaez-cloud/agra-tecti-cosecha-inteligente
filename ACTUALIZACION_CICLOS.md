@@ -831,3 +831,49 @@ git pull && docker-compose up -d --build
 
 Unos 3 minutos después de arrancar se dispara la revisión satelital si toca, y el
 historial se va llenando con cada captura. Sin cambios en la app móvil.
+
+---
+
+# Decimotercera entrega: la fecha de la captura, siempre visible en el Dashboard
+
+## Qué pasaba
+
+El sello con la fecha solo aparecía si la imagen guardada traía `captureDate`.
+Las imágenes descargadas antes de que existiera ese campo —o las que cayeron al
+mosaico de respaldo por no haber pasada despejada— dejaban la esquina **vacía**:
+no había forma de saber de cuándo era lo que se estaba viendo.
+
+## Ahora siempre dice de cuándo es
+
+El sello se arma con una cadena de respaldos, sin inventar nunca una fecha:
+
+1. **Fecha real de la pasada** del satélite, si se conoce.
+2. Si la imagen no la trae, se busca **la captura más reciente en el historial**
+   de esa parcela (lo llena el mismo refresco de 72 horas).
+3. Si aún así no hay, se muestra **cuándo se descargó la imagen**, etiquetado
+   como "descarga" para no hacerlo pasar por fecha de captura.
+
+Además:
+
+- Se agrega **qué tan reciente es** ("hace 3 días", "ayer", "hoy"), que es lo que
+  de verdad se quiere saber de un vistazo.
+- Si pasan más de 10 días sin captura nueva, el sello se pone **ámbar** para que
+  salte a la vista que el satélite no ha vuelto a ver la parcela.
+- Al pasar el cursor se ve el detalle completo: fecha, antigüedad, **qué tan
+  despejada se veía la parcela** y **a qué ciclo pertenece** la captura.
+
+Verificado en pantalla con las tres situaciones:
+
+| Parcela | Sello | Color |
+|---|---|---|
+| Con fecha de pasada | `8 ago 2026 · hace 3 días` (tooltip: 96% despejada, ciclo) | normal |
+| Sin fecha en la imagen, con historial | `6 ago 2026 · hace 5 días` | normal |
+| Sin fecha alguna | `descarga 2 jul 2026 · hace 40 días` | ámbar |
+
+## Despliegue
+
+```bash
+git pull && docker-compose up -d --build
+```
+
+Sin migraciones ni cambios en la app móvil.

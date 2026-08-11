@@ -3143,16 +3143,23 @@ export const appRouter = router({
           // ¿Hay mapa NDVI cacheado? La imagen se sirve aparte por
           // /api/parcel-ndvi-map/:parcelId (no se inyecta base64 en el payload)
           let hasNdviMap = false;
-          let ndviMapDate: string | null = null;
+          let ndviMapDate: string | null = null;   // fecha REAL de la pasada
+          let ndviFetchedAt: string | null = null; // cuándo se descargó la imagen
           let ndviClearPct: number | null = null;
+          let ndviCycleName: string | null = null;
           try {
-            // Solo la ranura 'latest', que es la que refresca el sync semanal.
+            // Solo la ranura 'latest', que es la que refresca el sync automático.
             // Antes se tomaba la fila más reciente sin importar la ranura, así
             // que una consulta manual de una fecha vieja en Análisis de Parcela
             // secuestraba la tarjeta y dejaba una foto de meses atrás.
-            const rows: any = await drizzle.execute(
-              sql`SELECT mapDate, captureDate, clearPct FROM parcelSatelliteCache WHERE parcelId = ${pid} AND dataType = 'map' AND indexType = 'NDVI' AND mapDate = 'latest' ORDER BY fetchedAt DESC LIMIT 1`
-            );
+            const rows: any = await drizzle.execute(sql`
+              SELECT sc.mapDate, sc.captureDate, sc.clearPct, sc.fetchedAt, c.name AS cycleName
+                FROM parcelSatelliteCache sc
+                LEFT JOIN productionCycles c ON c.id = sc.cycleId
+               WHERE sc.parcelId = ${pid} AND sc.dataType = 'map'
+                 AND sc.indexType = 'NDVI' AND sc.mapDate = 'latest'
+               ORDER BY sc.fetchedAt DESC LIMIT 1
+            `);
             const row = (rows as any)?.[0]?.[0] ?? (rows as any)?.rows?.[0];
             if (row) {
               hasNdviMap = true;
@@ -3163,8 +3170,28 @@ export const appRouter = router({
               const rawDate = /^\d{4}-\d{2}-\d{2}/.test(capture) ? capture : String(row.mapDate ?? "");
               ndviMapDate = /^\d{4}-\d{2}-\d{2}/.test(rawDate) ? rawDate.slice(0, 10) : null;
               ndviClearPct = row.clearPct != null ? Number(row.clearPct) : null;
+              ndviCycleName = row.cycleName ?? null;
+              // Respaldo honesto: si no se conoce la fecha de la pasada, al
+              // menos se dice cuándo se bajó la imagen (nunca se inventa)
+              if (row.fetchedAt) {
+                ndviFetchedAt = row.fetchedAt instanceof Date
+                  ? row.fetchedAt.toISOString().slice(0, 10)
+                  : String(row.fetchedAt).slice(0, 10);
+              }
             }
           } catch { /* sin cache */ }
+
+          // Si la imagen no trae fecha de pasada, se busca en el historial la
+          // captura más reciente de esa parcela (viene del mismo refresco)
+          if (hasNdviMap && !ndviMapDate) {
+            try {
+              const hist: any = await drizzle.execute(
+                sql`SELECT captureDate FROM parcelSatelliteHistory WHERE parcelId = ${pid} ORDER BY captureDate DESC LIMIT 1`
+              );
+              const h = (hist as any)?.[0]?.[0] ?? (hist as any)?.rows?.[0];
+              if (h?.captureDate) ndviMapDate = String(h.captureDate).slice(0, 10);
+            } catch { /* sin historial */ }
+          }
 
           const parcelActs = actsByParcel[pid];
           result.push({
@@ -3176,7 +3203,9 @@ export const appRouter = router({
             polygon: parcel.polygon,
             hasNdviMap,
             ndviMapDate,
+            ndviFetchedAt,
             ndviClearPct,
+            ndviCycleName,
             pendingCount: parcelActs.filter(a => a.status === "planificada" || a.status === "en_progreso").length,
             doneCount: parcelActs.filter(a => a.status === "completada").length,
             activities: parcelActs.slice(0, 5).map(a => ({
