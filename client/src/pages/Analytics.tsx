@@ -2,6 +2,7 @@ import { Loading } from "@/components/Loading";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { ProtectedPage } from "@/components/ProtectedPage";
 import { GlassCard } from "@/components/GlassCard";
+import { CycleComparison } from "@/components/CycleComparison";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -206,6 +207,9 @@ function AnalyticsContent() {
             </Button>
           </div>
         </GlassCard>
+
+        {/* Comparativo de ciclos: no depende del filtro de fechas */}
+        <CycleComparison />
 
         {isLoading ? (
           <GlassCard className="p-8 md:p-12 text-center">

@@ -630,117 +630,18 @@ IMPORTANTE:
         }
       }),
 
-    // Sincronización semanal de datos satelitales para todas las parcelas
+    // Sincronización semanal de datos satelitales para todas las parcelas.
+    // La lógica vive en satelliteAutoSync para que la compartan el botón de
+    // Configuración y el refresco automático de los lunes.
     syncAllParcels: adminProcedure.mutation(async () => {
-      const drizzle = await getDb();
-      if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const { runSatelliteSync } = await import("./satelliteAutoSync");
+      return runSatelliteSync();
+    }),
 
-      const allParcels = await drizzle.select({ id: parcels.id, name: parcels.name, code: parcels.code, polygon: parcels.polygon }).from(parcels);
-      const withPolygon = allParcels.filter((p: any) => p.polygon);
-      console.log(`[Satellite Sync] Iniciando sync de ${withPolygon.length} parcelas...`);
-
-      let updated = 0;
-      let errorCount = 0;
-      const errorDetails: string[] = [];
-      const indices: ("NDVI" | "NDRE" | "NDMI")[] = ["NDVI", "NDRE", "NDMI"];
-
-      for (const parcel of withPolygon) {
-        const parcelLabel = parcel.name || parcel.code || `ID:${parcel.id}`;
-        let geoPolygon: any;
-        try {
-          const polyData = typeof parcel.polygon === "string" ? JSON.parse(parcel.polygon as string) : parcel.polygon;
-          if (Array.isArray(polyData)) {
-            const ring = polyData.map((p: any) => [p.lng || p.longitude || p[1], p.lat || p.latitude || p[0]]);
-            if (ring.length > 0 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])) ring.push([...ring[0]]);
-            geoPolygon = { type: "Polygon", coordinates: [ring] };
-          } else if (polyData.type === "Polygon") { geoPolygon = polyData; }
-          else { errorCount++; errorDetails.push(`${parcelLabel}: polígono formato no reconocido`); continue; }
-        } catch (e: any) { errorCount++; errorDetails.push(`${parcelLabel}: error parseando polígono`); continue; }
-
-        const to = new Date().toISOString().split("T")[0];
-        let from: string;
-        try {
-          const [firstBox] = await drizzle.select({ submissionTime: boxes.submissionTime }).from(boxes).where(eq(boxes.parcelCode, parcel.code || "")).orderBy(boxes.submissionTime).limit(1);
-          from = firstBox?.submissionTime ? new Date(firstBox.submissionTime).toISOString().split("T")[0] : new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0];
-        } catch { from = new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0]; }
-
-        const { getIndexHistory, getIndexMapImage, findLatestClearPass } = await import("./copernicusService");
-
-        // La última pasada despejada depende de la PARCELA, no del índice:
-        // se busca una sola vez y se reutiliza para NDVI, NDRE y NDMI.
-        let clearPass: { date: string; clearPct: number } | null = null;
-        try {
-          clearPass = await findLatestClearPass(geoPolygon);
-          if (clearPass) {
-            console.log(`[Satellite Sync] ${parcelLabel}: última pasada despejada ${clearPass.date} (${clearPass.clearPct}%)`);
-          } else {
-            console.warn(`[Satellite Sync] ${parcelLabel}: sin pasadas utilizables, se usa el mosaico`);
-          }
-        } catch (e: any) {
-          console.error(`[Satellite Sync] ${parcelLabel}: error buscando la pasada:`, e?.message);
-        }
-
-        for (const idx of indices) {
-          try {
-            const data = await getIndexHistory(geoPolygon, from, to, idx);
-            await drizzle.execute(
-              sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, data, fromDate, toDate, fetchedAt) VALUES (${parcel.id}, 'stats', ${idx}, NULL, ${JSON.stringify(data)}, ${from}, ${to}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), fromDate = VALUES(fromDate), toDate = VALUES(toDate), fetchedAt = NOW()`
-            );
-
-            // Imagen de esa pasada exacta; si no hubo, mosaico de respaldo
-            let buffer = clearPass
-              ? await getIndexMapImage(geoPolygon, idx, clearPass.date, true)
-              : null;
-            let captureDate: string | null = clearPass?.date ?? null;
-            let clearPct: number | null = clearPass?.clearPct ?? null;
-            if (!buffer) {
-              buffer = await getIndexMapImage(geoPolygon, idx);
-              captureDate = null;
-              clearPct = null;
-            }
-
-            if (buffer) {
-              const imageB64 = `data:image/png;base64,${buffer.toString("base64")}`;
-              await drizzle.execute(
-                sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, captureDate, clearPct, data, fetchedAt) VALUES (${parcel.id}, 'map', ${idx}, 'latest', ${captureDate}, ${clearPct}, ${imageB64}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), captureDate = VALUES(captureDate), clearPct = VALUES(clearPct), fetchedAt = NOW()`
-              );
-            }
-            console.log(`[Satellite Sync] ✓ ${parcelLabel} - ${idx}`);
-          } catch (e: any) {
-            const reason = e?.message?.substring(0, 80) || "error desconocido";
-            console.error(`[Satellite Sync] ✗ ${parcelLabel} - ${idx}:`, reason);
-            errorCount++;
-            errorDetails.push(`${parcelLabel} (${idx}): ${reason}`);
-          }
-        }
-        updated++;
-      }
-
-      // Notificar por Telegram al grupo de reportes (telegramChatId)
-      try {
-        const { getGlobalSetting } = await import("./globalSettings");
-        const botToken = await getGlobalSetting("telegramBotToken");
-        const chatId = await getGlobalSetting("telegramChatId");
-        if (botToken && chatId) {
-          const now = new Date().toLocaleString("es-MX", { timeZone: "America/Mexico_City" });
-          const nextSync = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString("es-MX", { timeZone: "America/Mexico_City", day: "2-digit", month: "short", year: "numeric" });
-          let msg = `🛰️ *SINCRONIZACIÓN SATELITAL*\n\n✅ ${updated} parcelas procesadas\n📊 NDVI · NDRE · NDMI\n⏰ ${now}\n📅 Próxima sync: ${nextSync}`;
-          if (errorCount > 0) {
-            const errorList = errorDetails.slice(0, 20).map(e => `  • ${e}`).join("\n");
-            msg += `\n\n⚠️ *${errorCount} errores:*\n${errorList}`;
-            if (errorDetails.length > 20) msg += `\n  ... y ${errorDetails.length - 20} más`;
-          }
-          await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: "Markdown" }),
-          });
-          console.log(`[Satellite Sync] Telegram notificado`);
-        }
-      } catch (e) { console.error("[Satellite Sync] Error Telegram:", e); }
-
-      console.log(`[Satellite Sync] Completado: ${updated} parcelas, ${errorCount} errores`);
-      return { updated, errors: errorCount, errorDetails, total: withPolygon.length };
+    // Estado del refresco automático (para mostrarlo en Configuración)
+    syncStatus: protectedProcedure.query(async () => {
+      const { getSatelliteSyncStatus } = await import("./satelliteAutoSync");
+      return getSatelliteSyncStatus();
     }),
   }),
 
@@ -2369,6 +2270,139 @@ IMPORTANTE:
       };
     }),
 
+    /**
+     * Comparativo entre ciclos para el análisis de datos.
+     *
+     * La gracia está en alinear la producción por SEMANA DESDE EL INICIO DE
+     * COSECHA de cada ciclo: comparar por fecha de calendario no sirve porque
+     * cada ciclo arranca su poda —y por lo tanto su cosecha— en momentos
+     * distintos. Así se puede ver "voy adelantado o atrasado contra el ciclo
+     * pasado a estas alturas" desde la primera caja del ciclo nuevo.
+     */
+    comparison: protectedProcedure
+      .input(z.object({
+        cycleIds: z.array(z.number()).max(5).optional(),
+        limit: z.number().min(2).max(5).default(3),
+      }).optional())
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new Error("Base de datos no disponible");
+        const today = todayMx();
+
+        const allCycles = await drizzle
+          .select()
+          .from(productionCycles)
+          .orderBy(desc(productionCycles.startDate), desc(productionCycles.id));
+
+        const selected = input?.cycleIds?.length
+          ? allCycles.filter((c) => input.cycleIds!.includes(c.id))
+          : allCycles.slice(0, input?.limit ?? 3);
+
+        const toDateStr = (v: unknown): string =>
+          typeof v === "string" ? v.slice(0, 10) : new Date(v as any).toISOString().slice(0, 10);
+
+        const cycles = await Promise.all(
+          selected.map(async (c) => {
+            // Fin del rango: fin de cosecha, fin de ciclo, o hoy si sigue abierto
+            const rangeEnd = c.harvestEndDate ?? c.endDate ?? today;
+            const stats = await db.getDashboardStats(c.startDate, c.harvestEndDate ?? c.endDate ?? undefined);
+
+            // Inicio de cosecha: el capturado a mano o la primera caja del ciclo
+            const harvestStart = c.harvestStartDate
+              ?? (stats?.firstDate ? toDateStr(stats.firstDate) : null);
+
+            // Curva alineada: semana 0 = primera semana de cosecha del ciclo
+            let curve: { week: number; boxes: number; kg: number; firstQualityKg: number }[] = [];
+            let byParcel: { parcelCode: string; boxes: number; kg: number }[] = [];
+            if (harvestStart) {
+              const rows: any = await drizzle.execute(sql`
+                SELECT FLOOR(DATEDIFF(DATE(submissionTime), ${harvestStart}) / 7) AS week,
+                       COUNT(*) AS boxes,
+                       SUM(weight) AS grams,
+                       SUM(CASE WHEN harvesterId NOT IN (98, 99) THEN weight ELSE 0 END) AS firstGrams
+                  FROM boxes
+                 WHERE archived = 0
+                   AND DATE(submissionTime) >= ${harvestStart}
+                   AND DATE(submissionTime) <= ${rangeEnd}
+                 GROUP BY week
+                 ORDER BY week
+              `);
+              const list = ((rows as any)?.[0] ?? (rows as any)?.rows ?? []) as any[];
+              curve = list
+                .filter((r) => Number(r.week) >= 0)
+                .map((r) => ({
+                  week: Number(r.week),
+                  boxes: Number(r.boxes),
+                  kg: Math.round(Number(r.grams || 0) / 1000 * 10) / 10,
+                  firstQualityKg: Math.round(Number(r.firstGrams || 0) / 1000 * 10) / 10,
+                }));
+
+              const parcelRows: any = await drizzle.execute(sql`
+                SELECT parcelCode, COUNT(*) AS boxes, SUM(weight) AS grams
+                  FROM boxes
+                 WHERE archived = 0
+                   AND parcelCode IS NOT NULL AND parcelCode <> ''
+                   AND DATE(submissionTime) >= ${c.startDate}
+                   AND DATE(submissionTime) <= ${rangeEnd}
+                 GROUP BY parcelCode
+                 ORDER BY grams DESC
+              `);
+              const pList = ((parcelRows as any)?.[0] ?? (parcelRows as any)?.rows ?? []) as any[];
+              byParcel = pList.map((r) => ({
+                parcelCode: String(r.parcelCode),
+                boxes: Number(r.boxes),
+                kg: Math.round(Number(r.grams || 0) / 1000 * 10) / 10,
+              }));
+            }
+
+            // Labores del ciclo: dan contexto a las diferencias de producción
+            const actRows = await drizzle
+              .select({ type: fieldActivities.activityType, count: sql<number>`COUNT(*)` })
+              .from(fieldActivities)
+              .where(and(
+                gte(fieldActivities.activityDate, c.startDate as any),
+                lte(fieldActivities.activityDate, rangeEnd as any),
+                eq(fieldActivities.status, "completada"),
+              ))
+              .groupBy(fieldActivities.activityType);
+            const activities: Record<string, number> = {};
+            for (const r of actRows) activities[r.type] = Number(r.count);
+
+            const isActive = !c.endDate || c.endDate >= today;
+            const daysToHarvest = harvestStart
+              ? Math.round((new Date(harvestStart + "T12:00:00").getTime() - new Date(c.startDate + "T12:00:00").getTime()) / 86400000)
+              : null;
+            // Semanas de cosecha corridas: hasta dónde se puede comparar de tú a tú
+            const harvestWeeks = curve.length > 0 ? Math.max(...curve.map((p) => p.week)) + 1 : 0;
+
+            return {
+              id: c.id,
+              name: c.name,
+              startDate: c.startDate,
+              harvestStart,
+              harvestEndDate: c.harvestEndDate,
+              endDate: c.endDate,
+              isActive,
+              daysToHarvest,
+              harvestWeeks,
+              totalBoxes: stats?.total ?? 0,
+              totalKg: stats ? Math.round(stats.totalWeight * 10) / 10 : 0,
+              firstQualityPercent: stats?.firstQualityPercent ?? 0,
+              avgKgPerBox: stats && stats.total > 0
+                ? Math.round(stats.totalWeight / stats.total * 100) / 100
+                : 0,
+              curve,
+              byParcel,
+              activities,
+            };
+          })
+        );
+
+        // Del más reciente al más antiguo: el ciclo actual va primero
+        cycles.sort((a, b) => b.startDate.localeCompare(a.startDate));
+        return { cycles };
+      }),
+
     create: adminProcedure
       .input(z.object({
         name: z.string().min(1).max(255),
@@ -3196,8 +3230,12 @@ IMPORTANTE:
           let ndviMapDate: string | null = null;
           let ndviClearPct: number | null = null;
           try {
+            // Solo la ranura 'latest', que es la que refresca el sync semanal.
+            // Antes se tomaba la fila más reciente sin importar la ranura, así
+            // que una consulta manual de una fecha vieja en Análisis de Parcela
+            // secuestraba la tarjeta y dejaba una foto de meses atrás.
             const rows: any = await drizzle.execute(
-              sql`SELECT mapDate, captureDate, clearPct FROM parcelSatelliteCache WHERE parcelId = ${pid} AND dataType = 'map' AND indexType = 'NDVI' ORDER BY fetchedAt DESC LIMIT 1`
+              sql`SELECT mapDate, captureDate, clearPct FROM parcelSatelliteCache WHERE parcelId = ${pid} AND dataType = 'map' AND indexType = 'NDVI' AND mapDate = 'latest' ORDER BY fetchedAt DESC LIMIT 1`
             );
             const row = (rows as any)?.[0]?.[0] ?? (rows as any)?.rows?.[0];
             if (row) {

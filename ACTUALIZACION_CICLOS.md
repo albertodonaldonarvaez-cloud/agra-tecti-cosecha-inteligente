@@ -599,3 +599,80 @@ git pull && docker-compose up -d --build
 Las fechas correctas aparecen conforme se refresque el cache: en la
 sincronización satelital semanal, o de inmediato al entrar a Análisis de Parcela
 (el cache de mapas dura 7 días). Sin cambios en la app móvil.
+
+---
+
+# Décima entrega: refresco satelital automático y comparativo de ciclos
+
+## Por qué seguía apareciendo una foto de 2025
+
+Dos causas, las dos corregidas:
+
+1. **No existía ningún refresco automático.** `syncAllParcels` solo corría si
+   alguien apretaba el botón en Configuración. Las imágenes se quedaban tal cual
+   hasta que alguien se acordaba de sincronizar.
+2. **El Dashboard tomaba la fila más reciente sin importar de qué consulta
+   venía.** Si alguien abría Análisis de Parcela pidiendo una fecha vieja, esa
+   consulta quedaba como "la más reciente" y **secuestraba la tarjeta**: se veía
+   una foto de octubre de 2025 aunque hubiera una imagen nueva guardada.
+
+Ahora el Dashboard lee siempre la ranura `latest`, que es la que mantiene al día
+el refresco automático.
+
+## Refresco semanal automático
+
+Nuevo módulo `satelliteAutoSync.ts`:
+
+- Corre **los lunes a la 1:00 AM** (hora de México), justo antes del resumen con
+  IA de las 2:00 AM, para que la IA lea datos satelitales frescos.
+- Para cada parcela busca la **última pasada despejada** y refresca imagen e
+  índices (NDVI, NDRE, NDMI).
+- **Se pone al día al arrancar:** si la imagen más nueva tiene más de 8 días
+  (por ejemplo si el servidor estuvo apagado el lunes), sincroniza unos minutos
+  después de encender. Si están frescas no gasta llamadas a Copernicus.
+- Avisa por Telegram igual que la sincronización manual, y el botón de
+  Configuración usa exactamente el mismo código.
+
+> Sentinel-2 vuelve a pasar por la misma zona cada ~5 días, así que una vez por
+> semana siempre hay material nuevo.
+
+**Al desplegar:** unos 3 minutos después de arrancar el servidor se dispara la
+puesta al día y las tarjetas quedan con imagen y fecha nuevas. Si alguna parcela
+solo tenía imágenes de consultas manuales, se queda sin foto hasta que termine
+esa primera sincronización.
+
+## Comparativo de ciclos en Análisis de Datos
+
+Sección nueva al inicio de Análisis de Datos, independiente del filtro de fechas.
+
+**Lo importante: la comparación se alinea por SEMANA DESDE EL INICIO DE COSECHA
+de cada ciclo, no por fecha de calendario.** Cada ciclo poda en un momento
+distinto; comparar "agosto contra agosto" no dice nada. Alineando por el arranque
+propio de cada ciclo sí se puede responder: *¿voy mejor o peor que el ciclo
+pasado a estas alturas?*
+
+Incluye:
+
+- **Ciclo actual vs anterior "a estas alturas"**: kilos acumulados de cada uno
+  hasta la semana que lleva el ciclo nuevo, con el porcentaje de diferencia
+  arriba o abajo. Aparece en cuanto el ciclo nuevo registre su primera caja.
+- **Tarjeta por ciclo**: cajas, kilos, % de primera calidad, kg por caja, fecha
+  de poda, fecha de inicio de cosecha y **cuántos días tardó en cosechar tras la
+  poda** (muy útil para comparar ciclos entre sí).
+- **Gráfica de kilos por semana de cosecha** con una línea por ciclo (el ciclo en
+  curso en línea sólida, los anteriores punteados).
+- **Kilos por parcela** en cada ciclo, lado a lado.
+- **Labores realizadas por ciclo** (riegos, podas, fertilizaciones…), que es lo
+  que da contexto a las diferencias de producción.
+
+Verificado con los dos ciclos de la base de prueba: el comparativo calculó bien
+la curva alineada (S1, S2…), los días entre poda y cosecha (168 vs 159) y el
+desglose por parcela.
+
+## Despliegue
+
+```bash
+git pull && docker-compose up -d --build
+```
+
+Sin migraciones nuevas ni cambios en la app móvil.

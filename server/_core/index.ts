@@ -635,8 +635,10 @@ async function startServer() {
       const drizzle = await getDb();
       if (!drizzle) return res.status(503).json({ error: "Base de datos no disponible" });
 
+      // Ranura 'latest': la que mantiene al día el refresco semanal
+      // (debe coincidir con lo que reporta fieldNotebook.parcelsWithActivity)
       const rows: any = await drizzle.execute(
-        sql`SELECT data FROM parcelSatelliteCache WHERE parcelId = ${parcelId} AND dataType = 'map' AND indexType = 'NDVI' ORDER BY fetchedAt DESC LIMIT 1`
+        sql`SELECT data FROM parcelSatelliteCache WHERE parcelId = ${parcelId} AND dataType = 'map' AND indexType = 'NDVI' AND mapDate = 'latest' ORDER BY fetchedAt DESC LIMIT 1`
       );
       const row = (rows as any)?.[0]?.[0] ?? (rows as any)?.rows?.[0];
       if (!row?.data) return res.status(404).json({ error: "Sin mapa NDVI cacheado" });
@@ -700,6 +702,15 @@ async function startServer() {
       startHarvestNotifier();
     }).catch((err) => {
       console.error("Error al iniciar HarvestNotifier:", err);
+    });
+
+    // Iniciar refresco semanal de imágenes satelitales
+    // Lunes 1:00 AM hora de México (antes del resumen con IA de las 2:00 AM);
+    // al arrancar se pone al día si las imágenes están vencidas
+    import("../satelliteAutoSync").then(({ startSatelliteAutoSync }) => {
+      startSatelliteAutoSync();
+    }).catch((err) => {
+      console.error("Error al iniciar SatelliteAutoSync:", err);
     });
 
     // Iniciar generador del resumen semanal con IA
