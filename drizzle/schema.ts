@@ -58,17 +58,44 @@ export const telegramLinkCodes = mysqlTable("telegramLinkCodes", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
-// Tabla de logs de actividad de usuarios
+// Acciones registrables. ORDEN IMPORTANTE: MySQL guarda los ENUM por índice,
+// así que las acciones nuevas (las de la app de campo) van SIEMPRE al final
+// para no mover lo que ya está guardado en producción.
+export const ACTIVITY_ACTIONS = [
+  "login", "logout", "page_view", "page_leave",
+  // App móvil
+  "login_failed", "app_open", "app_close", "screen_view",
+  "photo_capture", "photo_upload",
+  "note_create", "note_status", "activity_create",
+  "person_create", "product_create", "product_update",
+  "sync", "error",
+] as const;
+
+// Tabla de logs de actividad de usuarios (web y app de campo)
 export const userActivityLogs = mysqlTable("userActivityLogs", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
-  action: mysqlEnum("action", ["login", "logout", "page_view", "page_leave"]).notNull(),
+  action: mysqlEnum("action", ACTIVITY_ACTIONS).notNull(),
+  // De dónde vino el evento: la web o la app del teléfono
+  source: mysqlEnum("source", ["web", "app"]).default("web").notNull(),
   page: varchar("page", { length: 255 }),
   pageName: varchar("pageName", { length: 255 }),
   sessionId: varchar("sessionId", { length: 128 }),
   durationSeconds: int("durationSeconds"), // Duración en la página (solo para page_leave)
   ipAddress: varchar("ipAddress", { length: 64 }),
   userAgent: varchar("userAgent", { length: 512 }),
+  // ── Campos que solo llena la app móvil ──
+  // UUID del evento en el teléfono: evita duplicados si el lote se reintenta
+  clientLogId: varchar("clientLogId", { length: 64 }).unique(),
+  device: varchar("device", { length: 160 }),
+  appVersion: varchar("appVersion", { length: 32 }),
+  detail: varchar("detail", { length: 500 }),
+  // Peso de la foto antes y después de comprimirla en el teléfono: es lo que
+  // permite saber cuánto ancho de banda se está ahorrando en el campo
+  originalBytes: int("originalBytes"),
+  finalBytes: int("finalBytes"),
+  // Momento real en el teléfono (puede subirse días después, sin señal)
+  occurredAt: timestamp("occurredAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

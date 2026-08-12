@@ -76,6 +76,21 @@ function getActionLabel(action: string) {
     case "logout": return "Cierre de sesión";
     case "page_view": return "Visitó página";
     case "page_leave": return "Salió de página";
+    // Acciones que reporta la app de campo
+    case "login_failed": return "Intento fallido";
+    case "app_open": return "Abrió la app";
+    case "app_close": return "Cerró la app";
+    case "screen_view": return "Abrió sección";
+    case "photo_capture": return "Tomó foto";
+    case "photo_upload": return "Subió foto";
+    case "note_create": return "Creó nota";
+    case "note_status": return "Cambió estado de nota";
+    case "activity_create": return "Registró actividad";
+    case "person_create": return "Dio de alta personal";
+    case "product_create": return "Dio de alta producto";
+    case "product_update": return "Editó producto";
+    case "sync": return "Sincronizó";
+    case "error": return "Error";
     default: return action;
   }
 }
@@ -86,8 +101,28 @@ function getActionColor(action: string) {
     case "logout": return "text-red-700 bg-red-100";
     case "page_view": return "text-blue-700 bg-blue-100";
     case "page_leave": return "text-gray-700 bg-gray-100";
+    case "login_failed":
+    case "error": return "text-red-700 bg-red-100";
+    case "app_open": return "text-emerald-700 bg-emerald-100";
+    case "photo_capture":
+    case "photo_upload": return "text-purple-700 bg-purple-100";
+    case "note_create":
+    case "note_status":
+    case "activity_create":
+    case "person_create":
+    case "product_create":
+    case "product_update": return "text-amber-700 bg-amber-100";
+    case "sync": return "text-sky-700 bg-sky-100";
     default: return "text-gray-700 bg-gray-100";
   }
+}
+
+/** "1,2 MB" — para los tamaños de foto */
+function formatBytes(bytes: number) {
+  if (!bytes || bytes <= 0) return "0 KB";
+  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
+  return `${Math.round(bytes / 1000)} KB`;
 }
 
 export default function Users() {
@@ -133,6 +168,11 @@ export default function Users() {
 
   const { data: allLogs } = trpc.usersAdmin.activityLogs.useQuery(
     { limit: 200 },
+    { enabled: activeTab === "activity" && !!user && user.role === "admin" }
+  );
+
+  const { data: appUsage } = trpc.usersAdmin.appUsage.useQuery(
+    { days: 30 },
     { enabled: activeTab === "activity" && !!user && user.role === "admin" }
   );
 
@@ -534,6 +574,78 @@ export default function Users() {
               </GlassCard>
             )}
 
+            {/* Lo que reporta la app de campo */}
+            {appUsage && (appUsage.compresion.fotos > 0 || appUsage.usuarios.length > 0) && (
+              <GlassCard className="p-6">
+                <h2 className="text-lg font-semibold text-green-900 mb-1 flex items-center gap-2">
+                  📱 Actividad desde la app de campo
+                </h2>
+                <p className="text-xs text-gray-500 mb-4">Últimos {appUsage.days} días</p>
+
+                {appUsage.compresion.fotos > 0 && (
+                  <div className="mb-5 rounded-xl bg-emerald-50 border border-emerald-100 p-4">
+                    <p className="text-sm font-semibold text-emerald-900 mb-2">
+                      Compresión de fotos en el teléfono
+                    </p>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div>
+                        <p className="text-xs text-gray-500">Fotos tomadas</p>
+                        <p className="text-xl font-bold text-emerald-800">{appUsage.compresion.fotos}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">Salieron de la cámara</p>
+                        <p className="text-xl font-bold text-gray-700">{formatBytes(appUsage.compresion.bytesOriginal)}</p>
+                        <p className="text-[11px] text-gray-400">{formatBytes(appUsage.compresion.promedioOriginal)} c/u</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">Se subieron</p>
+                        <p className="text-xl font-bold text-emerald-700">{formatBytes(appUsage.compresion.bytesFinal)}</p>
+                        <p className="text-[11px] text-gray-400">{formatBytes(appUsage.compresion.promedioFinal)} c/u</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">Datos ahorrados</p>
+                        <p className="text-xl font-bold text-emerald-700">{appUsage.compresion.ahorroPct}%</p>
+                        <p className="text-[11px] text-gray-400">{formatBytes(appUsage.compresion.bytesAhorrados)} menos</p>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-gray-500 mt-3">
+                      La app deja cada foto en 1920 px, que es el tamaño que este servidor conserva;
+                      subir más pesado no daría más detalle.
+                    </p>
+                  </div>
+                )}
+
+                {appUsage.usuarios.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b text-left text-xs text-gray-500">
+                          <th className="py-2 pr-3">Usuario</th>
+                          <th className="py-2 pr-3">Teléfono</th>
+                          <th className="py-2 pr-3">Versión</th>
+                          <th className="py-2 pr-3 text-right">Eventos</th>
+                          <th className="py-2 pr-3 text-right">Fotos</th>
+                          <th className="py-2">Última actividad</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {appUsage.usuarios.map((u: any, i: number) => (
+                          <tr key={u.id ?? i} className="border-b last:border-0 hover:bg-gray-50">
+                            <td className="py-2 pr-3 font-medium text-gray-800">{u.name || "Usuario"}</td>
+                            <td className="py-2 pr-3 text-gray-500 text-xs">{u.device || "—"}</td>
+                            <td className="py-2 pr-3 text-gray-500 text-xs">{u.appVersion || "—"}</td>
+                            <td className="py-2 pr-3 text-right">{Number(u.eventos)}</td>
+                            <td className="py-2 pr-3 text-right">{Number(u.fotos)}</td>
+                            <td className="py-2 text-gray-400 text-xs">{formatDate(u.ultimaActividad)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </GlassCard>
+            )}
+
             {/* Timeline de actividad global */}
             <GlassCard className="p-6">
               <h2 className="text-lg font-semibold text-green-900 mb-4 flex items-center gap-2">
@@ -551,6 +663,11 @@ export default function Users() {
                           <span className={`text-xs px-2 py-0.5 rounded-full ${getActionColor(log.action)}`}>
                             {getActionLabel(log.action)}
                           </span>
+                          {log.source === "app" && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">
+                              📱 App
+                            </span>
+                          )}
                           {log.pageName && (
                             <span className="text-xs text-gray-500">{log.pageName}</span>
                           )}
@@ -558,7 +675,15 @@ export default function Users() {
                             <span className="text-xs text-purple-600">({formatDuration(log.durationSeconds)})</span>
                           )}
                         </div>
-                        <p className="text-xs text-gray-400 mt-0.5">{formatDate(log.createdAt)}</p>
+                        {log.detail && (
+                          <p className="text-xs text-gray-600 mt-0.5 break-words">{log.detail}</p>
+                        )}
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {/* En la app el evento puede haberse capturado sin señal
+                              días antes de subirse: manda la hora del teléfono */}
+                          {formatDate(log.occurredAt || log.createdAt)}
+                          {log.device && <span className="ml-2">· {log.device}</span>}
+                        </p>
                       </div>
                     </div>
                   ))}
@@ -869,15 +994,26 @@ export default function Users() {
                 {userLogs && userLogs.length > 0 ? (
                   <div className="max-h-[400px] overflow-y-auto space-y-1">
                     {userLogs.map((log: any, i: number) => (
-                      <div key={log.id || i} className="flex items-center gap-3 p-2 rounded hover:bg-gray-50 text-sm">
+                      <div key={log.id || i} className="flex items-start gap-3 p-2 rounded hover:bg-gray-50 text-sm">
                         <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${getActionColor(log.action)}`}>
                           {getActionLabel(log.action)}
                         </span>
-                        <span className="text-gray-700 truncate flex-1">{log.pageName || log.page || "-"}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            {log.source === "app" && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium whitespace-nowrap">
+                                📱 App
+                              </span>
+                            )}
+                            <span className="text-gray-700 truncate">{log.pageName || log.page || "-"}</span>
+                          </div>
+                          {log.detail && <p className="text-xs text-gray-500 break-words">{log.detail}</p>}
+                        </div>
                         {log.durationSeconds > 0 && (
                           <span className="text-xs text-purple-600 whitespace-nowrap">{formatDuration(log.durationSeconds)}</span>
                         )}
-                        <span className="text-xs text-gray-400 whitespace-nowrap">{formatDate(log.createdAt)}</span>
+                        {/* Del teléfono manda la hora de captura: pudo subirse días después */}
+                        <span className="text-xs text-gray-400 whitespace-nowrap">{formatDate(log.occurredAt || log.createdAt)}</span>
                       </div>
                     ))}
                   </div>

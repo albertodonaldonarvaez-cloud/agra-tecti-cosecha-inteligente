@@ -13,6 +13,7 @@ import com.agratec.fieldapp.data.remote.dto.SyncNoteItem
 import com.agratec.fieldapp.data.remote.dto.SyncNotesRequest
 import com.agratec.fieldapp.data.remote.dto.TrpcMutationRequest
 import com.agratec.fieldapp.data.remote.dto.WorkSessionDto
+import com.agratec.fieldapp.util.AppLogger
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -33,6 +34,11 @@ import java.util.concurrent.TimeUnit
  *  2. Fotos — solo con WiFi, o con datos móviles si el usuario lo autorizó
  *
  * El resultado queda en [SyncStatus] para mostrárselo al usuario.
+ *
+ * SEGUNDO PLANO: mientras haya algo pendiente, el trabajo corre en primer plano
+ * con una notificación de progreso. Así el usuario puede salir de la app (o
+ * apagar la pantalla) sin que el sistema mate la subida a medio camino, y ve
+ * cuánto falta. Al terminar queda un aviso con el resultado.
  */
 class SyncWorker(
     context: Context,
@@ -43,8 +49,13 @@ class SyncWorker(
         const val TAG = "SyncWorker"
         const val UNIQUE_WORK_NAME = "agra_field_sync"
 
-        /** Arriba de esto, la foto se recomprime antes de subir (~2.5 MB) */
-        private const val MAX_UPLOAD_BYTES = 2_500_000L
+        /**
+         * Arriba de esto la foto se vuelve a comprimir antes de subir.
+         * Está por encima del tamaño normal de una foto ya procesada (~450 KB)
+         * para no reprocesar de balde, pero muy por debajo de lo que pesaban
+         * las fotos tomadas con las versiones anteriores de la app.
+         */
+        private const val MAX_UPLOAD_BYTES = 900_000L
 
         /** Sincronización periódica cada 15 minutos cuando hay conexión */
         fun enqueuePeriodicSync(context: Context) {
@@ -100,6 +111,27 @@ class SyncWorker(
         else -> "No se pudo $what (código $code)"
     }
 
+    /** Total de elementos por subir en esta corrida (para la barra de progreso) */
+    private var totalPendiente = 0
+    private var hechos = 0
+    private var enPrimerPlano = false
+
+    /**
+     * Actualiza la notificación de progreso.
+     * Si el sistema no deja correr en primer plano (permiso revocado, versiones
+     * viejas, restricciones del fabricante), la sincronización sigue igual: solo
+     * se queda sin notificación.
+     */
+    private suspend fun avance(texto: String) {
+        if (totalPendiente <= 0) return
+        try {
+            setForeground(SyncNotifier.foregroundInfo(applicationContext, texto, hechos, totalPendiente))
+            enPrimerPlano = true
+        } catch (e: Exception) {
+            if (enPrimerPlano) Log.w(TAG, "No se pudo actualizar el progreso", e)
+        }
+    }
+
     override suspend fun doWork(): Result {
         Log.i(TAG, "=== Iniciando sincronización ===")
 
@@ -120,8 +152,18 @@ class SyncWorker(
         var photosSynced = 0
         var activitiesSynced = 0
         var activityPhotosSynced = 0
+        var productPhotosSynced = 0
         var authFailed = false
         var networkFailed = false
+        val inicio = System.currentTimeMillis()
+
+        // Cuánto hay por subir: es lo que se le muestra al usuario en la barra
+        totalPendiente = db.fieldNoteDao().getUnsyncedNotes(limit = 999).size +
+            db.fieldActivityDao().getUnsynced(limit = 999).size +
+            db.productDao().getUnsyncedCount() +
+            db.productDao().getPendingPhotoCount() +
+            (if (photosAllowed) db.photoDao().getUnsyncedCount() + db.activityPhotoDao().getUnsyncedCount() else 0)
+        if (totalPendiente > 0) avance("Preparando $totalPendiente elemento${if (totalPendiente == 1) "" else "s"}")
 
         // ============================================================
         // DATOS (siempre, pesan poco)
@@ -218,6 +260,9 @@ class SyncWorker(
         } catch (e: Exception) {
             Log.w(TAG, "Error sincronizando el seguimiento de notas", e)
         }
+
+        hechos += notesSynced
+        avance("Notas y catálogos listos")
 
         // ── Actividades de la libreta ──
         try {
@@ -346,6 +391,21 @@ class SyncWorker(
             Log.w(TAG, "Error bajando actividades", e)
         }
 
+        hechos += activitiesSynced
+        avance("Actividades listas")
+
+        // ── Fotos de los productos del almacén (pesan poco: van siempre) ──
+        try {
+            val productRepo = com.agratec.fieldapp.data.repository.ProductRepository(applicationContext)
+            productPhotosSynced = productRepo.pushPhotos()
+            if (productPhotosSynced > 0) {
+                hechos += productPhotosSynced
+                avance("Fotos de productos subidas")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error subiendo fotos de productos", e)
+        }
+
         // ============================================================
         // FOTOS (solo WiFi, o datos móviles si el usuario lo autorizó)
         // ============================================================
@@ -371,7 +431,11 @@ class SyncWorker(
                         // Fotos viejas tomadas antes de la compresión: reducirlas ahora
                         // (una foto de 48MP tardaba tanto que tumbaba la sincronización)
                         if (file.length() > MAX_UPLOAD_BYTES) {
-                            com.agratec.fieldapp.util.ImageProcessor.compressInPlace(photo.localFilePath)
+                            // Foto de una versión anterior de la app: se reduce ahora
+                            com.agratec.fieldapp.util.ImageProcessor.compressInPlace(
+                                photo.localFilePath,
+                                dataSaver = SyncPreferences.dataSaver(applicationContext),
+                            )
                         }
                         val requestFile = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
                         val response = apiService.uploadPhoto(
@@ -382,6 +446,8 @@ class SyncWorker(
                         if (response.isSuccessful && response.body()?.success == true) {
                             db.photoDao().markAsSynced(photo.localPhotoId)
                             photosSynced++
+                            hechos++
+                            avance("Subiendo fotos ($hechos de $totalPendiente)")
                         } else {
                             if (response.code() == 401) authFailed = true
                             db.photoDao().markSyncFailed(
@@ -409,7 +475,11 @@ class SyncWorker(
                             continue
                         }
                         if (file.length() > MAX_UPLOAD_BYTES) {
-                            com.agratec.fieldapp.util.ImageProcessor.compressInPlace(photo.localFilePath)
+                            // Foto de una versión anterior de la app: se reduce ahora
+                            com.agratec.fieldapp.util.ImageProcessor.compressInPlace(
+                                photo.localFilePath,
+                                dataSaver = SyncPreferences.dataSaver(applicationContext),
+                            )
                         }
                         val requestFile = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
                         val response = apiService.uploadActivityPhoto(
@@ -421,6 +491,8 @@ class SyncWorker(
                         if (response.isSuccessful && response.body()?.success == true) {
                             db.activityPhotoDao().markAsSynced(photo.localPhotoId)
                             activityPhotosSynced++
+                            hechos++
+                            avance("Subiendo fotos ($hechos de $totalPendiente)")
                         } else {
                             if (response.code() == 401) authFailed = true
                             db.activityPhotoDao().markSyncFailed(
@@ -443,7 +515,7 @@ class SyncWorker(
         // ============================================================
         val stillPendingPhotos = db.photoDao().getUnsyncedCount() + db.activityPhotoDao().getUnsyncedCount()
         val subidos = notesSynced + activitiesSynced
-        val fotos = photosSynced + activityPhotosSynced
+        val fotos = photosSynced + activityPhotosSynced + productPhotosSynced
 
         // Si el 401 persistió es que ni la renovación automática funcionó
         val sessionReallyExpired = authFailed && RetrofitClient.isSessionExpired(applicationContext)
@@ -466,6 +538,48 @@ class SyncWorker(
         SyncStatus.record(applicationContext, message, ok = !authFailed && problems.isEmpty(), photosWaitingForWifi = photosWaiting)
 
         Log.i(TAG, "=== Sync: $notesSynced notas, $activitiesSynced actividades, $fotos fotos, ${problems.size} problemas ===")
+
+        // ── Aviso al usuario ──
+        // Solo cuando hubo algo real que subir: una notificación por cada
+        // revisión rutinaria (cada 15 min) sería puro ruido en el teléfono.
+        if (totalPendiente > 0) {
+            val quedaronFotos = if (photosAllowed) stillPendingPhotos else 0
+            when {
+                sessionReallyExpired ->
+                    SyncNotifier.result(applicationContext, "Agra Campo", "Tu sesión terminó: entra de nuevo para subir lo que falta", ok = false)
+                problems.isNotEmpty() ->
+                    SyncNotifier.result(applicationContext, "Quedó algo sin subir", problems.first(), ok = false)
+                quedaronFotos > 0 ->
+                    SyncNotifier.result(
+                        applicationContext, "Subida en curso",
+                        "$quedaronFotos foto${if (quedaronFotos == 1) "" else "s"} sin subir todavía; la app lo sigue intentando",
+                        ok = true,
+                    )
+                subidos > 0 || fotos > 0 ->
+                    SyncNotifier.result(applicationContext, "Todo subido ✅", message, ok = true)
+                else -> SyncNotifier.cancelProgress(applicationContext)
+            }
+        }
+
+        // ── Bitácora ──
+        // El resumen de ESTA corrida se registra antes de subir el lote, así
+        // viaja de una vez en lugar de esperar a la siguiente sincronización.
+        val segundos = ((System.currentTimeMillis() - inicio) / 1000).toInt()
+        if (totalPendiente > 0 || problems.isNotEmpty()) {
+            AppLogger.log(
+                context = applicationContext,
+                action = AppLogger.SYNC,
+                screen = "Sincronización",
+                detail = "$message · red $networkType · $subidos registro(s), $fotos foto(s)" +
+                    if (stillPendingPhotos > 0) " · $stillPendingPhotos pendiente(s)" else "",
+                durationSeconds = segundos,
+            )
+        }
+        try {
+            com.agratec.fieldapp.data.repository.AppLogRepository(applicationContext).push()
+        } catch (e: Exception) {
+            Log.w(TAG, "No se pudo subir la bitácora", e)
+        }
 
         return when {
             // Sesión muerta de verdad: reintentar no sirve, el usuario debe entrar

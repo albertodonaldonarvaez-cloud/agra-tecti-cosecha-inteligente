@@ -127,10 +127,17 @@ data class SyncProductsRequest(
 
 data class SyncProductItem(
     val clientUuid: String,
+    /** ID del servidor cuando el producto se creó en la web y se edita desde el campo */
+    val serverId: Int? = null,
     val name: String,
     val brand: String? = null,
     val category: String? = null,
     val unit: String? = null,
+    val description: String? = null,
+    val activeIngredient: String? = null,
+    val concentration: String? = null,
+    val presentation: String? = null,
+    val storageLocation: String? = null,
 )
 
 data class SyncProductsResponseData(
@@ -149,11 +156,44 @@ data class SyncProductResult(
 /** Producto del almacén (offlineSync.getProducts) */
 data class ProductData(
     val id: Int,
+    val clientUuid: String?,
     val name: String,
     val brand: String?,
     val category: String?,
     val unit: String?,
     val presentation: String?,
+    val description: String?,
+    val activeIngredient: String?,
+    val concentration: String?,
+    val storageLocation: String?,
+    val photoUrl: String?,
+)
+
+// ============ BITÁCORA DE LA APP ============
+
+/** Lote de eventos de la app para offlineSync.syncAppLogs */
+data class SyncAppLogsRequest(
+    val device: String?,
+    val appVersion: String?,
+    val logs: List<AppLogItem>,
+)
+
+data class AppLogItem(
+    val clientLogId: String,
+    val action: String,
+    val screen: String? = null,
+    val detail: String? = null,
+    val originalBytes: Long? = null,
+    val finalBytes: Long? = null,
+    val durationSeconds: Int? = null,
+    val occurredAt: String,
+)
+
+data class SyncAppLogsResponseData(
+    val success: Boolean,
+    /** IDs que el servidor ya guardó: se borran del teléfono */
+    val storedIds: List<String>?,
+    val storedCount: Int?,
 )
 
 // ============ AUTO-ACTUALIZACIÓN ============

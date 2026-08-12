@@ -9,7 +9,14 @@ import com.agratec.fieldapp.data.remote.dto.SyncProductItem
 import com.agratec.fieldapp.data.remote.dto.SyncProductsRequest
 import com.agratec.fieldapp.data.remote.dto.TrpcMutationRequest
 import com.agratec.fieldapp.sync.SyncWorker
+import com.agratec.fieldapp.util.AppLogger
+import com.agratec.fieldapp.util.ImageProcessor
 import kotlinx.coroutines.flow.Flow
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
 import java.util.UUID
 
 /**
@@ -76,25 +83,91 @@ class ProductRepository(private val context: Context) {
 
     suspend fun getUnsyncedCount(): Int = dao.getUnsyncedCount()
 
+    private fun limpia(v: String?, max: Int): String? =
+        v?.trim()?.takeIf { it.isNotBlank() }?.take(max)
+
     /** Alta local de un producto (se sube en el siguiente sync) */
     suspend fun addProduct(
         name: String,
         brand: String?,
         category: String,
         unit: String,
+        description: String? = null,
+        activeIngredient: String? = null,
+        concentration: String? = null,
+        presentation: String? = null,
+        storageLocation: String? = null,
     ): ProductEntity {
         val entity = ProductEntity(
             clientUuid = UUID.randomUUID().toString(),
             name = name.trim().take(255),
-            brand = brand?.trim()?.takeIf { it.isNotBlank() }?.take(255),
+            brand = limpia(brand, 255),
             category = category,
             unit = unit,
+            description = limpia(description, 1000),
+            activeIngredient = limpia(activeIngredient, 255),
+            concentration = limpia(concentration, 128),
+            presentation = limpia(presentation, 128),
+            storageLocation = limpia(storageLocation, 255),
             isSynced = false,
         )
         dao.insert(entity)
         Log.i(TAG, "Producto creado localmente: ${entity.name}")
+        AppLogger.log(context, AppLogger.PRODUCT_CREATE, "Almacén", "Alta de producto: ${entity.name}")
         SyncWorker.enqueueImmediateSync(context)
         return entity
+    }
+
+    /**
+     * Editar un producto ya existente (incluidos los que nacieron en la web).
+     * Queda marcado como isDirty y el cambio viaja en la siguiente sincronización.
+     */
+    suspend fun updateProduct(
+        product: ProductEntity,
+        name: String,
+        brand: String?,
+        category: String,
+        unit: String,
+        description: String?,
+        activeIngredient: String?,
+        concentration: String?,
+        presentation: String?,
+        storageLocation: String?,
+    ) {
+        dao.update(
+            product.copy(
+                name = name.trim().take(255),
+                brand = limpia(brand, 255),
+                category = category,
+                unit = unit,
+                description = limpia(description, 1000),
+                activeIngredient = limpia(activeIngredient, 255),
+                concentration = limpia(concentration, 128),
+                presentation = limpia(presentation, 128),
+                storageLocation = limpia(storageLocation, 255),
+                isDirty = true,
+                syncAttempts = 0,
+                lastSyncError = null,
+            )
+        )
+        Log.i(TAG, "Producto editado localmente: ${product.name}")
+        AppLogger.log(context, AppLogger.PRODUCT_UPDATE, "Almacén", "Edición de producto: ${name.take(120)}")
+        SyncWorker.enqueueImmediateSync(context)
+    }
+
+    /**
+     * Guardar la foto del producto tomada (o elegida) en el teléfono.
+     * Se comprime aquí mismo: una foto de envase de 4 MB no tiene por qué
+     * gastar los datos de la cuadrilla.
+     */
+    suspend fun setPhoto(clientUuid: String, path: String) {
+        // Se relee el producto: si venía de una edición recién guardada, la
+        // copia que tenía la pantalla ya está vieja y pisaría los cambios
+        val product = dao.getByUuid(clientUuid) ?: return
+        val result = ImageProcessor.compress(path, dataSaver = true)
+        dao.update(product.copy(localPhotoPath = path, photoDirty = true, syncAttempts = 0))
+        AppLogger.logPhoto(context, "Almacén", result, "producto: ${product.name.take(60)}")
+        SyncWorker.enqueueImmediateSync(context)
     }
 
     /** Resultado de la subida, para que el worker pueda avisar al usuario */
@@ -112,21 +185,33 @@ class ProductRepository(private val context: Context) {
                     products = unsynced.map {
                         SyncProductItem(
                             clientUuid = it.clientUuid,
+                            serverId = it.serverId,
                             name = it.name.take(255),
                             brand = it.brand?.take(255),
                             category = it.category,
                             unit = it.unit,
+                            description = it.description?.take(1000),
+                            activeIngredient = it.activeIngredient?.take(255),
+                            concentration = it.concentration?.take(128),
+                            presentation = it.presentation?.take(128),
+                            storageLocation = it.storageLocation?.take(255),
                         )
                     }
                 ))
             )
             if (response.isSuccessful) {
                 response.body()?.result?.data?.json?.results?.forEach { r ->
-                    if (r.status != "error") {
-                        dao.markAsSynced(r.clientUuid, r.serverId)
-                        synced++
-                    } else {
-                        dao.markSyncFailed(r.clientUuid, r.error ?: "Error desconocido")
+                    when {
+                        // Lo borraron en la web mientras el teléfono no tenía señal
+                        r.status == "deleted" -> {
+                            dao.getByUuid(r.clientUuid)?.let { dao.deleteById(it.id) }
+                            Log.i(TAG, "Producto ${r.clientUuid} eliminado en la web")
+                        }
+                        r.status != "error" -> {
+                            dao.markAsSynced(r.clientUuid, r.serverId)
+                            synced++
+                        }
+                        else -> dao.markSyncFailed(r.clientUuid, r.error ?: "Error desconocido")
                     }
                 }
                 return PushResult(synced)
@@ -165,22 +250,36 @@ class ProductRepository(private val context: Context) {
                 if (local == null) {
                     dao.insert(
                         ProductEntity(
-                            clientUuid = UUID.randomUUID().toString(),
+                            clientUuid = r.clientUuid ?: UUID.randomUUID().toString(),
                             serverId = r.id,
                             name = r.name,
                             brand = r.brand,
                             category = r.category ?: "otro",
                             unit = r.unit ?: "kg",
+                            description = r.description,
+                            activeIngredient = r.activeIngredient,
+                            concentration = r.concentration,
+                            presentation = r.presentation,
+                            storageLocation = r.storageLocation,
+                            photoUrl = r.photoUrl,
                             isSynced = true,
                         )
                     )
-                } else if (local.isSynced) {
+                } else if (local.isSynced && !local.isDirty) {
+                    // Si hay una edición pendiente en el teléfono no se pisa: el
+                    // pull traería el estado viejo y borraría el trabajo del campo
                     dao.update(
                         local.copy(
                             name = r.name,
                             brand = r.brand,
                             category = r.category ?: local.category,
                             unit = r.unit ?: local.unit,
+                            description = r.description,
+                            activeIngredient = r.activeIngredient,
+                            concentration = r.concentration,
+                            presentation = r.presentation,
+                            storageLocation = r.storageLocation,
+                            photoUrl = if (local.photoDirty) local.photoUrl else r.photoUrl,
                         )
                     )
                 }
@@ -199,4 +298,51 @@ class ProductRepository(private val context: Context) {
             false
         }
     }
+
+    /**
+     * Subir las fotos de producto pendientes.
+     * Solo se intentan las de productos que ya tienen serverId: si el producto
+     * todavía no sube, la foto espera al siguiente intento.
+     */
+    suspend fun pushPhotos(): Int {
+        val pendientes = dao.getPendingPhotos()
+        if (pendientes.isEmpty()) return 0
+        val api = RetrofitClient.getApiService(context)
+        var subidas = 0
+        for (p in pendientes) {
+            val path = p.localPhotoPath ?: continue
+            try {
+                val file = File(path)
+                if (!file.exists()) {
+                    // El archivo ya no está (limpieza del teléfono): se olvida
+                    dao.update(p.copy(localPhotoPath = null, photoDirty = false))
+                    continue
+                }
+                val body = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
+                val response = api.uploadProductPhoto(
+                    photo = MultipartBody.Part.createFormData("photo", file.name, body),
+                    clientUuid = p.clientUuid.toRequestBody("text/plain".toMediaTypeOrNull()),
+                    serverId = p.serverId?.toString()?.toRequestBody("text/plain".toMediaTypeOrNull()),
+                    originalBytes = file.length().toString().toRequestBody("text/plain".toMediaTypeOrNull()),
+                )
+                if (response.isSuccessful && response.body()?.success == true) {
+                    dao.markPhotoSynced(p.clientUuid, response.body()?.photoUrl)
+                    subidas++
+                    AppLogger.log(
+                        context, AppLogger.PHOTO_UPLOAD, "Almacén",
+                        "Foto de producto subida: " + p.name.take(120),
+                        finalBytes = file.length(),
+                    )
+                } else {
+                    dao.markSyncFailed(p.clientUuid, response.body()?.error ?: "HTTP ${response.code()}")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "No se pudo subir la foto de ${p.name}", e)
+                dao.markSyncFailed(p.clientUuid, e.message ?: "Sin conexión")
+            }
+        }
+        return subidas
+    }
+
+    suspend fun getPendingPhotoCount(): Int = dao.getPendingPhotoCount()
 }

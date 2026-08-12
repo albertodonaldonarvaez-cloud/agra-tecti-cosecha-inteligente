@@ -3,6 +3,8 @@ package com.agratec.fieldapp.data.repository
 import android.content.Context
 import android.util.Log
 import com.agratec.fieldapp.data.remote.RetrofitClient
+import com.agratec.fieldapp.sync.SyncWorker
+import com.agratec.fieldapp.util.AppLogger
 import com.agratec.fieldapp.data.remote.dto.LoginRequest
 import com.agratec.fieldapp.data.remote.dto.TrpcMutationRequest
 
@@ -52,6 +54,14 @@ class AuthRepository(private val context: Context) {
                     context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                         .edit().putString(KEY_USER_NAME, data.user?.name ?: "").apply()
                     Log.i(TAG, "Login exitoso para: ${data.user?.name}")
+                    AppLogger.log(
+                        context, AppLogger.LOGIN, "Inicio de sesión",
+                        "Entró ${data.user?.name ?: email} desde ${AppLogger.deviceName()}",
+                    )
+                    // La bitácora que quedó pendiente (incluidos los intentos
+                    // fallidos y el cierre de sesión anterior) sube en el
+                    // siguiente sync, que este login dispara
+                    SyncWorker.enqueueImmediateSync(context)
                     Result.success(
                         LoginResult(
                             userName = data.user?.name ?: "Usuario",
@@ -60,6 +70,7 @@ class AuthRepository(private val context: Context) {
                         )
                     )
                 } else {
+                    AppLogger.log(context, AppLogger.LOGIN_FAILED, "Inicio de sesión", "Credenciales incorrectas ($email)")
                     Result.failure(Exception("Credenciales incorrectas"))
                 }
             } else {
@@ -68,6 +79,7 @@ class AuthRepository(private val context: Context) {
                     500 -> "Error del servidor, intenta más tarde"
                     else -> "Error de conexión (${response.code()})"
                 }
+                AppLogger.log(context, AppLogger.LOGIN_FAILED, "Inicio de sesión", "$errorMsg ($email)")
                 Result.failure(Exception(errorMsg))
             }
         } catch (e: Exception) {
@@ -78,8 +90,20 @@ class AuthRepository(private val context: Context) {
         }
     }
 
-    /** Cerrar sesión (limpiar token local) */
-    fun logout() {
+    /**
+     * Cerrar sesión (limpiar token local).
+     *
+     * Antes de borrar el token se intenta subir la bitácora pendiente: sin
+     * token el servidor ya no sabría de quién son esos eventos. Si no hay
+     * señal se quedan guardados y suben después.
+     */
+    suspend fun logout() {
+        AppLogger.log(context, AppLogger.LOGOUT, "Ajustes", "Cerró sesión desde ${AppLogger.deviceName()}")
+        try {
+            AppLogRepository(context).push()
+        } catch (e: Exception) {
+            Log.w(TAG, "La bitácora quedó pendiente al cerrar sesión", e)
+        }
         RetrofitClient.clearToken(context)
     }
 

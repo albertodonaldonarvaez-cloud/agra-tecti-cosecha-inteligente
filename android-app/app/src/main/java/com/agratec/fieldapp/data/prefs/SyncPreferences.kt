@@ -15,6 +15,7 @@ object SyncPreferences {
     private const val KEY_UPLOAD_ON_MOBILE = "upload_photos_on_mobile"
     private const val KEY_DOWNLOAD_ON_MOBILE = "download_photos_on_mobile"
     private const val KEY_ASKED = "photo_policy_asked"
+    private const val KEY_DATA_SAVER = "photo_data_saver"
 
     /** ASK = todavía no se le pregunta al usuario */
     enum class Policy { ASK, ALLOW, WIFI_ONLY }
@@ -50,6 +51,17 @@ object SyncPreferences {
 
     fun markAsked(context: Context) {
         prefs(context).edit().putBoolean(KEY_ASKED, true).apply()
+    }
+
+    /**
+     * Ahorro de datos: comprime las fotos más fuerte (1280 px en vez de 1920).
+     * Para cuadrillas con señal muy mala; por omisión está apagado porque el
+     * tamaño normal es justo el que el servidor conserva.
+     */
+    fun dataSaver(context: Context): Boolean = prefs(context).getBoolean(KEY_DATA_SAVER, false)
+
+    fun setDataSaver(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_DATA_SAVER, enabled).apply()
     }
 
     /** Decide si se pueden SUBIR fotos con la red actual */

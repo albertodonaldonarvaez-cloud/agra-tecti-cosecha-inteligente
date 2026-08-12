@@ -403,6 +403,86 @@ async function startServer() {
   });
 
   // ============================================
+  // FOTO DE PRODUCTO DEL ALMACÉN (desde la app)
+  // El producto se identifica por serverId (nació en la web) o por clientUuid
+  // (se dio de alta en el campo). La foto de un envase no es evidencia de
+  // campo, así que aquí sí vale la galería del teléfono.
+  // ============================================
+  app.post("/api/sync/product-photo", upload.single("photo"), async (req, res) => {
+    try {
+      const user = await getAuthUser(req);
+      if (!user) return res.status(401).json({ error: "No autenticado" });
+
+      const { clientUuid, serverId } = req.body;
+      if (!clientUuid && !serverId) {
+        return res.status(400).json({ error: "Se requiere clientUuid o serverId del producto" });
+      }
+      if (clientUuid && !isSafeLocalId(clientUuid)) {
+        return res.status(400).json({ error: "clientUuid con formato inválido" });
+      }
+      const idServidor = serverId ? Number(serverId) : null;
+      if (serverId && (!Number.isInteger(idServidor) || idServidor! <= 0)) {
+        return res.status(400).json({ error: "serverId inválido" });
+      }
+      if (!req.file) {
+        return res.status(400).json({ error: "No se recibió ninguna foto" });
+      }
+
+      const { getDb } = await import("../db");
+      const { warehouseProducts } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      const drizzle = await getDb();
+      if (!drizzle) return res.status(503).json({ error: "Base de datos no disponible" });
+
+      let producto: { id: number } | undefined;
+      if (idServidor) {
+        [producto] = await drizzle.select({ id: warehouseProducts.id })
+          .from(warehouseProducts).where(eq(warehouseProducts.id, idServidor)).limit(1);
+      }
+      if (!producto && clientUuid) {
+        [producto] = await drizzle.select({ id: warehouseProducts.id })
+          .from(warehouseProducts).where(eq(warehouseProducts.clientUuid, clientUuid)).limit(1);
+      }
+      if (!producto) {
+        return res.status(404).json({ error: "Producto no encontrado (sincroniza el producto antes que su foto)" });
+      }
+
+      const fs = await import("fs");
+      const pathModule = await import("path");
+      // Mismo directorio que usa el almacén de la web, para no partir las fotos
+      const dir = `/app/photos/warehouse/products`;
+      fs.mkdirSync(dir, { recursive: true });
+      // El nombre lleva el id del producto: una foto por producto, se reemplaza
+      const fileName = `producto-${producto.id}.jpg`;
+      const destPath = pathModule.join(dir, fileName);
+
+      try {
+        const compressed = await sharp(req.file.path)
+          .resize(1280, 1280, { fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 80 })
+          .toBuffer();
+        fs.writeFileSync(destPath, compressed);
+      } catch (sharpErr) {
+        console.warn("[ProductPhoto] Sharp falló, copiando sin comprimir:", sharpErr);
+        fs.copyFileSync(req.file.path, destPath);
+      }
+      try { fs.unlinkSync(req.file.path); } catch { /* el temporal ya no está */ }
+
+      // El sufijo cambia en cada subida para que el navegador no siga
+      // mostrando la foto vieja en cache (el estático se sirve con 7 días)
+      const photoUrl = `/app/photos/warehouse/products/${fileName}?v=${Date.now()}`;
+      await drizzle.update(warehouseProducts)
+        .set({ photoUrl })
+        .where(eq(warehouseProducts.id, producto.id));
+
+      res.json({ success: true, photoUrl, serverId: producto.id, clientUuid: clientUuid || null });
+    } catch (error: any) {
+      console.error("[ProductPhoto] Error:", error);
+      res.status(500).json({ error: error.message || "Error interno del servidor" });
+    }
+  });
+
+  // ============================================
   // WEB ACTIVITY PHOTOS — Regularizar evidencia desde la computadora
   // La app solo permite cámara en vivo (evidencia confiable del campo); desde
   // la web sí se pueden adjuntar archivos locales a actividades ya creadas,

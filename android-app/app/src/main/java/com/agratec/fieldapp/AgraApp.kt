@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import com.agratec.fieldapp.data.remote.RetrofitClient
 import com.agratec.fieldapp.sync.SyncWorker
+import com.agratec.fieldapp.util.AppLogger
 
 /**
  * Clase Application de Agra Field App.
@@ -24,6 +25,13 @@ class AgraApp : Application() {
         // Solo programar sync si hay sesión activa
         if (RetrofitClient.isLoggedIn(this)) {
             SyncWorker.enqueuePeriodicSync(this)
+            // Queda constancia de cada entrada a la app, con qué teléfono y cuándo
+            AppLogger.log(
+                context = this,
+                action = AppLogger.APP_OPEN,
+                screen = "Inicio",
+                detail = "Abrió la app v${BuildConfig.VERSION_NAME} en ${AppLogger.deviceName()}",
+            )
         }
     }
 }

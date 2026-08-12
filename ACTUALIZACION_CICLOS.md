@@ -939,3 +939,151 @@ La fecha aparece en cuanto corra la revisión satelital (unos 3 minutos después
 arrancar, o desde el botón de Configuración). En el log de cada parcela se ve la
 línea `última pasada AAAA-MM-DD (NN% despejado)`, y si se usó el catálogo lo dice
 con "(nubosidad de la escena)". Sin migraciones ni cambios en la app móvil.
+
+---
+
+# Decimoquinta entrega — bitácora de la app, almacén con foto y subida en segundo plano
+
+App **v1.8.0 (versionCode 9)** · base local Room **v7** · migración de servidor **0023**
+
+## 1. Bitácora de la app enviada al servidor
+
+La app ahora deja constancia de lo que pasa en el teléfono y lo sube por lotes:
+entradas y salidas de sesión (incluidos los intentos fallidos), qué sección se
+abre, cada foto tomada con lo que pesaba y lo que pesa ya comprimida, alta de
+notas, actividades, personal y productos, cambios de estado de una nota, y el
+resumen de cada sincronización.
+
+Cómo funciona:
+
+- El evento se guarda **primero en el teléfono** (tabla `app_logs`), porque en
+  el campo casi nunca hay señal. La subida es posterior y por lotes de 200.
+- `clientLogId` es la clave de idempotencia: si el lote se reintenta, el
+  servidor no duplica nada. Solo se borran del teléfono los eventos que el
+  servidor confirmó haber guardado.
+- Se guarda la **hora real del teléfono** (`occurredAt`) además de la de
+  recepción: un evento capturado el martes sin señal y subido el jueves se
+  muestra con la fecha del martes.
+- Todo cae en la misma tabla que ya usaba la web (`userActivityLogs`) con
+  `source = 'app'`, así se ve junto y por usuario. En **Usuarios → Actividad**
+  cada renglón de la app trae su distintivo 📱, el detalle y el modelo del
+  teléfono.
+- Red de seguridad: si un teléfono pasa meses sin subir, la bitácora local se
+  recorta a los 2 000 eventos más recientes.
+- Al cerrar sesión se intenta subir lo pendiente **antes** de borrar el token:
+  sin token el servidor ya no sabría de quién eran esos eventos.
+
+Registrar nunca puede tumbar la app: todo va en un hilo aparte y cualquier
+error se traga.
+
+## 2. Cuánto se están comprimiendo las fotos
+
+Se midió y se corrigió. El servidor **ya reescalaba** cada foto recibida a
+1920 px con calidad 80 antes de guardarla, así que todo lo que el teléfono
+subía por encima de eso se tiraba en el servidor: ancho de banda del campo
+gastado a cambio de nada.
+
+Ahora la app deja la foto exactamente en ese tamaño. **La evidencia archivada
+queda idéntica**; lo único que cambia es lo que viaja por la red.
+
+Medido con una foto de 12 MP (4000×3000) con detalle fino de follaje:
+
+| | Tamaño | Peso por foto | 40 fotos (una jornada) |
+|---|---|---|---|
+| Antes (8 MP, q80) | 3265×2449 | 1.94 MB | 77.7 MB |
+| **Ahora (1920 px, q80)** | 1920×1440 | **449 KB** | **18.0 MB** |
+| Ahorro de datos (1280 px, q70) | 1280×960 | 106 KB | 4.2 MB |
+
+**4.3 veces menos** por foto. Además hay un tope duro de 700 KB: si una foto
+sigue pesando de más se le baja la calidad por pasos, porque una sola foto
+pesada podía tumbar la sincronización completa en una red de campo.
+
+Dónde se ve el número:
+
+- **En la app** (Ajustes): "N fotos · 486 MB → 61 MB · te has ahorrado 425 MB
+  (87 % menos)".
+- **En la web** (Usuarios → Actividad): la misma cuenta de los últimos 30 días,
+  con el promedio por foto y el total ahorrado, sacada de la bitácora.
+
+También se agregó un interruptor **"Ahorro de datos"** en Ajustes para las
+cuadrillas con señal muy mala (1280 px / calidad 70). Viene apagado, porque el
+tamaño normal ya es el que el servidor conserva.
+
+Las fotos tomadas con versiones anteriores de la app se reducen antes de
+subirse si pasan de 900 KB.
+
+## 3. Almacén: foto y edición de productos desde la app
+
+- Tocar un producto abre el formulario de edición, con todos sus datos.
+- Se puede editar cualquier producto, **incluidos los creados en la web**: se
+  identifican por `serverId`.
+- Además del nombre, marca, unidad y tipo, ahora se capturan desde el campo el
+  ingrediente activo, la concentración, la presentación, dónde está guardado y
+  las notas.
+- **Foto del producto**, con cámara o galería. Aquí sí se permite la galería
+  (a diferencia de la evidencia de campo, que sigue exigiendo cámara en vivo):
+  lo normal es fotografiar la etiqueta o reusar la foto del proveedor. Se
+  comprime en el teléfono y se sube a `/api/sync/product-photo`.
+- Todo funciona sin señal y sube solo al recuperarla.
+
+Lo importante de la implementación: **el servidor solo toca los campos que el
+teléfono manda**. Stock, costos, proveedor, lote y caducidad se capturan en la
+oficina y el teléfono ni los conoce; sobrescribirlos con null habría borrado
+trabajo. Y si el producto se borró en la web mientras el teléfono estaba sin
+señal, el servidor responde `deleted` y la app lo quita en vez de recrearlo a
+escondidas.
+
+## 4. Subida en segundo plano con notificación de progreso
+
+Antes, si el usuario salía de la app con fotos a medio subir, la subida seguía
+a ciegas y el sistema podía matarla.
+
+Ahora, mientras haya algo pendiente, la sincronización corre **en primer plano**
+con una notificación de progreso ("Subiendo 3 de 12"), el sistema no la
+interrumpe y al terminar queda un aviso con el resultado:
+
+- "Todo subido ✅ · 4 registros sincronizados · 8 fotos subidas"
+- "Subida en curso · 6 fotos sin subir todavía; la app lo sigue intentando"
+- "Quedó algo sin subir · <el problema concreto>"
+
+La notificación **solo aparece cuando de verdad había algo que subir**: una por
+cada revisión rutinaria (cada 15 minutos) sería puro ruido. Si el usuario niega
+el permiso de notificaciones o el fabricante bloquea el primer plano, la
+sincronización sigue funcionando igual: solo se queda sin aviso.
+
+Permisos nuevos: `POST_NOTIFICATIONS`, `FOREGROUND_SERVICE` y
+`FOREGROUND_SERVICE_DATA_SYNC`.
+
+## Verificaciones
+
+- **Migración de la base del teléfono (v6 → v7)**: se reconstruyó una base v6
+  igual a la que traen los teléfonos, se le aplicaron los `ALTER` escritos a
+  mano y se comparó columna por columna contra lo que Room espera en la v7. Las
+  8 tablas quedan idénticas, así que Room no recrea la base y nadie pierde lo
+  capturado sin subir.
+- **ENUM de acciones**: comprobado que `schema.ts` y `migrate.cjs` declaran la
+  misma lista en el mismo orden y que las 4 acciones originales siguen en las
+  posiciones 0-3. MySQL guarda los ENUM por índice: moverlas habría cambiado el
+  significado de todo lo ya registrado.
+- **Endpoints** (`server/offlineSyncApp.test.ts`, 7 pruebas): alta de producto
+  desde el campo; edición de un producto de la web sin tocar stock/costo/
+  proveedor/lote; vaciado de un campo; producto borrado en la web; bitácora con
+  `source='app'`, dispositivo y hora real; reloj del teléfono corrido; acción
+  fuera del catálogo rechazada.
+- **Compresión**: medida con la misma librería JPEG y una foto de 12 MP con
+  detalle fino (tabla de arriba).
+- App compilada (debug y release con R8) y web compilada; `tsc` sigue en 204
+  errores previos.
+
+No se pudo probar contra una base MySQL real ni contra el servidor levantado
+(no hay Docker ni credenciales de base en este equipo).
+
+## Despliegue
+
+```bash
+git pull && docker-compose up -d --build
+```
+
+La migración `0023` corre sola al arrancar y es idempotente. Después hay que
+publicar el APK v1.8.0 para que los teléfonos reciban la bitácora, la foto de
+productos y la notificación de progreso.

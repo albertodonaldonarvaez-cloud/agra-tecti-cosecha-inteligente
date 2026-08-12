@@ -225,13 +225,13 @@ fun CreateNoteScreen(onBack: () -> Unit) {
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
         if (success) {
-            // Procesar en el teléfono: máx 8MP, calidad media (pesa mucho menos al subir)
+            // Dejarla al tamaño que el servidor conserva (1920 px): sube mucho
+            // más rápido y la evidencia guardada queda igual. De paso queda
+            // registrado cuánto se ahorró.
             val path = lastPhotoRealPath
             if (path != null) {
                 scope.launch {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        com.agratec.fieldapp.util.ImageProcessor.compressInPlace(path)
-                    }
+                    com.agratec.fieldapp.util.AppLogger.captureAndLog(context, path, "Notas de campo")
                     photoUri = tempPhotoUri
                 }
             } else {

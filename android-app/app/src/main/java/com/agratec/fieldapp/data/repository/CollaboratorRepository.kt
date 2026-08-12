@@ -50,6 +50,10 @@ class CollaboratorRepository(private val context: Context) {
         // aunque no haya señal; el servidor lo registra al sincronizar
         cleanRole?.let { CatalogPreferences.addRole(context, it) }
         Log.i(TAG, "Colaborador creado localmente: ${entity.name}")
+        com.agratec.fieldapp.util.AppLogger.log(
+            context, com.agratec.fieldapp.util.AppLogger.PERSON_CREATE, "Personal",
+            "Alta de personal: " + name.take(120),
+        )
         SyncWorker.enqueueImmediateSync(context)
         return entity
     }

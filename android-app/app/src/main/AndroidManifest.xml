@@ -12,6 +12,11 @@
     <!-- Para Android < 13 -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <!-- Notificación con el progreso de la subida (Android 13+ la pide al usuario) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- La subida sigue aunque el usuario salga de la app -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application
         android:name=".AgraApp"
@@ -33,6 +38,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+            WorkManager corre la sincronización en primer plano para que el
+            sistema no la mate a medio subir. Desde Android 10 hay que declarar
+            de qué tipo es el servicio; sin esto, el trabajo se rechaza.
+        -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
 
         <!-- FileProvider para compartir fotos con la cámara -->
         <provider

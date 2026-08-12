@@ -42,6 +42,39 @@ data class ProductEntity(
     @ColumnInfo(defaultValue = "kg")
     val unit: String = "kg",
 
+    /** Notas del producto (dosis recomendada, observaciones del campo…) */
+    val description: String? = null,
+
+    /** Ingrediente activo, tal como viene en la etiqueta */
+    val activeIngredient: String? = null,
+
+    /** Concentración de la etiqueta (p. ej. "35 %") */
+    val concentration: String? = null,
+
+    /** Presentación (bidón de 20 L, saco de 50 kg…) */
+    val presentation: String? = null,
+
+    /** Dónde está guardado en la bodega */
+    val storageLocation: String? = null,
+
+    /** Foto del producto ya en el servidor (ruta relativa) */
+    val photoUrl: String? = null,
+
+    /** Foto tomada en el campo que todavía no se sube */
+    val localPhotoPath: String? = null,
+
+    /** Hay una foto local pendiente de subir */
+    @ColumnInfo(defaultValue = "0")
+    val photoDirty: Boolean = false,
+
+    /**
+     * El producto se editó en el teléfono y el cambio no ha llegado al servidor.
+     * Va aparte de isSynced: un producto bajado del servidor está sincronizado
+     * pero puede tener una edición pendiente encima.
+     */
+    @ColumnInfo(defaultValue = "0")
+    val isDirty: Boolean = false,
+
     val isSynced: Boolean = false,
 
     val syncAttempts: Int = 0,

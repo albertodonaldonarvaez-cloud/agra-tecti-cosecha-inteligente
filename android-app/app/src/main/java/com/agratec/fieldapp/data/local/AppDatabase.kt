@@ -7,6 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.agratec.fieldapp.data.local.dao.ActivityPhotoDao
+import com.agratec.fieldapp.data.local.dao.AppLogDao
 import com.agratec.fieldapp.data.local.dao.CollaboratorDao
 import com.agratec.fieldapp.data.local.dao.FieldActivityDao
 import com.agratec.fieldapp.data.local.dao.FieldNoteDao
@@ -14,6 +15,7 @@ import com.agratec.fieldapp.data.local.dao.ParcelDao
 import com.agratec.fieldapp.data.local.dao.PhotoDao
 import com.agratec.fieldapp.data.local.dao.ProductDao
 import com.agratec.fieldapp.data.local.entity.ActivityPhotoEntity
+import com.agratec.fieldapp.data.local.entity.AppLogEntity
 import com.agratec.fieldapp.data.local.entity.CollaboratorEntity
 import com.agratec.fieldapp.data.local.entity.FieldActivityEntity
 import com.agratec.fieldapp.data.local.entity.FieldNoteEntity
@@ -35,12 +37,14 @@ import com.agratec.fieldapp.data.local.entity.ProductEntity
  *          actividades (planeado vs utilizado).
  * v5 → v6: seguimiento de notas de campo (estado, notas de resolución y
  *          vínculo con el servidor) para poder cerrarlas desde el teléfono.
+ * v6 → v7: bitácora de la app (app_logs) y edición/foto de los productos
+ *          del almacén desde el teléfono.
  * Las migraciones son REALES (no destructivas) para no perder datos pendientes
  * de sincronizar en los dispositivos de campo.
  */
 @Database(
-    entities = [FieldNoteEntity::class, PhotoEntity::class, ParcelEntity::class, FieldActivityEntity::class, CollaboratorEntity::class, ActivityPhotoEntity::class, ProductEntity::class],
-    version = 6,
+    entities = [FieldNoteEntity::class, PhotoEntity::class, ParcelEntity::class, FieldActivityEntity::class, CollaboratorEntity::class, ActivityPhotoEntity::class, ProductEntity::class, AppLogEntity::class],
+    version = 7,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -52,6 +56,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun collaboratorDao(): CollaboratorDao
     abstract fun activityPhotoDao(): ActivityPhotoDao
     abstract fun productDao(): ProductDao
+    abstract fun appLogDao(): AppLogDao
 
     companion object {
         @Volatile
@@ -162,6 +167,41 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v6 → v7: bitácora de la app y edición/foto de productos */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `app_logs` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `clientLogId` TEXT NOT NULL,
+                        `action` TEXT NOT NULL,
+                        `screen` TEXT,
+                        `detail` TEXT,
+                        `originalBytes` INTEGER,
+                        `finalBytes` INTEGER,
+                        `durationSeconds` INTEGER,
+                        `occurredAt` TEXT NOT NULL,
+                        `isSynced` INTEGER NOT NULL,
+                        `syncAttempts` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_app_logs_clientLogId` ON `app_logs` (`clientLogId`)")
+
+                // Edición y foto de productos desde el teléfono
+                db.execSQL("ALTER TABLE `products_cache` ADD COLUMN `description` TEXT")
+                db.execSQL("ALTER TABLE `products_cache` ADD COLUMN `activeIngredient` TEXT")
+                db.execSQL("ALTER TABLE `products_cache` ADD COLUMN `concentration` TEXT")
+                db.execSQL("ALTER TABLE `products_cache` ADD COLUMN `presentation` TEXT")
+                db.execSQL("ALTER TABLE `products_cache` ADD COLUMN `storageLocation` TEXT")
+                db.execSQL("ALTER TABLE `products_cache` ADD COLUMN `photoUrl` TEXT")
+                db.execSQL("ALTER TABLE `products_cache` ADD COLUMN `localPhotoPath` TEXT")
+                db.execSQL("ALTER TABLE `products_cache` ADD COLUMN `photoDirty` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `products_cache` ADD COLUMN `isDirty` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -169,7 +209,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "agra_field_notes.db"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     // Solo como último recurso para saltos sin ruta de migración
                     .fallbackToDestructiveMigration()
                     .build()

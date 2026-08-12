@@ -1,5 +1,6 @@
 package com.agratec.fieldapp.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -10,10 +11,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.agratec.fieldapp.data.prefs.PhotoStats
 import com.agratec.fieldapp.ui.theme.*
 
 /**
@@ -81,6 +84,10 @@ fun SettingsDialog(
     checkingUpdate: Boolean = false,
     onCheckUpdate: (() -> Unit)? = null,
     onLogout: (() -> Unit)? = null,
+    dataSaver: Boolean = false,
+    onDataSaverChange: ((Boolean) -> Unit)? = null,
+    photoStats: PhotoStats.Stats? = null,
+    pendingUploads: Int = 0,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -108,6 +115,65 @@ fun SettingsDialog(
                     checked = downloadOnMobile,
                     onCheckedChange = { onChange(uploadOnMobile, it) },
                 )
+
+                // ── Cuánto se está ahorrando al comprimir ──
+                if (onDataSaverChange != null) {
+                    SettingSwitch(
+                        title = "Ahorro de datos",
+                        subtitle = if (dataSaver) "Fotos más ligeras (1280 px)" else "Calidad normal (1920 px)",
+                        checked = dataSaver,
+                        onCheckedChange = onDataSaverChange,
+                    )
+                }
+
+                if (photoStats != null && photoStats.fotos > 0) {
+                    SettingsDivider()
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(AgraEmerald100.copy(alpha = 0.5f))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Text(
+                            "Compresión de fotos",
+                            color = TextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            "${photoStats.fotos} foto${if (photoStats.fotos == 1) "" else "s"} · " +
+                                "${PhotoStats.formatoMb(photoStats.originalBytes)} → " +
+                                PhotoStats.formatoMb(photoStats.finalBytes),
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                        )
+                        Text(
+                            "Te has ahorrado ${PhotoStats.formatoMb(photoStats.ahorroBytes)} de datos " +
+                                "(${photoStats.ahorroPct}% menos)",
+                            color = AgraEmerald600,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            "Las fotos se dejan al tamaño exacto que el servidor conserva; " +
+                                "subir más pesado no daría más detalle.",
+                            color = TextTertiary,
+                            fontSize = 10.sp,
+                        )
+                    }
+                }
+
+                if (pendingUploads > 0) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "⏳ $pendingUploads elemento${if (pendingUploads == 1) "" else "s"} por subir. " +
+                            "Puedes salir de la app: la subida sigue y te avisamos al terminar.",
+                        color = TextTertiary,
+                        fontSize = 11.sp,
+                    )
+                }
 
                 // ── Actualizaciones de la app ──
                 if (onCheckUpdate != null) {

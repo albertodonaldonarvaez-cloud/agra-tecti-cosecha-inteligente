@@ -148,6 +148,32 @@ interface ApiService {
     @GET("api/trpc/offlineSync.getProducts")
     suspend fun getProducts(): Response<TrpcResponse<List<ProductData>>>
 
+    /**
+     * Subir la foto de un producto del almacén.
+     * Se identifica por clientUuid (alta del campo) o serverId (alta de la web).
+     */
+    @Multipart
+    @POST("api/sync/product-photo")
+    suspend fun uploadProductPhoto(
+        @Part photo: MultipartBody.Part,
+        @Part("clientUuid") clientUuid: RequestBody,
+        @Part("serverId") serverId: RequestBody?,
+        @Part("originalBytes") originalBytes: RequestBody?,
+    ): Response<PhotoUploadResponse>
+
+    // ============================================
+    // BITÁCORA DE LA APP
+    // ============================================
+
+    /**
+     * Subir el lote de eventos registrados en el teléfono (entradas, fotos,
+     * altas, sincronizaciones). Idempotente por clientLogId.
+     */
+    @POST("api/trpc/offlineSync.syncAppLogs")
+    suspend fun syncAppLogs(
+        @Body body: TrpcMutationRequest<SyncAppLogsRequest>
+    ): Response<TrpcResponse<SyncAppLogsResponseData>>
+
     // ============================================
     // FOTOS DE ACTIVIDADES (multipart)
     // ============================================

@@ -1219,6 +1219,78 @@ export async function getUserTopPages(userId: number) {
 }
 
 /**
+ * Resumen de lo que reporta la app de campo.
+ *
+ * Sale de la misma tabla de actividad, filtrando source='app'. El bloque de
+ * compresión responde a la pregunta práctica: cuánto ancho de banda se está
+ * ahorrando el teléfono al reducir las fotos antes de subirlas.
+ */
+export async function getAppUsageSummary(days: number = 30) {
+  const db = await getDb();
+  if (!db) return null;
+
+  const { sql } = await import("drizzle-orm");
+
+  // Compresión de fotos: bytes que salieron de la cámara vs. los que viajaron
+  const [fotos] = await db.execute(sql`
+    SELECT
+      COUNT(*) AS fotos,
+      COALESCE(SUM(originalBytes), 0) AS bytesOriginal,
+      COALESCE(SUM(finalBytes), 0) AS bytesFinal,
+      COALESCE(AVG(originalBytes), 0) AS promedioOriginal,
+      COALESCE(AVG(finalBytes), 0) AS promedioFinal
+    FROM userActivityLogs
+    WHERE source = 'app' AND action = 'photo_capture'
+      AND originalBytes > 0
+      AND createdAt >= DATE_SUB(NOW(), INTERVAL ${days} DAY)
+  `);
+
+  // Qué se hace desde el teléfono, por acción
+  const [acciones] = await db.execute(sql`
+    SELECT action, COUNT(*) AS total
+    FROM userActivityLogs
+    WHERE source = 'app' AND createdAt >= DATE_SUB(NOW(), INTERVAL ${days} DAY)
+    GROUP BY action
+    ORDER BY total DESC
+  `);
+
+  // Quién está usando la app y desde qué teléfono
+  const [usuarios] = await db.execute(sql`
+    SELECT
+      u.id, u.name, u.email,
+      COUNT(*) AS eventos,
+      COUNT(CASE WHEN l.action = 'photo_capture' THEN 1 END) AS fotos,
+      MAX(l.device) AS device,
+      MAX(l.appVersion) AS appVersion,
+      MAX(COALESCE(l.occurredAt, l.createdAt)) AS ultimaActividad
+    FROM userActivityLogs l
+    LEFT JOIN users u ON l.userId = u.id
+    WHERE l.source = 'app' AND l.createdAt >= DATE_SUB(NOW(), INTERVAL ${days} DAY)
+    GROUP BY u.id, u.name, u.email
+    ORDER BY ultimaActividad DESC
+  `);
+
+  const f = (fotos as unknown as any[])[0] || {};
+  const original = Number(f.bytesOriginal || 0);
+  const final = Number(f.bytesFinal || 0);
+
+  return {
+    days,
+    compresion: {
+      fotos: Number(f.fotos || 0),
+      bytesOriginal: original,
+      bytesFinal: final,
+      bytesAhorrados: Math.max(0, original - final),
+      ahorroPct: original > 0 ? Math.round(100 - (final * 100) / original) : 0,
+      promedioOriginal: Math.round(Number(f.promedioOriginal || 0)),
+      promedioFinal: Math.round(Number(f.promedioFinal || 0)),
+    },
+    acciones: acciones as unknown as any[],
+    usuarios: usuarios as unknown as any[],
+  };
+}
+
+/**
  * Limpiar logs antiguos (más de 90 días)
  */
 export async function cleanOldActivityLogs() {

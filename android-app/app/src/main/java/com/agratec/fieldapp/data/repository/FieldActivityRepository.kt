@@ -86,6 +86,11 @@ class FieldActivityRepository(private val context: Context) {
         }
 
         Log.i(TAG, "Actividad creada localmente: ${entity.clientUuid} ($activityType, ${photoFilePaths.size} fotos)")
+        com.agratec.fieldapp.util.AppLogger.log(
+            context, com.agratec.fieldapp.util.AppLogger.ACTIVITY_CREATE, "Libreta de campo",
+            "Actividad $activityType en ${parcelIds.size} parcela(s) · " +
+                "${photoFilePaths.size} foto(s) · ${collaboratorUuids.size} persona(s)",
+        )
         SyncWorker.enqueueImmediateSync(context)
         return entity
     }

@@ -62,6 +62,10 @@ class FieldNoteRepository(private val context: Context) {
         )
         noteDao.insert(note)
         Log.i(TAG, "Nota creada localmente: ${note.folio}")
+        com.agratec.fieldapp.util.AppLogger.log(
+            context, com.agratec.fieldapp.util.AppLogger.NOTE_CREATE, "Notas de campo",
+            "Nota nueva ($category): ${description.take(160)}",
+        )
 
         // If a photo was captured, create the linked PhotoEntity
         if (photoUri != null) {
@@ -97,6 +101,10 @@ class FieldNoteRepository(private val context: Context) {
     suspend fun setNoteStatus(folio: String, status: String, resolutionNotes: String? = null) {
         noteDao.setStatusLocally(folio, status, resolutionNotes?.takeIf { it.isNotBlank() })
         Log.i(TAG, "Nota $folio -> $status (pendiente de subir)")
+        com.agratec.fieldapp.util.AppLogger.log(
+            context, com.agratec.fieldapp.util.AppLogger.NOTE_STATUS, "Notas de campo",
+            "Nota marcada como $status" + (resolutionNotes?.takeIf { it.isNotBlank() }?.let { ": ${it.take(200)}" } ?: ""),
+        )
         com.agratec.fieldapp.sync.SyncWorker.enqueueImmediateSync(context)
     }
 

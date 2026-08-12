@@ -1,8 +1,11 @@
 package com.agratec.fieldapp.ui
 
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
@@ -20,10 +23,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.agratec.fieldapp.data.prefs.PhotoStats
 import com.agratec.fieldapp.data.prefs.SyncPreferences
 import com.agratec.fieldapp.data.repository.AuthRepository
 import com.agratec.fieldapp.data.repository.UpdateRepository
 import com.agratec.fieldapp.sync.NetworkUtils
+import com.agratec.fieldapp.sync.SyncNotifier
 import com.agratec.fieldapp.sync.SyncStatus
 import com.agratec.fieldapp.sync.SyncWorker
 import com.agratec.fieldapp.ui.components.AgraCreateButton
@@ -39,6 +44,7 @@ import com.agratec.fieldapp.ui.screens.LoginScreen
 import com.agratec.fieldapp.ui.screens.NotesListScreen
 import com.agratec.fieldapp.ui.screens.PersonnelScreen
 import com.agratec.fieldapp.ui.screens.WarehouseScreen
+import com.agratec.fieldapp.util.AppLogger
 import com.agratec.fieldapp.ui.theme.AgraFieldTheme
 import com.agratec.fieldapp.ui.theme.AgraGreen
 import com.agratec.fieldapp.ui.theme.TextPrimary
@@ -105,6 +111,43 @@ fun AppNavigation() {
     }
     var showPhotoPolicyDialog by remember { mutableStateOf(false) }
     var checkingUpdate by remember { mutableStateOf(false) }
+    var dataSaver by remember { mutableStateOf(SyncPreferences.dataSaver(context)) }
+    var photoStats by remember { mutableStateOf(PhotoStats.read(context)) }
+    var pendingUploads by remember { mutableIntStateOf(0) }
+
+    // Permiso de notificaciones: es lo que permite avisar del progreso de la
+    // subida cuando el usuario ya salió de la app (Android 13+ lo pide aparte)
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { /* si lo niega, la subida sigue igual: solo se queda sin aviso */ }
+    LaunchedEffect(currentScreen) {
+        if (currentScreen == Screen.Main &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            !SyncNotifier.puedeNotificar(context)
+        ) {
+            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    // Cada vez que se abren los ajustes, números frescos
+    LaunchedEffect(showSettings) {
+        if (!showSettings) return@LaunchedEffect
+        photoStats = PhotoStats.read(context)
+        val db = com.agratec.fieldapp.data.local.AppDatabase.getInstance(context)
+        pendingUploads = com.agratec.fieldapp.data.repository.FieldNoteRepository(context).getUnsyncedNoteCount() +
+            db.fieldActivityDao().getUnsyncedCount() +
+            db.photoDao().getUnsyncedCount() +
+            db.activityPhotoDao().getUnsyncedCount() +
+            db.productDao().getUnsyncedCount() +
+            db.productDao().getPendingPhotoCount()
+    }
+
+    // Cambiar de sección queda registrado: así se sabe qué usa la cuadrilla
+    LaunchedEffect(currentTab, currentScreen) {
+        if (currentScreen == Screen.Main) {
+            AppLogger.log(context, AppLogger.SCREEN_VIEW, currentTab.label, "Abrió la sección ${currentTab.label}")
+        }
+    }
 
     // ── Actualización de la app ──
     var updateInfo by remember { mutableStateOf<UpdateRepository.UpdateInfo?>(null) }
@@ -209,9 +252,20 @@ fun AppNavigation() {
             },
             onLogout = {
                 showSettings = false
-                authRepository.logout()
-                currentScreen = Screen.Login
+                scope.launch {
+                    // logout sube primero la bitácora pendiente; después ya no
+                    // habría token para saber de quién era
+                    authRepository.logout()
+                    currentScreen = Screen.Login
+                }
             },
+            dataSaver = dataSaver,
+            onDataSaverChange = {
+                SyncPreferences.setDataSaver(context, it)
+                dataSaver = it
+            },
+            photoStats = photoStats,
+            pendingUploads = pendingUploads,
         )
     }
 

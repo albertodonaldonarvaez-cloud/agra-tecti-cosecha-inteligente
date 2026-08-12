@@ -340,6 +340,43 @@ async function migrate() {
       `ALTER TABLE warehouseProducts MODIFY COLUMN unit ENUM(${UNITS_SQL}) NOT NULL DEFAULT 'kg'`);
     await ensureEnumValue('fieldActivityProducts', 'unit', 'oz',
       `ALTER TABLE fieldActivityProducts MODIFY COLUMN unit ENUM(${UNITS_SQL}) NULL DEFAULT 'kg'`);
+
+    // ── Bitácora de la app de campo (0023) ────────────────────
+    // La app registra en el teléfono lo que va pasando (entradas, fotos,
+    // altas, sincronizaciones) y lo sube por lotes. Todo cae en la misma
+    // tabla que ya usa la web; 'source' distingue de dónde vino.
+    // Las acciones nuevas van al FINAL del ENUM: MySQL los guarda por índice.
+    const ACTIONS_SQL = [
+      'login', 'logout', 'page_view', 'page_leave',
+      'login_failed', 'app_open', 'app_close', 'screen_view',
+      'photo_capture', 'photo_upload',
+      'note_create', 'note_status', 'activity_create',
+      'person_create', 'product_create', 'product_update',
+      'sync', 'error',
+    ].map((a) => `'${a}'`).join(',');
+    await ensureEnumValue('userActivityLogs', 'action', 'app_open',
+      `ALTER TABLE userActivityLogs MODIFY COLUMN action ENUM(${ACTIONS_SQL}) NOT NULL`);
+    await ensureColumn('userActivityLogs', 'source',
+      "ALTER TABLE userActivityLogs ADD COLUMN source ENUM('web','app') NOT NULL DEFAULT 'web'");
+    await ensureColumn('userActivityLogs', 'clientLogId',
+      "ALTER TABLE userActivityLogs ADD COLUMN clientLogId VARCHAR(64) NULL");
+    await ensureColumn('userActivityLogs', 'device',
+      "ALTER TABLE userActivityLogs ADD COLUMN device VARCHAR(160) NULL");
+    await ensureColumn('userActivityLogs', 'appVersion',
+      "ALTER TABLE userActivityLogs ADD COLUMN appVersion VARCHAR(32) NULL");
+    await ensureColumn('userActivityLogs', 'detail',
+      "ALTER TABLE userActivityLogs ADD COLUMN detail VARCHAR(500) NULL");
+    await ensureColumn('userActivityLogs', 'originalBytes',
+      "ALTER TABLE userActivityLogs ADD COLUMN originalBytes INT NULL");
+    await ensureColumn('userActivityLogs', 'finalBytes',
+      "ALTER TABLE userActivityLogs ADD COLUMN finalBytes INT NULL");
+    await ensureColumn('userActivityLogs', 'occurredAt',
+      "ALTER TABLE userActivityLogs ADD COLUMN occurredAt TIMESTAMP NULL");
+    // Sin este índice, reintentar un lote duplicaría los eventos
+    await ensureIndex('userActivityLogs', 'userActivityLogs_clientLogId_unique',
+      "ALTER TABLE userActivityLogs ADD UNIQUE INDEX userActivityLogs_clientLogId_unique (clientLogId)");
+    await ensureIndex('userActivityLogs', 'idx_activity_source_date',
+      "ALTER TABLE userActivityLogs ADD INDEX idx_activity_source_date (source, createdAt)");
   } catch (err) {
     console.error('[Migration] Error:', err.message);
   } finally {

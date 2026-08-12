@@ -8,7 +8,7 @@ import * as db from "./db";
 import * as dbExt from "./db_extended";
 import * as webodm from "./webodmService";
 import { getDb } from "./db";
-import { users, boxes, harvesters, parcels, parcelDetails, parcelAiAnalysis, crops, cropVarieties, productionCycles, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, fieldActivityWorkSessions, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos, telegramLinkCodes, collaborators, collaboratorRoles, collaboratorLinkCodes, fieldActivityAssignments, labelPrintHistory, weeklySummaries, appReleases, PRODUCT_UNITS } from "../drizzle/schema";
+import { users, boxes, harvesters, parcels, parcelDetails, parcelAiAnalysis, crops, cropVarieties, productionCycles, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, fieldActivityWorkSessions, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos, telegramLinkCodes, collaborators, collaboratorRoles, collaboratorLinkCodes, fieldActivityAssignments, labelPrintHistory, weeklySummaries, appReleases, userActivityLogs, ACTIVITY_ACTIONS, PRODUCT_UNITS } from "../drizzle/schema";
 import { eq, desc, asc, and, gte, lte, inArray, isNull, sql } from "drizzle-orm";
 
 // Fecha local de México "YYYY-MM-DD" (el negocio opera en America/Mexico_City)
@@ -1512,6 +1512,13 @@ export const appRouter = router({
       .input(z.object({ userId: z.number() }))
       .query(async ({ input }) => {
         return await db.getUserTopPages(input.userId);
+      }),
+
+    // Qué se está haciendo desde la app de campo y cuánto se comprimen las fotos
+    appUsage: adminProcedure
+      .input(z.object({ days: z.number().min(1).max(365).optional() }).optional())
+      .query(async ({ input }) => {
+        return await db.getAppUsageSummary(input?.days ?? 30);
       }),
   }),
 
@@ -4874,11 +4881,17 @@ export const appRouter = router({
       const rows = await drizzle
         .select({
           id: warehouseProducts.id,
+          clientUuid: warehouseProducts.clientUuid,
           name: warehouseProducts.name,
           brand: warehouseProducts.brand,
           category: warehouseProducts.category,
           unit: warehouseProducts.unit,
           presentation: warehouseProducts.presentation,
+          description: warehouseProducts.description,
+          activeIngredient: warehouseProducts.activeIngredient,
+          concentration: warehouseProducts.concentration,
+          storageLocation: warehouseProducts.storageLocation,
+          photoUrl: warehouseProducts.photoUrl,
         })
         .from(warehouseProducts)
         .where(eq(warehouseProducts.isActive, true))
@@ -4886,33 +4899,70 @@ export const appRouter = router({
       return rows;
     }),
 
-    /** Alta de productos desde la app móvil (idempotente por clientUuid) */
+    /**
+     * Alta y edición de productos desde la app móvil.
+     *
+     * Cómo se identifica el producto:
+     *  - serverId → el producto nació en la web y el campo lo está editando
+     *  - clientUuid → el producto nació en el teléfono (clave de idempotencia)
+     *
+     * SOLO se tocan los campos que la app manda. Stock, costos, proveedor y
+     * lote se capturan en la web y el teléfono ni los conoce: sobrescribirlos
+     * con null borraría trabajo de oficina.
+     */
     syncProducts: protectedProcedure
       .input(z.object({
         products: z.array(z.object({
           clientUuid: z.string().uuid(),
+          serverId: z.number().int().positive().optional(),
           name: z.string().min(1).max(255),
-          brand: z.string().max(255).optional(),
+          brand: z.string().max(255).nullish(),
           category: z.string().max(64).optional(),
           unit: z.enum(PRODUCT_UNITS).optional(),
-          description: z.string().max(1000).optional(),
+          description: z.string().max(1000).nullish(),
+          activeIngredient: z.string().max(255).nullish(),
+          concentration: z.string().max(128).nullish(),
+          presentation: z.string().max(128).nullish(),
+          storageLocation: z.string().max(255).nullish(),
         })),
       }))
       .mutation(async ({ input, ctx }) => {
         const drizzle = await getDb();
         if (!drizzle) throw new Error("Base de datos no disponible");
         const userId = (ctx as any).user?.id || 0;
-        const results: { clientUuid: string; serverId?: number; status: "created" | "updated" | "error"; error?: string }[] = [];
+        const results: { clientUuid: string; serverId?: number; status: "created" | "updated" | "deleted" | "error"; error?: string }[] = [];
 
         // Categorías válidas del catálogo; cualquier otra cae en "otro"
         const validCategories = new Set(warehouseProducts.category.enumValues as string[]);
+        const limpia = (v: string | null | undefined, max: number) => {
+          if (v === undefined) return undefined;
+          const t = (v ?? "").trim();
+          return t === "" ? null : t.slice(0, max);
+        };
 
         for (const p of input.products) {
           try {
-            const [existing] = await drizzle.select({ id: warehouseProducts.id })
-              .from(warehouseProducts)
-              .where(eq(warehouseProducts.clientUuid, p.clientUuid))
-              .limit(1);
+            // 1) Por serverId (producto de la web que se edita desde el campo)
+            let existing: { id: number } | undefined;
+            if (p.serverId) {
+              [existing] = await drizzle.select({ id: warehouseProducts.id })
+                .from(warehouseProducts)
+                .where(eq(warehouseProducts.id, p.serverId))
+                .limit(1);
+              if (!existing) {
+                // Lo borraron en la web mientras el teléfono estaba sin señal:
+                // no se recrea a escondidas, se le avisa a la app para que lo quite
+                results.push({ clientUuid: p.clientUuid, status: "deleted" });
+                continue;
+              }
+            }
+            // 2) Por clientUuid (producto dado de alta en el teléfono)
+            if (!existing) {
+              [existing] = await drizzle.select({ id: warehouseProducts.id })
+                .from(warehouseProducts)
+                .where(eq(warehouseProducts.clientUuid, p.clientUuid))
+                .limit(1);
+            }
 
             const category = (p.category && validCategories.has(p.category) ? p.category : "otro") as any;
 
@@ -4920,31 +4970,45 @@ export const appRouter = router({
               await drizzle.insert(warehouseProducts).values({
                 clientUuid: p.clientUuid,
                 name: p.name,
-                brand: p.brand || null,
+                brand: limpia(p.brand, 255) ?? null,
                 category,
                 unit: (p.unit || "kg") as any,
                 // description es obligatoria en el esquema; sin captura en campo
                 // se deja una nota trazable en vez de texto vacío
-                description: p.description || "Alta desde la app de campo",
+                description: limpia(p.description, 1000) || "Alta desde la app de campo",
+                activeIngredient: limpia(p.activeIngredient, 255) ?? null,
+                concentration: limpia(p.concentration, 128) ?? null,
+                presentation: limpia(p.presentation, 128) ?? null,
+                storageLocation: limpia(p.storageLocation, 255) ?? null,
                 createdByUserId: userId,
               }).onDuplicateKeyUpdate({ set: { name: p.name } });
             } else {
-              // El servidor manda en stock/costos: desde el campo solo se
-              // corrigen los datos básicos del producto
+              // Solo los campos que el teléfono realmente mandó
+              const cambios: Record<string, any> = { name: p.name, category, unit: (p.unit || "kg") as any };
+              const brand = limpia(p.brand, 255);
+              if (brand !== undefined) cambios.brand = brand;
+              const desc = limpia(p.description, 1000);
+              if (desc) cambios.description = desc; // description es NOT NULL
+              const ai = limpia(p.activeIngredient, 255);
+              if (ai !== undefined) cambios.activeIngredient = ai;
+              const conc = limpia(p.concentration, 128);
+              if (conc !== undefined) cambios.concentration = conc;
+              const pres = limpia(p.presentation, 128);
+              if (pres !== undefined) cambios.presentation = pres;
+              const loc = limpia(p.storageLocation, 255);
+              if (loc !== undefined) cambios.storageLocation = loc;
+
               await drizzle.update(warehouseProducts)
-                .set({
-                  name: p.name,
-                  brand: p.brand || null,
-                  category,
-                  unit: (p.unit || "kg") as any,
-                })
+                .set(cambios)
                 .where(eq(warehouseProducts.id, existing.id));
             }
 
-            const [row] = await drizzle.select({ id: warehouseProducts.id })
-              .from(warehouseProducts)
-              .where(eq(warehouseProducts.clientUuid, p.clientUuid))
-              .limit(1);
+            const [row] = existing
+              ? [{ id: existing.id }]
+              : await drizzle.select({ id: warehouseProducts.id })
+                  .from(warehouseProducts)
+                  .where(eq(warehouseProducts.clientUuid, p.clientUuid))
+                  .limit(1);
             results.push({ clientUuid: p.clientUuid, serverId: row?.id, status: existing ? "updated" : "created" });
           } catch (error: any) {
             console.error(`[OfflineSync] Error syncing producto ${p.clientUuid}:`, error.message);
@@ -4953,6 +5017,74 @@ export const appRouter = router({
         }
 
         return { success: true, results, syncedCount: results.filter(r => r.status !== "error").length };
+      }),
+
+    // ── BITÁCORA DE LA APP DE CAMPO ──
+    /**
+     * Recibe el lote de eventos que la app fue guardando en el teléfono
+     * (entradas, fotos tomadas, altas, sincronizaciones, errores).
+     *
+     * Cae en la MISMA tabla que la actividad de la web, marcado source='app',
+     * para poder verlo todo junto por usuario. clientLogId evita duplicados si
+     * el teléfono reintenta el lote; el servidor responde qué IDs quedaron
+     * guardados y solo esos se borran del teléfono.
+     */
+    syncAppLogs: protectedProcedure
+      .input(z.object({
+        device: z.string().max(160).nullish(),
+        appVersion: z.string().max(32).nullish(),
+        logs: z.array(z.object({
+          clientLogId: z.string().max(64),
+          action: z.enum(ACTIVITY_ACTIONS),
+          screen: z.string().max(128).nullish(),
+          detail: z.string().max(500).nullish(),
+          originalBytes: z.number().int().nonnegative().nullish(),
+          finalBytes: z.number().int().nonnegative().nullish(),
+          durationSeconds: z.number().int().nonnegative().nullish(),
+          occurredAt: z.string().max(40),
+        })).max(500),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const drizzle = await getDb();
+        if (!drizzle) throw new Error("Base de datos no disponible");
+        const userId = (ctx as any).user?.id || 0;
+        const req = (ctx as any).req;
+        const ip = (req?.headers?.["x-forwarded-for"]?.toString().split(",")[0] || req?.ip || "")
+          .trim().slice(0, 64) || null;
+
+        const storedIds: string[] = [];
+        for (const l of input.logs) {
+          try {
+            // La hora del teléfono puede venir corrida; si no se entiende, se
+            // deja null y queda la de recepción (createdAt)
+            const cuando = new Date(l.occurredAt);
+            const occurredAt = Number.isNaN(cuando.getTime()) ? null : cuando;
+
+            await drizzle.insert(userActivityLogs).values({
+              userId,
+              action: l.action as any,
+              source: "app" as any,
+              pageName: l.screen || null,
+              detail: l.detail || null,
+              originalBytes: l.originalBytes ?? null,
+              finalBytes: l.finalBytes ?? null,
+              durationSeconds: l.durationSeconds ?? null,
+              clientLogId: l.clientLogId,
+              device: input.device || null,
+              appVersion: input.appVersion || null,
+              ipAddress: ip,
+              occurredAt,
+            }).onDuplicateKeyUpdate({
+              // Ya estaba: el teléfono reintentó. Se confirma y ya.
+              set: { clientLogId: l.clientLogId },
+            });
+            storedIds.push(l.clientLogId);
+          } catch (error: any) {
+            console.error(`[AppLogs] No se pudo guardar ${l.clientLogId}:`, error.message);
+          }
+        }
+
+        return { success: true, storedIds, storedCount: storedIds.length };
       }),
   }),
 
