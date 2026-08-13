@@ -293,6 +293,17 @@ export async function buildParcelContext(parcelId: number): Promise<string | nul
     }
   } catch { /* sin notas */ }
 
+  // ── Cómo va este ciclo contra los anteriores ──
+  // Es lo que convierte el diagnóstico en comparativo: sin esto la IA solo
+  // puede decir "el NDVI está en 0.51", que por sí solo no dice nada.
+  try {
+    const { buildCycleComparisonText } = await import("./parcelTelemetry");
+    const comparativo = await buildCycleComparisonText(parcelId);
+    if (comparativo) bloques.push(comparativo);
+  } catch (e: any) {
+    console.error('[ParcelAI] No se pudo armar el comparativo de ciclos:', e?.message);
+  }
+
   // ── Cosecha de la parcela ──
   try {
     if (parcel.code) {

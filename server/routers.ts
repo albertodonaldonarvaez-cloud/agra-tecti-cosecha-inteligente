@@ -220,27 +220,41 @@ export const appRouter = router({
         indexType: z.enum(["NDVI", "NDRE", "NDMI"]).default("NDVI"),
         fromDate: z.string().optional(),
         toDate: z.string().optional(),
+        /** true = ignorar lo guardado y volver a pedírselo al satélite */
+        refresh: z.boolean().optional(),
       }))
       .query(async ({ input }) => {
         const drizzle = await getDb();
         if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-        // 1. Buscar en cache (< 7 días)
-        try {
-          const cached = await drizzle.execute(
-            sql`SELECT data, fromDate, toDate, fetchedAt FROM parcelSatelliteCache WHERE parcelId = ${input.parcelId} AND dataType = 'stats' AND indexType = ${input.indexType} AND mapDate IS NULL ORDER BY fetchedAt DESC LIMIT 1`
-          );
-          const row = (cached as any)?.[0] || (cached as any)?.rows?.[0];
-          if (row?.fetchedAt) {
-            const age = Date.now() - new Date(row.fetchedAt).getTime();
-            if (age < 7 * 24 * 60 * 60 * 1000) {
-              console.log(`[Copernicus] Cache HIT stats ${input.indexType} parcela ${input.parcelId} (${Math.round(age / 3600000)}h)`);
-              return { data: JSON.parse((cached as any).data), fromDate: (cached as any).fromDate, toDate: (cached as any).toDate, indexType: input.indexType, cached: true };
+        // 1. Lo guardado manda.
+        //    De esto se encarga la revisión diaria (satelliteAutoSync): abrir la
+        //    pantalla NO debe consultar al satélite. Solo se descarga aquí si
+        //    todavía no hay nada guardado, o si el usuario pidió refrescar.
+        //    OJO: drizzle.execute devuelve [filas, columnas]; leerlo mal era lo
+        //    que hacía que el cache nunca sirviera y cada visita bajara todo.
+        if (!input.refresh) {
+          try {
+            const res: any = await drizzle.execute(
+              sql`SELECT data, fromDate, toDate, fetchedAt FROM parcelSatelliteCache WHERE parcelId = ${input.parcelId} AND dataType = 'stats' AND indexType = ${input.indexType} AND mapDate IS NULL ORDER BY fetchedAt DESC LIMIT 1`
+            );
+            const row = ((res?.[0] ?? res?.rows ?? []) as any[])[0];
+            if (row?.data) {
+              const age = row.fetchedAt ? Date.now() - new Date(row.fetchedAt).getTime() : 0;
+              console.log(`[Copernicus] Serie ${input.indexType} parcela ${input.parcelId} desde el servidor (${Math.round(age / 3600000)}h)`);
+              return {
+                data: typeof row.data === "string" ? JSON.parse(row.data) : row.data,
+                fromDate: row.fromDate instanceof Date ? row.fromDate.toISOString().split("T")[0] : row.fromDate,
+                toDate: row.toDate instanceof Date ? row.toDate.toISOString().split("T")[0] : row.toDate,
+                indexType: input.indexType,
+                cached: true,
+                ageHours: Math.round(age / 3600000),
+              };
             }
-          }
-        } catch (e) { console.log("[Copernicus] Cache check error:", e); }
+          } catch (e) { console.log("[Copernicus] No se pudo leer la serie guardada:", e); }
+        }
 
-        // 2. No hay cache o es viejo -> llamar API
+        // 2. Primera vez (o refresco pedido a mano) -> llamar API
         const [parcel] = await drizzle.select({ polygon: parcels.polygon, code: parcels.code }).from(parcels).where(eq(parcels.id, input.parcelId));
         if (!parcel?.polygon) throw new TRPCError({ code: "BAD_REQUEST", message: "La parcela no tiene polígono definido" });
 
@@ -363,6 +377,8 @@ export const appRouter = router({
         parcelId: z.number(),
         indexType: z.enum(["NDVI", "NDRE", "NDMI"]).default("NDVI"),
         date: z.string().optional(),
+        /** true = ignorar lo guardado y volver a pedírselo al satélite */
+        refresh: z.boolean().optional(),
       }))
       .query(async ({ input }) => {
         const drizzle = await getDb();
@@ -370,21 +386,39 @@ export const appRouter = router({
 
         const mapDateKey = input.date || "latest";
 
-        // 1. Buscar en cache
-        try {
-          const [cached] = await drizzle.execute(
-            sql`SELECT data, fetchedAt FROM parcelSatelliteCache WHERE parcelId = ${input.parcelId} AND dataType = 'map' AND indexType = ${input.indexType} AND mapDate = ${mapDateKey} ORDER BY fetchedAt DESC LIMIT 1`
-          );
-          if (cached && (cached as any).fetchedAt) {
-            const age = Date.now() - new Date((cached as any).fetchedAt).getTime();
-            if (age < 7 * 24 * 60 * 60 * 1000) {
-              console.log(`[Copernicus] Cache HIT map ${input.indexType} parcela ${input.parcelId} (${Math.round(age / 3600000)}h)`);
-              return { image: (cached as any).data, message: null, cached: true };
+        // 1. Lo guardado manda (lo refresca la revisión diaria).
+        //    Igual que en la serie: drizzle.execute devuelve [filas, columnas],
+        //    y leerlo mal hacía que el mapa se volviera a bajar en cada visita.
+        if (!input.refresh) {
+          try {
+            const res: any = await drizzle.execute(
+              sql`SELECT c.data, c.fetchedAt, c.captureDate, c.clearPct, c.cycleId, cy.name AS cycleName
+                    FROM parcelSatelliteCache c
+                    LEFT JOIN productionCycles cy ON cy.id = c.cycleId
+                   WHERE c.parcelId = ${input.parcelId} AND c.dataType = 'map'
+                     AND c.indexType = ${input.indexType} AND c.mapDate = ${mapDateKey}
+                   ORDER BY c.fetchedAt DESC LIMIT 1`
+            );
+            const row = ((res?.[0] ?? res?.rows ?? []) as any[])[0];
+            if (row?.data) {
+              const age = row.fetchedAt ? Date.now() - new Date(row.fetchedAt).getTime() : 0;
+              console.log(`[Copernicus] Mapa ${input.indexType} parcela ${input.parcelId} desde el servidor (${Math.round(age / 3600000)}h)`);
+              return {
+                image: row.data,
+                message: null,
+                cached: true,
+                captureDate: row.captureDate instanceof Date
+                  ? row.captureDate.toISOString().split("T")[0]
+                  : (row.captureDate ?? null),
+                clearPct: row.clearPct ?? null,
+                cycleName: row.cycleName ?? null,
+                ageHours: Math.round(age / 3600000),
+              };
             }
-          }
-        } catch (e) { console.log("[Copernicus] Cache check error:", e); }
+          } catch (e) { console.log("[Copernicus] No se pudo leer el mapa guardado:", e); }
+        }
 
-        // 2. No hay cache -> llamar API
+        // 2. Primera vez (o refresco pedido a mano) -> llamar API
         const [parcel] = await drizzle.select({ polygon: parcels.polygon }).from(parcels).where(eq(parcels.id, input.parcelId));
         if (!parcel?.polygon) throw new TRPCError({ code: "BAD_REQUEST", message: "La parcela no tiene polígono definido" });
         let geoPolygon: any;
@@ -546,13 +580,51 @@ export const appRouter = router({
         }));
       }),
 
+    /**
+     * TODO lo satelital guardado de una parcela, en una sola consulta.
+     *
+     * No toca Copernicus: la descarga la hace la revisión diaria. Sustituye a
+     * las seis consultas que hacía la pestaña satelital (mapa y serie de NDVI,
+     * NDRE y NDMI), así que abre al instante y no gasta llamadas a la API.
+     */
+    getTelemetry: protectedProcedure
+      .input(z.object({ parcelId: z.number() }))
+      .query(async ({ input }) => {
+        const { getStoredTelemetry } = await import("./parcelTelemetry");
+        return getStoredTelemetry(input.parcelId);
+      }),
+
+    /**
+     * La misma telemetría partida por ciclo de producción, con la cosecha y las
+     * labores de cada uno, y las series alineadas por día del ciclo para poder
+     * poner un ciclo encima del otro.
+     */
+    getCycleTelemetry: protectedProcedure
+      .input(z.object({ parcelId: z.number() }))
+      .query(async ({ input }) => {
+        const { getCycleTelemetry } = await import("./parcelTelemetry");
+        return getCycleTelemetry(input.parcelId);
+      }),
+
+    /** Refrescar AHORA una sola parcela (botón de la pantalla) */
+    refreshParcel: protectedProcedure
+      .input(z.object({ parcelId: z.number() }))
+      .mutation(async ({ input }) => {
+        const { syncOneParcel } = await import("./satelliteAutoSync");
+        return syncOneParcel(input.parcelId, { force: true });
+      }),
+
     // Sincronización semanal de datos satelitales para todas las parcelas.
     // La lógica vive en satelliteAutoSync para que la compartan el botón de
     // Configuración y el refresco automático de los lunes.
-    syncAllParcels: adminProcedure.mutation(async () => {
-      const { runSatelliteSync } = await import("./satelliteAutoSync");
-      return runSatelliteSync();
-    }),
+    syncAllParcels: adminProcedure
+      // force = volver a descargar aunque la pasada sea la misma que ya está
+      // guardada. Sin él solo se baja lo que de verdad es nuevo.
+      .input(z.object({ force: z.boolean().optional() }).optional())
+      .mutation(async ({ input }) => {
+        const { runSatelliteSync } = await import("./satelliteAutoSync");
+        return runSatelliteSync({ force: input?.force });
+      }),
 
     // Estado del refresco automático (para mostrarlo en Configuración)
     syncStatus: protectedProcedure.query(async () => {

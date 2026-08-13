@@ -1,9 +1,12 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { GlassCard } from "@/components/GlassCard";
 import { VigorHistoryCard } from "@/components/VigorHistoryCard";
+import { CycleTelemetryCard } from "@/components/CycleTelemetryCard";
+import { TelemetryFreshness } from "@/components/TelemetryFreshness";
 import { ProtectedPage } from "@/components/ProtectedPage";
 import { APP_LOGO } from "@/const";
 import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 import {
   MapPin, TreePine, Ruler, Sprout, Package, TrendingUp, Calendar,
   ChevronDown, ChevronUp, Edit3, Save, X, Layers, Eye,
@@ -2266,21 +2269,27 @@ const INDEX_CONFIGS_UI = {
 
 type IdxKey = "NDVI" | "NDRE" | "NDMI";
 const ALL_INDICES: IdxKey[] = ["NDVI", "NDRE", "NDMI"];
-/** Subcomponente: tarjeta de mapa individual por indice con hover de valor */
-function IndexMapCard({ parcelId, indexType, showLegend }: { parcelId: number; indexType: IdxKey; showLegend?: boolean }) {
+/**
+ * Subcomponente: tarjeta de mapa individual por indice con hover de valor.
+ *
+ * NO consulta al satélite: recibe lo que la revisión diaria ya dejó guardado
+ * en el servidor. Antes cada una de las tres tarjetas lanzaba dos consultas
+ * propias, y abrir la pestaña disparaba seis descargas a Copernicus.
+ */
+function IndexMapCard({ indexType, showLegend, telemetry, isLoading, error }: {
+  indexType: IdxKey;
+  showLegend?: boolean;
+  telemetry?: any;
+  isLoading?: boolean;
+  error?: unknown;
+}) {
   const cfg = INDEX_CONFIGS_UI[indexType];
-  const { data, isLoading, error } = trpc.copernicus.getIndexMap.useQuery(
-    { parcelId, indexType },
-    { staleTime: 10 * 60 * 1000, retry: 1 }
-  );
-  const { data: statsData } = trpc.copernicus.getIndexStats.useQuery(
-    { parcelId, indexType },
-    { staleTime: 10 * 60 * 1000, retry: 1 }
-  );
+  const data = telemetry ? { image: telemetry.image } : null;
   const lastVal = useMemo(() => {
-    if (!statsData?.data?.length) return null;
-    return statsData.data[statsData.data.length - 1];
-  }, [statsData]);
+    const serie = telemetry?.series;
+    if (!serie?.length) return null;
+    return serie[serie.length - 1];
+  }, [telemetry]);
   const status = lastVal ? cfg.getStatus(lastVal.mean) : null;
 
   // Canvas para lectura de pixel
@@ -2374,6 +2383,12 @@ function IndexMapCard({ parcelId, indexType, showLegend }: { parcelId: number; i
           )}
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent p-1.5">
             <p className="text-[9px] text-white/80">{cfg.formula}</p>
+            {telemetry?.captureDate && (
+              <p className="text-[9px] text-white/70">
+                Pasada {telemetry.captureDate}
+                {telemetry.clearPct != null ? ` · ${telemetry.clearPct}% despejado` : ""}
+              </p>
+            )}
           </div>
         </div>
       ) : (
@@ -2583,6 +2598,10 @@ function AIAnalysisCard({ parcelId, parcelName, ndviStats, ndreStats, ndmiStats 
 function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
   const [showLegend, setShowLegend] = useState(true);
   const [timelineIndex, setTimelineIndex] = useState<IdxKey>("NDVI");
+  // La línea de tiempo histórica arranca plegada A PROPÓSITO: cada miniatura
+  // es una fecha distinta y la primera vez hay que bajarlas del satélite.
+  // Plegada, abrir esta pestaña no cuesta ni una llamada a la API.
+  const [showTimeline, setShowTimeline] = useState(false);
 
   const hasPolygon = useMemo(() => {
     if (!parcel?.polygon) return false;
@@ -2593,19 +2612,42 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
     } catch { return false; }
   }, [parcel]);
 
-  // Queries para los 3 indices simultaneamente
-  const { data: ndviStats, isLoading: ndviLoading } = trpc.copernicus.getIndexStats.useQuery(
-    { parcelId: parcel?.id, indexType: "NDVI" },
-    { enabled: !!parcel?.id && hasPolygon, staleTime: 10 * 60 * 1000, retry: 1 }
+  // TODA la telemetría en UNA consulta, leída de lo que el servidor ya guardó.
+  // La descarga desde Copernicus la hace la revisión diaria del backend, así
+  // que abrir esta pestaña no le cuesta ni una llamada al satélite.
+  const {
+    data: telemetry,
+    isLoading: telemetryLoading,
+    error: telemetryError,
+    refetch: refetchTelemetry,
+  } = trpc.copernicus.getTelemetry.useQuery(
+    { parcelId: parcel?.id },
+    { enabled: !!parcel?.id && hasPolygon, staleTime: 30 * 60 * 1000, retry: 1 }
   );
-  const { data: ndreStats, isLoading: ndreLoading } = trpc.copernicus.getIndexStats.useQuery(
-    { parcelId: parcel?.id, indexType: "NDRE" },
-    { enabled: !!parcel?.id && hasPolygon, staleTime: 10 * 60 * 1000, retry: 1 }
+
+  const porIndice = useCallback(
+    (k: IdxKey) => telemetry?.indices?.find((i: any) => i.indexType === k),
+    [telemetry],
   );
-  const { data: ndmiStats, isLoading: ndmiLoading } = trpc.copernicus.getIndexStats.useQuery(
-    { parcelId: parcel?.id, indexType: "NDMI" },
-    { enabled: !!parcel?.id && hasPolygon, staleTime: 10 * 60 * 1000, retry: 1 }
-  );
+
+  // Lo que esperan las tarjetas y la IA de abajo, armado con lo guardado
+  const comoStats = (t?: any) =>
+    t ? { data: t.series ?? [], fromDate: t.seriesFrom, toDate: t.seriesTo } : undefined;
+  const ndviStats = useMemo(() => comoStats(porIndice("NDVI")), [porIndice]);
+  const ndreStats = useMemo(() => comoStats(porIndice("NDRE")), [porIndice]);
+  const ndmiStats = useMemo(() => comoStats(porIndice("NDMI")), [porIndice]);
+
+  // Botón "buscar ahora": es la ÚNICA forma de que la pantalla pida datos al
+  // satélite, y es a petición explícita del usuario
+  const refreshMut = trpc.copernicus.refreshParcel.useMutation({
+    onSuccess: (r: any) => {
+      refetchTelemetry();
+      if (r?.status === "sin-cambios") toast.info(`Sin pasada nueva: la última sigue siendo la del ${r.captureDate}`);
+      else if (r?.status === "actualizada") toast.success(`Captura actualizada${r.captureDate ? ` al ${r.captureDate}` : ""}`);
+      else toast.error(r?.detail || "No se pudo actualizar");
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
 
   // Obtener tareas del drone (WebODM) para la ortofoto
   const { data: odmTasks } = trpc.webodm.getProjectTasks.useQuery(
@@ -2722,7 +2764,7 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
     return dates;
   }, [ndviStats]);
 
-  const chartsLoading = ndviLoading || ndreLoading || ndmiLoading;
+  const chartsLoading = telemetryLoading;
 
   if (!hasPolygon) {
     return (
@@ -2796,13 +2838,30 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {ALL_INDICES.map((idx) => (
           <GlassCard key={idx} className="p-3" hover={false}>
-            <IndexMapCard parcelId={parcel.id} indexType={idx} showLegend={showLegend} />
+            <IndexMapCard
+              indexType={idx}
+              showLegend={showLegend}
+              telemetry={porIndice(idx)}
+              isLoading={telemetryLoading}
+              error={telemetryError}
+            />
           </GlassCard>
         ))}
       </div>
 
+      {/* De cuándo son los datos y de dónde salen */}
+      <TelemetryFreshness
+        telemetry={telemetry}
+        isLoading={telemetryLoading}
+        onRefresh={() => refreshMut.mutate({ parcelId: parcel.id })}
+        refreshing={refreshMut.isPending}
+      />
+
       {/* HISTORIAL DE CAPTURAS — cómo viene el vigor, captura tras captura */}
       <VigorHistoryCard parcelId={parcel.id} />
+
+      {/* COMPARATIVO POR CICLOS — este ciclo contra los anteriores */}
+      <CycleTelemetryCard parcelId={parcel.id} />
 
       {/* ANALISIS IA — IA Tecti */}
       <AIAnalysisCard parcelId={parcel.id} parcelName={parcel.name || parcel.code} ndviStats={ndviStats} ndreStats={ndreStats} ndmiStats={ndmiStats} />
@@ -2901,25 +2960,42 @@ function SatelliteTab({ parcel, mapping }: { parcel: any; mapping?: any }) {
         <p className="text-[10px] text-gray-400 mb-3">
           Cada 15 dias · {INDEX_CONFIGS_UI[timelineIndex].fullLabel} · {INDEX_CONFIGS_UI[timelineIndex].formula}
         </p>
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-          {timelineDates.map((td) => (
-            <HistoricalMapThumb
-              key={`${timelineIndex}-${td.date}`}
-              parcelId={parcel.id}
-              indexType={timelineIndex}
-              date={td.date}
-              dateLabel={td.label}
-            />
-          ))}
-        </div>
-        <div className="flex items-center gap-3 mt-3 justify-center flex-wrap">
-          {INDEX_CONFIGS_UI[timelineIndex].colorStops.map((s) => (
-            <div key={s.label} className="flex items-center gap-1">
-              <div className="w-3 h-2.5 rounded-sm border border-gray-200/50" style={{ backgroundColor: s.color }} />
-              <span className="text-[9px] text-gray-500">{s.label} {s.desc}</span>
+
+        {!showTimeline ? (
+          <button
+            onClick={() => setShowTimeline(true)}
+            className="w-full py-6 rounded-xl border border-dashed border-indigo-200 bg-indigo-50/40 hover:bg-indigo-50 transition text-center"
+          >
+            <p className="text-xs font-semibold text-indigo-700">
+              Ver las {timelineDates.length} capturas históricas
+            </p>
+            <p className="text-[10px] text-gray-500 mt-0.5">
+              Son fechas sueltas: la primera vez se bajan del satélite y después quedan guardadas.
+            </p>
+          </button>
+        ) : (
+          <>
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+              {timelineDates.map((td) => (
+                <HistoricalMapThumb
+                  key={`${timelineIndex}-${td.date}`}
+                  parcelId={parcel.id}
+                  indexType={timelineIndex}
+                  date={td.date}
+                  dateLabel={td.label}
+                />
+              ))}
             </div>
-          ))}
-        </div>
+            <div className="flex items-center gap-3 mt-3 justify-center flex-wrap">
+              {INDEX_CONFIGS_UI[timelineIndex].colorStops.map((s) => (
+                <div key={s.label} className="flex items-center gap-1">
+                  <div className="w-3 h-2.5 rounded-sm border border-gray-200/50" style={{ backgroundColor: s.color }} />
+                  <span className="text-[9px] text-gray-500">{s.label} {s.desc}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </GlassCard>
 
       {/* FOOTER INFO */}

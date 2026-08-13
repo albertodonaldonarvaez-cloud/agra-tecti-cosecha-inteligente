@@ -1686,7 +1686,14 @@ function CopernicusSection() {
   });
 
   const syncParcels = trpc.copernicus.syncAllParcels.useMutation({
-    onSuccess: (data: any) => toast.success(`🛰️ Sync completada: ${data.updated} parcelas actualizadas${data.errors > 0 ? `, ${data.errors} errores` : ""}`),
+    onSuccess: (data: any) => {
+      // "sin cambios" no es un fallo: significa que esa parcela no ha tenido
+      // pasada nueva del satélite y por eso no se le descargó nada
+      const partes = [`${data.updated} con captura nueva`];
+      if (data.unchanged > 0) partes.push(`${data.unchanged} sin pasada nueva`);
+      if (data.errors > 0) partes.push(`${data.errors} con error`);
+      toast.success(`🛰️ Revisión completada: ${partes.join(" · ")}`);
+    },
     onError: (error: any) => toast.error("Error en sync: " + error.message),
   });
 

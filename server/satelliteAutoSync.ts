@@ -1,9 +1,16 @@
 /**
  * Sincronización satelital automática.
  *
- * Cada 72 horas se busca la pasada más reciente en que cada parcela se vio
- * despejada y se refresca su imagen, sus índices y su vigor por zonas. Además
- * se revisa al arrancar el sistema, por si estuvo apagado cuando tocaba.
+ * TODOS LOS DÍAS se le pregunta a Copernicus si hay una pasada nueva sobre cada
+ * parcela. Si la hay, se descargan su imagen, sus índices y su vigor por zonas
+ * y se guardan en el servidor. Si NO la hay —Sentinel-2 repite cada ~5 días, o
+ * estuvo nublado— no se descarga nada: la revisión cuesta una sola consulta por
+ * parcela y lo guardado sigue vigente.
+ *
+ * Así la pantalla de Análisis de Parcela nunca tiene que llamar al satélite:
+ * lee del servidor y abre al instante.
+ *
+ * También se revisa al arrancar el sistema, por si estuvo apagado cuando tocaba.
  *
  * Cada captura nueva se guarda en el historial (parcelSatelliteHistory), así se
  * puede ver cómo evolucionó la parcela a lo largo del ciclo y no solo su foto
@@ -20,17 +27,19 @@ const TIMEZONE = "America/Mexico_City";
 const TAG = "[Satellite Sync]";
 
 /**
- * Cada cuánto se refrescan las parcelas. Sentinel-2 repite cada ~5 días, así
- * que con 72 horas nunca se pierde una pasada y no se satura a Copernicus.
+ * Cada cuánto se REVISA si hay datos nuevos. Diario.
+ * Revisar no es descargar: si la pasada más reciente es la que ya está
+ * guardada, la parcela se salta entera.
  */
-const REFRESH_HOURS = 72;
+const REFRESH_HOURS = 24;
 
 /**
- * Cuánto vale la lista de pasadas antes de volver a preguntarle al satélite.
- * Sentinel-2 repite cada ~5 días: con 3 días nunca se pierde una pasada nueva
- * y se evitan consultas repetidas cuando alguien navega por la web.
+ * Cuánto vale la lista de pasadas antes de volver a preguntarle al satélite
+ * cuando alguien navega por la web. La revisión diaria la pide siempre fresca
+ * (es justo lo que va a buscar); esto solo evita consultas repetidas si algo
+ * más necesita la lista entre revisión y revisión.
  */
-const PASSES_TTL_HOURS = 72;
+const PASSES_TTL_HOURS = 20;
 
 /**
  * A qué ciclo de producción pertenece una fecha.
@@ -124,9 +133,22 @@ export async function getCachedVigor(parcelId: number): Promise<
 
 export interface SatelliteSyncResult {
   updated: number;
+  /** Parcelas revisadas que no tenían pasada nueva: no se les descargó nada */
+  unchanged: number;
   errors: number;
   errorDetails: string[];
   total: number;
+}
+
+/** Resultado de revisar UNA parcela */
+export interface ParcelSyncResult {
+  parcelId: number;
+  label: string;
+  status: "actualizada" | "sin-cambios" | "sin-poligono" | "error";
+  captureDate: string | null;
+  clearPct: number | null;
+  cycleName: string | null;
+  detail?: string;
 }
 
 /** Convierte el polígono guardado (varios formatos históricos) a GeoJSON */
@@ -147,173 +169,299 @@ function toGeoPolygon(raw: unknown): any | null {
   }
 }
 
+const INDICES: ("NDVI" | "NDRE" | "NDMI")[] = ["NDVI", "NDRE", "NDMI"];
+
+/** Qué hay ya guardado de esta parcela, para no volver a bajar lo mismo */
+async function estadoGuardado(parcelId: number): Promise<{ captureDate: string | null; mapas: number; series: number }> {
+  const drizzle = await getDb();
+  if (!drizzle) return { captureDate: null, mapas: 0, series: 0 };
+  try {
+    const res: any = await drizzle.execute(sql`
+      SELECT
+        MAX(CASE WHEN dataType = 'map' AND indexType = 'NDVI' AND mapDate = 'latest' THEN captureDate END) AS captureDate,
+        SUM(CASE WHEN dataType = 'map'   AND mapDate = 'latest' THEN 1 ELSE 0 END) AS mapas,
+        SUM(CASE WHEN dataType = 'stats' AND mapDate IS NULL    THEN 1 ELSE 0 END) AS series
+      FROM parcelSatelliteCache WHERE parcelId = ${parcelId}
+    `);
+    const row = ((res?.[0] ?? res?.rows ?? []) as any[])[0] ?? {};
+    const cd = row.captureDate;
+    return {
+      captureDate: cd ? (cd instanceof Date ? cd.toISOString().split("T")[0] : String(cd).split("T")[0]) : null,
+      mapas: Number(row.mapas || 0),
+      series: Number(row.series || 0),
+    };
+  } catch {
+    return { captureDate: null, mapas: 0, series: 0 };
+  }
+}
+
 /**
- * Refresca los datos satelitales de todas las parcelas con polígono.
- * La usan el refresco automático y el botón de Configuración.
+ * Revisa UNA parcela y, si hay pasada nueva, guarda todo lo satelital.
+ *
+ * @param opts.force  descargar aunque la pasada sea la misma que ya está guardada
  */
-export async function runSatelliteSync(): Promise<SatelliteSyncResult> {
+export async function syncOneParcel(
+  parcelId: number,
+  opts: { force?: boolean } = {},
+): Promise<ParcelSyncResult> {
+  const drizzle = await getDb();
+  if (!drizzle) throw new Error("Base de datos no disponible");
+
+  const [parcel] = await drizzle
+    .select({ id: parcels.id, name: parcels.name, code: parcels.code, polygon: parcels.polygon })
+    .from(parcels)
+    .where(eq(parcels.id, parcelId));
+  if (!parcel) throw new Error("Parcela no encontrada");
+
+  const label = parcel.name || parcel.code || `ID:${parcel.id}`;
+  const geoPolygon = toGeoPolygon(parcel.polygon);
+  if (!geoPolygon) {
+    return { parcelId, label, status: "sin-poligono", captureDate: null, clearPct: null, cycleName: null,
+             detail: "polígono con formato no reconocido" };
+  }
+
+  const { getIndexHistory, getIndexMapImage, getParcelVigor } = await import("./copernicusService");
+
+  // 1. ¿Hay pasada nueva? Esta es la ÚNICA consulta que se hace siempre.
+  //    Candidatas ordenadas: primero las despejadas, luego el resto de más a
+  //    menos despejada. Si una no devuelve imagen se prueba la siguiente, en
+  //    vez de perder la fecha al primer tropiezo.
+  let candidatas: { date: string; clearPct: number; source?: string }[] = [];
+  try {
+    const passes = await getClearPassesCached(parcelId, geoPolygon, true);
+    const despejadas = passes.filter((p) => p.clearPct >= 85);
+    const resto = passes.filter((p) => p.clearPct < 85).sort((a, b) => b.clearPct - a.clearPct);
+    candidatas = [...despejadas, ...resto].slice(0, 4);
+  } catch (e: any) {
+    console.error(`${TAG} ${label}: error buscando la pasada:`, e?.message);
+  }
+  const clearPass = candidatas[0] ?? null;
+
+  // 2. Si la pasada más reciente es la que ya está guardada, no se baja nada.
+  //    Aquí es donde se ahorran las llamadas: revisar sale barato, descargar no.
+  const guardado = await estadoGuardado(parcelId);
+  const completo = guardado.mapas >= INDICES.length && guardado.series >= INDICES.length;
+  if (!opts.force && clearPass && completo && guardado.captureDate === clearPass.date) {
+    console.log(`${TAG} ${label}: sin pasada nueva (la del ${clearPass.date} ya estaba)`);
+    const ciclo = await resolveCycleForDate(clearPass.date);
+    return {
+      parcelId, label, status: "sin-cambios",
+      captureDate: clearPass.date, clearPct: clearPass.clearPct, cycleName: ciclo?.name ?? null,
+    };
+  }
+
+  if (clearPass) {
+    const origen = clearPass.source === "escena" ? " (nubosidad de la escena)" : "";
+    console.log(`${TAG} ${label}: pasada nueva ${clearPass.date} (${clearPass.clearPct}% despejado)${origen}`);
+  } else {
+    console.warn(`${TAG} ${label}: sin pasadas utilizables, se usa el mosaico`);
+  }
+
+  // Rango de la serie histórica: desde la primera cosecha registrada, para que
+  // el comparativo por ciclos alcance a los ciclos anteriores
+  const to = new Date().toISOString().split("T")[0];
+  let from: string;
+  try {
+    const [firstBox] = await drizzle
+      .select({ submissionTime: boxes.submissionTime })
+      .from(boxes)
+      .where(eq(boxes.parcelCode, parcel.code || ""))
+      .orderBy(boxes.submissionTime)
+      .limit(1);
+    from = firstBox?.submissionTime
+      ? new Date(firstBox.submissionTime).toISOString().split("T")[0]
+      : new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0];
+  } catch {
+    from = new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0];
+  }
+
+  // Ciclo al que pertenece la imagen: así se sabe si el dato es del ciclo
+  // en curso o todavía del anterior
+  const cycle = clearPass ? await resolveCycleForDate(clearPass.date) : null;
+
+  // 3. Vigor por zonas: se calcula UNA vez por pasada y se guarda. Es lo que
+  //    alimenta a la IA con el detalle de qué parte se ve seca.
+  if (clearPass) {
+    try {
+      const vigor = await getParcelVigor(geoPolygon, clearPass.date);
+      if (vigor) {
+        await drizzle.execute(
+          sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, captureDate, clearPct, cycleId, data, fetchedAt) VALUES (${parcelId}, 'zones', 'NDVI', 'latest', ${clearPass.date}, ${clearPass.clearPct}, ${cycle?.id ?? null}, ${JSON.stringify(vigor)}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), captureDate = VALUES(captureDate), clearPct = VALUES(clearPct), cycleId = VALUES(cycleId), fetchedAt = NOW()`
+        );
+
+        // Historial: una fila por captura. Si esa fecha ya estaba se
+        // actualiza en vez de duplicar (la clave única es parcela+fecha).
+        await drizzle.execute(
+          sql`INSERT INTO parcelSatelliteHistory (parcelId, captureDate, cycleId, clearPct, ndviMean, ndviMin, ndviMax, distributionJson, zonesJson) VALUES (${parcelId}, ${clearPass.date}, ${cycle?.id ?? null}, ${clearPass.clearPct}, ${vigor.meanNdvi}, ${vigor.minNdvi}, ${vigor.maxNdvi}, ${JSON.stringify(vigor.distribution)}, ${JSON.stringify(vigor.zones)}) ON DUPLICATE KEY UPDATE cycleId = VALUES(cycleId), clearPct = VALUES(clearPct), ndviMean = VALUES(ndviMean), ndviMin = VALUES(ndviMin), ndviMax = VALUES(ndviMax), distributionJson = VALUES(distributionJson), zonesJson = VALUES(zonesJson)`
+        );
+
+        console.log(
+          `${TAG} ${label}: NDVI ${vigor.meanNdvi} · seco ${vigor.distribution.suelo}% · ` +
+          `zona más débil: ${vigor.driest?.name ?? "n/d"} (${vigor.driest?.meanNdvi ?? "n/d"})`
+        );
+      }
+    } catch (e: any) {
+      console.error(`${TAG} ${label}: error analizando el vigor por zonas:`, e?.message);
+    }
+  }
+
+  // 4. Serie histórica e imagen de cada índice
+  let captureDateFinal: string | null = null;
+  let clearPctFinal: number | null = null;
+  const fallos: string[] = [];
+
+  for (const idx of INDICES) {
+    try {
+      const data = await getIndexHistory(geoPolygon, from, to, idx);
+      await drizzle.execute(
+        sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, data, fromDate, toDate, fetchedAt) VALUES (${parcelId}, 'stats', ${idx}, NULL, ${JSON.stringify(data)}, ${from}, ${to}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), fromDate = VALUES(fromDate), toDate = VALUES(toDate), fetchedAt = NOW()`
+      );
+
+      // Imagen de una pasada concreta. Si esa fecha no devuelve nada se
+      // prueba la siguiente candidata: lo importante es conservar la FECHA
+      // real, no caer al mosaico (que se queda sin fecha).
+      let buffer: Buffer | null = null;
+      let captureDate: string | null = null;
+      let clearPct: number | null = null;
+      for (const cand of candidatas) {
+        buffer = await getIndexMapImage(geoPolygon, idx, cand.date, true);
+        if (buffer) {
+          captureDate = cand.date;
+          clearPct = cand.clearPct;
+          break;
+        }
+        console.warn(`${TAG} ${label} - ${idx}: la pasada del ${cand.date} no trajo imagen, se prueba la anterior`);
+      }
+
+      // Último recurso: mosaico de 15 días, que no tiene una fecha única
+      if (!buffer) {
+        buffer = await getIndexMapImage(geoPolygon, idx);
+        captureDate = null;
+        clearPct = null;
+        if (buffer) console.warn(`${TAG} ${label} - ${idx}: sin pasada utilizable, se guarda el mosaico SIN fecha`);
+      }
+
+      if (buffer) {
+        const imageB64 = `data:image/png;base64,${buffer.toString("base64")}`;
+        // El ciclo se resuelve con la fecha que de verdad se usó
+        const cicloImagen = captureDate ? await resolveCycleForDate(captureDate) : cycle;
+        await drizzle.execute(
+          sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, captureDate, clearPct, cycleId, data, fetchedAt) VALUES (${parcelId}, 'map', ${idx}, 'latest', ${captureDate}, ${clearPct}, ${cicloImagen?.id ?? null}, ${imageB64}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), captureDate = VALUES(captureDate), clearPct = VALUES(clearPct), cycleId = VALUES(cycleId), fetchedAt = NOW()`
+        );
+        if (idx === "NDVI") {
+          captureDateFinal = captureDate;
+          clearPctFinal = clearPct;
+        }
+      }
+      console.log(`${TAG} ✓ ${label} - ${idx}`);
+    } catch (e: any) {
+      const reason = e?.message?.substring(0, 80) || "error desconocido";
+      console.error(`${TAG} ✗ ${label} - ${idx}:`, reason);
+      fallos.push(`${label} (${idx}): ${reason}`);
+    }
+  }
+
+  if (fallos.length === INDICES.length) {
+    return { parcelId, label, status: "error", captureDate: null, clearPct: null, cycleName: null,
+             detail: fallos.join(" · ") };
+  }
+
+  return {
+    parcelId, label,
+    status: "actualizada",
+    captureDate: captureDateFinal ?? clearPass?.date ?? null,
+    clearPct: clearPctFinal ?? clearPass?.clearPct ?? null,
+    cycleName: cycle?.name ?? null,
+    detail: fallos.length > 0 ? fallos.join(" · ") : undefined,
+  };
+}
+
+/**
+ * Revisa todas las parcelas con polígono.
+ * La usan la revisión diaria y el botón de Configuración.
+ */
+export async function runSatelliteSync(opts: { force?: boolean } = {}): Promise<SatelliteSyncResult> {
   const drizzle = await getDb();
   if (!drizzle) throw new Error("Base de datos no disponible");
 
   const allParcels = await drizzle
-    .select({ id: parcels.id, name: parcels.name, code: parcels.code, polygon: parcels.polygon })
+    .select({ id: parcels.id, name: parcels.name, polygon: parcels.polygon })
     .from(parcels);
   const withPolygon = allParcels.filter((p: any) => p.polygon);
-  console.log(`${TAG} Iniciando sync de ${withPolygon.length} parcelas...`);
+  console.log(`${TAG} Revisando ${withPolygon.length} parcelas...`);
 
   let updated = 0;
+  let unchanged = 0;
   let errorCount = 0;
   const errorDetails: string[] = [];
-  const indices: ("NDVI" | "NDRE" | "NDMI")[] = ["NDVI", "NDRE", "NDMI"];
-
-  const { getIndexHistory, getIndexMapImage, getParcelVigor } = await import("./copernicusService");
 
   for (const parcel of withPolygon) {
-    const parcelLabel = parcel.name || parcel.code || `ID:${parcel.id}`;
-    const geoPolygon = toGeoPolygon(parcel.polygon);
-    if (!geoPolygon) {
-      errorCount++;
-      errorDetails.push(`${parcelLabel}: polígono con formato no reconocido`);
-      continue;
-    }
-
-    const to = new Date().toISOString().split("T")[0];
-    let from: string;
     try {
-      const [firstBox] = await drizzle
-        .select({ submissionTime: boxes.submissionTime })
-        .from(boxes)
-        .where(eq(boxes.parcelCode, parcel.code || ""))
-        .orderBy(boxes.submissionTime)
-        .limit(1);
-      from = firstBox?.submissionTime
-        ? new Date(firstBox.submissionTime).toISOString().split("T")[0]
-        : new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0];
-    } catch {
-      from = new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0];
-    }
-
-    // La última pasada despejada depende de la PARCELA, no del índice:
-    // se busca una sola vez y se reutiliza para NDVI, NDRE y NDMI.
-    // force = true: el refresco automático sí quiere la lista fresca.
-    let clearPass: { date: string; clearPct: number; source?: string } | null = null;
-    // Candidatas ordenadas: primero las despejadas, luego el resto de más
-    // reciente a más antigua. Si una no devuelve imagen se prueba la siguiente,
-    // en vez de perder la fecha al primer tropiezo.
-    let candidatas: { date: string; clearPct: number; source?: string }[] = [];
-    try {
-      const passes = await getClearPassesCached(parcel.id, geoPolygon, true);
-      const despejadas = passes.filter((p) => p.clearPct >= 85);
-      const resto = passes.filter((p) => p.clearPct < 85).sort((a, b) => b.clearPct - a.clearPct);
-      candidatas = [...despejadas, ...resto].slice(0, 4);
-      clearPass = candidatas[0] ?? null;
-      if (clearPass) {
-        const origen = clearPass.source === "escena" ? " (nubosidad de la escena)" : "";
-        console.log(`${TAG} ${parcelLabel}: última pasada ${clearPass.date} (${clearPass.clearPct}% despejado)${origen}`);
+      const r = await syncOneParcel(parcel.id, opts);
+      if (r.status === "actualizada") {
+        updated++;
+        if (r.detail) { errorCount++; errorDetails.push(r.detail); }
+      } else if (r.status === "sin-cambios") {
+        unchanged++;
       } else {
-        console.warn(`${TAG} ${parcelLabel}: sin pasadas utilizables, se usa el mosaico`);
+        errorCount++;
+        errorDetails.push(`${r.label}: ${r.detail ?? r.status}`);
       }
     } catch (e: any) {
-      console.error(`${TAG} ${parcelLabel}: error buscando la pasada:`, e?.message);
+      errorCount++;
+      errorDetails.push(`${parcel.name || parcel.id}: ${e?.message ?? "error"}`);
     }
-
-    // Ciclo al que pertenece la imagen: así se sabe si el dato es del ciclo
-    // en curso o todavía del anterior
-    const cycle = clearPass ? await resolveCycleForDate(clearPass.date) : null;
-
-    // Vigor por zonas: se calcula UNA vez por pasada y se guarda. Es lo que
-    // alimenta a la IA con el detalle de qué parte se ve seca.
-    if (clearPass) {
-      try {
-        const vigor = await getParcelVigor(geoPolygon, clearPass.date);
-        if (vigor) {
-          await drizzle.execute(
-            sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, captureDate, clearPct, cycleId, data, fetchedAt) VALUES (${parcel.id}, 'zones', 'NDVI', 'latest', ${clearPass.date}, ${clearPass.clearPct}, ${cycle?.id ?? null}, ${JSON.stringify(vigor)}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), captureDate = VALUES(captureDate), clearPct = VALUES(clearPct), cycleId = VALUES(cycleId), fetchedAt = NOW()`
-          );
-
-          // Historial: una fila por captura. Si esa fecha ya estaba se
-          // actualiza en vez de duplicar (la clave única es parcela+fecha).
-          await drizzle.execute(
-            sql`INSERT INTO parcelSatelliteHistory (parcelId, captureDate, cycleId, clearPct, ndviMean, ndviMin, ndviMax, distributionJson, zonesJson) VALUES (${parcel.id}, ${clearPass.date}, ${cycle?.id ?? null}, ${clearPass.clearPct}, ${vigor.meanNdvi}, ${vigor.minNdvi}, ${vigor.maxNdvi}, ${JSON.stringify(vigor.distribution)}, ${JSON.stringify(vigor.zones)}) ON DUPLICATE KEY UPDATE cycleId = VALUES(cycleId), clearPct = VALUES(clearPct), ndviMean = VALUES(ndviMean), ndviMin = VALUES(ndviMin), ndviMax = VALUES(ndviMax), distributionJson = VALUES(distributionJson), zonesJson = VALUES(zonesJson)`
-          );
-
-          console.log(
-            `${TAG} ${parcelLabel}: NDVI ${vigor.meanNdvi} · seco ${vigor.distribution.suelo}% · ` +
-            `zona más débil: ${vigor.driest?.name ?? "n/d"} (${vigor.driest?.meanNdvi ?? "n/d"})`
-          );
-        }
-      } catch (e: any) {
-        console.error(`${TAG} ${parcelLabel}: error analizando el vigor por zonas:`, e?.message);
-      }
-    }
-
-    for (const idx of indices) {
-      try {
-        const data = await getIndexHistory(geoPolygon, from, to, idx);
-        await drizzle.execute(
-          sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, data, fromDate, toDate, fetchedAt) VALUES (${parcel.id}, 'stats', ${idx}, NULL, ${JSON.stringify(data)}, ${from}, ${to}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), fromDate = VALUES(fromDate), toDate = VALUES(toDate), fetchedAt = NOW()`
-        );
-
-        // Imagen de una pasada concreta. Si esa fecha no devuelve nada se
-        // prueba la siguiente candidata: lo importante es conservar la FECHA
-        // real, no caer al mosaico (que se queda sin fecha).
-        let buffer: Buffer | null = null;
-        let captureDate: string | null = null;
-        let clearPct: number | null = null;
-        for (const cand of candidatas) {
-          buffer = await getIndexMapImage(geoPolygon, idx, cand.date, true);
-          if (buffer) {
-            captureDate = cand.date;
-            clearPct = cand.clearPct;
-            break;
-          }
-          console.warn(`${TAG} ${parcelLabel} - ${idx}: la pasada del ${cand.date} no trajo imagen, se prueba la anterior`);
-        }
-
-        // Último recurso: mosaico de 15 días, que no tiene una fecha única
-        if (!buffer) {
-          buffer = await getIndexMapImage(geoPolygon, idx);
-          captureDate = null;
-          clearPct = null;
-          if (buffer) console.warn(`${TAG} ${parcelLabel} - ${idx}: sin pasada utilizable, se guarda el mosaico SIN fecha`);
-        }
-
-        if (buffer) {
-          const imageB64 = `data:image/png;base64,${buffer.toString("base64")}`;
-          // El ciclo se resuelve con la fecha que de verdad se usó
-          const cicloImagen = captureDate ? await resolveCycleForDate(captureDate) : cycle;
-          await drizzle.execute(
-            sql`INSERT INTO parcelSatelliteCache (parcelId, dataType, indexType, mapDate, captureDate, clearPct, cycleId, data, fetchedAt) VALUES (${parcel.id}, 'map', ${idx}, 'latest', ${captureDate}, ${clearPct}, ${cicloImagen?.id ?? null}, ${imageB64}, NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), captureDate = VALUES(captureDate), clearPct = VALUES(clearPct), cycleId = VALUES(cycleId), fetchedAt = NOW()`
-          );
-        }
-        console.log(`${TAG} ✓ ${parcelLabel} - ${idx}`);
-      } catch (e: any) {
-        const reason = e?.message?.substring(0, 80) || "error desconocido";
-        console.error(`${TAG} ✗ ${parcelLabel} - ${idx}:`, reason);
-        errorCount++;
-        errorDetails.push(`${parcelLabel} (${idx}): ${reason}`);
-      }
-    }
-    updated++;
   }
 
-  await notifyTelegram(updated, errorCount, errorDetails);
-  console.log(`${TAG} Completado: ${updated} parcelas, ${errorCount} errores`);
-  return { updated, errors: errorCount, errorDetails, total: withPolygon.length };
+  await limpiarMapasViejos();
+  await notifyTelegram(updated, unchanged, errorCount, errorDetails);
+  console.log(`${TAG} Completado: ${updated} actualizadas, ${unchanged} sin cambios, ${errorCount} errores`);
+  return { updated, unchanged, errors: errorCount, errorDetails, total: withPolygon.length };
 }
 
-async function notifyTelegram(updated: number, errorCount: number, errorDetails: string[]) {
+/**
+ * Tira las imágenes de fechas sueltas que ya nadie mira.
+ *
+ * Son las miniaturas de la línea de tiempo histórica: se guardan para no
+ * volver a bajarlas, pero son PNG en base64 y las fechas se van corriendo con
+ * el tiempo, así que la tabla crecería sin fin. La captura vigente de cada
+ * parcela (mapDate = 'latest') y el historial numérico NO se tocan.
+ */
+async function limpiarMapasViejos(): Promise<void> {
+  const drizzle = await getDb();
+  if (!drizzle) return;
+  try {
+    const res: any = await drizzle.execute(sql`
+      DELETE FROM parcelSatelliteCache
+       WHERE dataType = 'map'
+         AND mapDate IS NOT NULL AND mapDate <> 'latest'
+         AND fetchedAt < DATE_SUB(NOW(), INTERVAL 90 DAY)
+    `);
+    const borradas = (res?.[0]?.affectedRows ?? res?.affectedRows ?? 0) as number;
+    if (borradas > 0) console.log(`${TAG} Limpieza: ${borradas} imagen(es) histórica(s) sin uso`);
+  } catch (e: any) {
+    console.error(`${TAG} No se pudo limpiar el cache de imágenes:`, e?.message);
+  }
+}
+
+async function notifyTelegram(updated: number, unchanged: number, errorCount: number, errorDetails: string[]) {
   try {
     const { getGlobalSetting } = await import("./globalSettings");
     const botToken = await getGlobalSetting("telegramBotToken");
     const chatId = await getGlobalSetting("telegramChatId");
     if (!botToken || !chatId) return;
 
+    // Si no hubo NADA nuevo y nada falló, no se manda mensaje: un aviso diario
+    // diciendo "no pasó nada" solo enseña a ignorar las notificaciones
+    if (updated === 0 && errorCount === 0) {
+      console.log(`${TAG} Sin novedades: no se notifica por Telegram`);
+      return;
+    }
+
     const now = new Date().toLocaleString("es-MX", { timeZone: TIMEZONE });
-    const nextSync = new Date(Date.now() + 7 * 86400000).toLocaleDateString("es-MX", {
-      timeZone: TIMEZONE, day: "2-digit", month: "short", year: "numeric",
-    });
-    let msg = `🛰️ *SINCRONIZACIÓN SATELITAL*\n\n✅ ${updated} parcelas procesadas\n📊 NDVI · NDRE · NDMI\n⏰ ${now}\n📅 Próxima sync: ${nextSync}`;
+    let msg = `🛰️ *REVISIÓN SATELITAL*\n\n✅ ${updated} parcela(s) con captura nueva`;
+    if (unchanged > 0) msg += `\n😴 ${unchanged} sin pasada nueva (no se descargó nada)`;
+    msg += `\n📊 NDVI · NDRE · NDMI\n⏰ ${now}\n📅 Se revisa todos los días`;
     if (errorCount > 0) {
       const errorList = errorDetails.slice(0, 20).map(e => `  • ${e}`).join("\n");
       msg += `\n\n⚠️ *${errorCount} errores:*\n${errorList}`;
@@ -382,15 +530,16 @@ async function checkAndRun(): Promise<void> {
 }
 
 /**
- * Inicia el refresco cada 72 horas.
- * Revisa al arrancar el sistema y luego cada hora comprueba si ya toca; si los
- * datos están frescos no gasta llamadas a Copernicus.
+ * Inicia la revisión diaria.
+ * Revisa al arrancar el sistema y luego cada hora comprueba si ya toca. Buscar
+ * datos nuevos cuesta una consulta por parcela; descargar solo ocurre cuando de
+ * verdad hay una pasada nueva.
  */
 export function startSatelliteAutoSync(): void {
   if (syncInterval) clearInterval(syncInterval);
-  console.log(`🛰️ ${TAG} Scheduler iniciado (revisión de parcelas cada ${REFRESH_HOURS} horas)`);
+  console.log(`🛰️ ${TAG} Scheduler iniciado (revisión diaria de parcelas)`);
 
-  // Cada hora se pregunta si ya pasaron las 72 horas
+  // Cada hora se pregunta si ya pasaron las 24 horas
   syncInterval = setInterval(() => { checkAndRun().catch(console.error); }, 60 * 60 * 1000);
 
   // Revisión al arrancar, con margen para que la base esté lista
@@ -418,7 +567,7 @@ export async function getSatelliteSyncStatus() {
     isActive: syncInterval !== null,
     hoursSinceLastSync: age === null ? null : Math.round(age * 10) / 10,
     nextRefreshInHours: age === null ? 0 : Math.max(0, Math.round((REFRESH_HOURS - age) * 10) / 10),
-    schedule: `Cada ${REFRESH_HOURS} horas y al arrancar el sistema`,
+    schedule: `Todos los días y al arrancar el sistema (solo descarga si hay pasada nueva)`,
     timezone: TIMEZONE,
   };
 }

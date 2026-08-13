@@ -1087,3 +1087,113 @@ git pull && docker-compose up -d --build
 La migración `0023` corre sola al arrancar y es idempotente. Después hay que
 publicar el APK v1.8.0 para que los teléfonos reciban la bitácora, la foto de
 productos y la notificación de progreso.
+
+---
+
+# Decimosexta entrega — telemetría satelital diaria y comparativo por ciclos
+
+Sin migraciones ni cambios en la app móvil. Solo servidor y web.
+
+## El problema de fondo
+
+Al revisar por qué la pestaña satelital tardaba tanto en abrir apareció un bug
+viejo: **el cache satelital nunca funcionaba**. El código leía mal la respuesta
+de la base de datos —`drizzle.execute` devuelve `[filas, columnas]` y se estaba
+usando el arreglo entero como si fuera una fila—, así que la condición de
+"cache encontrado" jamás se cumplía.
+
+Consecuencia: **cada vez que alguien abría Análisis de Parcela se bajaban seis
+archivos de Copernicus** (mapa y serie de NDVI, NDRE y NDMI), más hasta ocho
+imágenes de la línea de tiempo histórica. Cada visita, de cada usuario.
+
+## 1. El backend busca todos los días; el frontend solo lee
+
+Ahora hay un reparto claro de responsabilidades:
+
+**El servidor** revisa **todos los días** (antes cada 72 h) si el satélite pasó
+de nuevo sobre cada parcela. Esa revisión cuesta **una sola consulta por
+parcela**. Si la pasada más reciente es la que ya está guardada, **no se
+descarga nada** y la parcela se salta entera. Sentinel-2 repite cada ~5 días,
+así que la mayoría de los días no hay nada que bajar.
+
+**La pantalla** ya no llama a Copernicus. Un endpoint nuevo (`getTelemetry`)
+devuelve todo lo guardado —los tres mapas con su fecha de pasada, las tres
+series y el vigor por zonas— en **una sola consulta a la base**.
+
+En la práctica: abrir Análisis de Parcela pasó de **6 descargas satelitales a 0**.
+
+La línea de tiempo histórica quedó plegada por omisión, con un botón para
+desplegarla: son fechas sueltas que sí hay que bajar la primera vez, y no tiene
+sentido pagarlas cada vez que alguien entra a ver otra cosa.
+
+También se agregó una franja que dice de cuándo es la captura, cuándo se revisó
+el servidor y a qué ciclo pertenece, con un botón **"Buscar ahora"** para
+forzar la revisión de esa parcela. Y una limpieza automática que tira las
+imágenes históricas con más de 90 días sin uso, para que la tabla de cache no
+crezca sin fin.
+
+El aviso de Telegram ya no se manda cuando no pasó nada: un mensaje diario
+diciendo "sin novedades" solo enseña a ignorar las notificaciones.
+
+## 2. Comparativo por ciclos
+
+La tarjeta nueva de Análisis de Parcela pone un ciclo encima del otro. Lo
+importante está en el eje X: **no son fechas del calendario, son días desde que
+arrancó el ciclo**. Así el día 90 del ciclo pasado queda justo encima del día 90
+del actual y se puede ver cuál venía mejor en el mismo momento del cultivo,
+aunque hayan empezado en fechas distintas.
+
+Debajo, una tabla por ciclo con:
+
+- Promedio, máximo y **en qué día del ciclo se alcanzó el pico** de cada índice
+- La diferencia contra el ciclo en curso, en verde o rojo
+- Capturas satelitales disponibles
+- **Cosecha del ciclo** (kg, cajas y días de corte) y **labores registradas**
+
+Se puede cambiar entre NDVI (vigor), NDRE (nitrógeno) y NDMI (humedad).
+
+## 3. La IA de la parcela ahora compara
+
+El análisis por parcela recibe un bloque nuevo que corta el ciclo anterior **en
+el mismo día de avance** que lleva el actual. Comparar contra el promedio del
+ciclo completo anterior sería tramposo: un ciclo a la mitad siempre perdería.
+
+Con eso el diagnóstico deja de ser "el NDVI está en 0.51" y pasa a ser "va
+0.042 arriba de como venía el ciclo pasado a estas alturas, que terminó dando
+12,340 kg".
+
+## Verificaciones
+
+`server/parcelTelemetry.test.ts`, 9 pruebas, con Copernicus sustituido por un
+doble que cuenta cuántas veces se le llama:
+
+| Prueba | Resultado |
+|---|---|
+| Abrir la telemetría guardada | 0 llamadas al satélite, 1 sola consulta a la base |
+| Parcela sin datos | responde vacío, no revienta |
+| **Pasada ya guardada** | **1 consulta para preguntar, 0 descargas** |
+| Pasada nueva | 3 series + 3 mapas + vigor, y escribe el historial |
+| Refresco a mano (force) | descarga aunque la fecha sea la misma |
+| Guardado incompleto | descarga aunque la fecha coincida |
+| Reparto por ciclo | cada ciclo se queda con sus capturas, alineadas por día del ciclo |
+| Texto comparativo para la IA | corta el ciclo anterior en el mismo día de avance |
+| Un solo ciclo con datos | no inventa comparación |
+
+Más las 7 pruebas de la entrega anterior: 16 en total, todas pasan. Web
+compilada; `tsc` sigue en los 204 errores previos.
+
+No se pudo probar contra una base MySQL real ni contra Copernicus (no hay
+Docker, credenciales de base ni credenciales de CDSE en este equipo).
+
+## Despliegue
+
+```bash
+git pull && docker-compose up -d --build
+```
+
+Sin migraciones. La primera revisión corre unos 3 minutos después de arrancar y
+descargará lo que falte; a partir de ahí solo baja lo que de verdad sea nuevo.
+En el log se distingue una cosa de la otra:
+
+- `El Higueral: pasada nueva 2026-08-09 (96% despejado)` → sí descargó
+- `El Higueral: sin pasada nueva (la del 2026-08-09 ya estaba)` → no descargó nada
