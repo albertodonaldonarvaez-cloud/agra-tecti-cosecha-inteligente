@@ -1821,6 +1821,21 @@ export const appRouter = router({
         return forecast;
       }),
     
+    /**
+     * Clima aplicado a la planeación de labores: qué clima hubo en cada labor
+     * ya hecha, qué clima habrá en las planeadas, y en qué momento del ciclo
+     * estamos (para poner la cosecha al frente cuando es temporada).
+     */
+    planner: protectedProcedure
+      .input(z.object({
+        pastDays: z.number().min(1).max(365).optional(),
+        aheadDays: z.number().min(1).max(16).optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        const { getWeatherPlanner } = await import("./weatherPlanner");
+        return getWeatherPlanner(input?.pastDays ?? 30, input?.aheadDays ?? 7);
+      }),
+
     getHistoricalDetailed: protectedProcedure
       .input(z.object({
         startDate: z.string(),

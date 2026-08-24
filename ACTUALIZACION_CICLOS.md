@@ -1197,3 +1197,97 @@ En el log se distingue una cosa de la otra:
 
 - `El Higueral: pasada nueva 2026-08-09 (96% despejado)` → sí descargó
 - `El Higueral: sin pasada nueva (la del 2026-08-09 ya estaba)` → no descargó nada
+
+---
+
+# Decimoséptima entrega — Clima para planear labores (no solo para explicar la cosecha)
+
+Sin migraciones ni cambios en la app móvil. La pantalla pasa a llamarse
+**Clima, Labores y Cosecha**.
+
+## Qué hacía antes y qué hace ahora
+
+La pantalla servía para una sola cosa: cruzar temperatura y lluvia contra la
+cosecha. Útil para explicar lo que ya pasó, pero no ayudaba a decidir nada.
+
+Ahora responde tres preguntas que sí se hacen en el campo:
+
+1. **¿Con qué clima se hizo cada labor?** Una aplicación que se lavó o una poda
+   con humedad quedan a la vista, y explican resultados meses después.
+2. **¿Qué clima les va a tocar a las labores planeadas?** Cada labor programada
+   trae el pronóstico de SU día y un veredicto.
+3. **¿Qué conviene programar y qué día?** Una agenda de los próximos días con
+   el clima y lo que ya está agendado.
+
+## El criterio agronómico
+
+Cada labor se juzga con lo que de verdad la afecta, no con "hace calor":
+
+| Labor | Qué la arruina |
+|---|---|
+| Aspersiones (fitosanitario, plagas, maleza, foliar) | Viento arriba de 20 km/h (se va a otro lado), lluvia el mismo día o al siguiente (se lava), calor arriba de 32 °C (se evapora antes de entrar a la hoja) |
+| Riego | Lluvia fuerte el mismo día o al siguiente: el riego se desperdicia |
+| Poda | Humedad al podar: el corte abre la puerta a enfermedades |
+| Fertilización granular | Lluvia fuerte lo lava; **lluvia ligera después ayuda** a incorporarlo; sin nada de agua se queda en la superficie |
+| Cosecha | Lluvia: el higo se abre y la caja llega mojada. Arriba de 36 °C madura de golpe |
+
+Más las reglas comunes: calor extremo y riesgo de helada.
+
+Todo eso vive en el **servidor** (`weatherPlanner.ts`), no en la pantalla, para
+que la web, la IA y los avisos de Telegram digan exactamente lo mismo el día
+que se conecten.
+
+El veredicto se muestra siempre con el mismo lenguaje visual —verde, ámbar,
+rojo— y **explica el porqué en el idioma del campo**: "Viento de 24 km/h: la
+aspersión se va a otro lado", no "condiciones subóptimas". Además habla en
+pasado de lo que ya ocurrió ("cayeron 14 mm") y en futuro de lo que viene
+("se esperan 12 mm").
+
+## Detecta el ciclo y cambia de enfoque
+
+La pantalla sabe en qué momento del ciclo está y se reacomoda sola:
+
+- **En temporada de cosecha**: el análisis de cosecha va primero, la agenda
+  califica cada día para cortar fruta, y el bloque de labores queda abajo —
+  presente, pero después.
+- **Fuera de temporada**: la planeación de labores va primero, la agenda
+  califica cada día para trabajar en campo, y el análisis de cosecha queda
+  plegado con un botón para abrirlo.
+
+Cómo lo detecta, en orden: **si están entrando cajas, es temporada**, aunque
+nadie haya capturado la fecha de inicio de cosecha en la ficha del ciclo. Si no
+hay cajas, se usa el rango del ciclo. Y siempre se dice en pantalla de dónde
+salió la conclusión ("Entraron 340 cajas en los últimos 14 días").
+
+## Verificaciones
+
+`server/weatherPlanner.test.ts`, 16 pruebas:
+
+- **Criterio agronómico** (12): viento fuerte en aspersión, lluvia al día
+  siguiente que lava la aplicación, riego desperdiciado, poda con humedad,
+  lluvia ligera que ayuda al granulado, fertilización sin agua, calor extremo,
+  cosecha con lluvia, y que sin datos de clima no se invente un veredicto bueno.
+- **Armado completo** (4): detección de temporada por cajas, detección fuera de
+  temporada, que cada labor tome el clima de SU día (el que hubo si ya pasó, el
+  pronosticado si viene) y quede separada en hecha o pendiente, y que una labor
+  vencida sin completar siga contando como pendiente.
+
+Junto con las entregas anteriores: **32 pruebas, todas pasan**. Web compilada;
+`tsc` sigue en los 204 errores previos.
+
+Durante la revisión visual encontré y corregí un hueco propio: fuera de
+temporada, la tarjeta de cada día decía "el sello indica si es buen día para
+asperjar" pero el sello solo se dibujaba en temporada de cosecha.
+
+No se pudo probar contra una base MySQL real ni contra Open-Meteo (no hay
+Docker ni credenciales de base en este equipo).
+
+## Despliegue
+
+```bash
+git pull && docker-compose up -d --build
+```
+
+Sin migraciones. Requiere que la **ubicación del huerto** esté configurada en
+Ajustes (es de donde sale el clima) y que las labores se registren en la
+Libreta de Campo con su fecha y estado.

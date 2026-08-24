@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, memo } from "react";
 import { trpc } from "@/lib/trpc";
 import { WeatherBackground } from "@/components/WeatherBackground";
 import { GlassCard } from "@/components/GlassCard";
+import { WeatherPlanner } from "@/components/WeatherPlanner";
 import {
   XAxis,
   YAxis,
@@ -263,6 +264,18 @@ interface CorrelationRow {
 export default function ClimateAnalysis() {
   // Por defecto: 30 días (carga rápida). -1 = desde inicio cosecha
   const [historicalDays, setHistoricalDays] = useState(30);
+
+  // En qué momento del ciclo estamos. Es la MISMA consulta que hace el bloque
+  // de planeación (tRPC la reusa), y sirve para decidir qué va primero:
+  // en temporada manda la cosecha; fuera de temporada, las labores.
+  const { data: planner } = trpc.weather.planner.useQuery(
+    { pastDays: 30, aheadDays: 7 },
+    { staleTime: 10 * 60 * 1000, refetchOnWindowFocus: false, retry: 2 },
+  );
+  const temporadaCosecha = planner?.temporadaCosecha ?? false;
+  // Fuera de temporada el análisis de cosecha sigue estando, solo que plegado
+  const [verCosecha, setVerCosecha] = useState<boolean | null>(null);
+  const mostrarCosecha = verCosecha ?? temporadaCosecha;
   const [tableDays, setTableDays] = useState(30);
   const [tableSortField, setTableSortField] = useState<string>("date");
   const [tableSortOrder, setTableSortOrder] = useState<"asc" | "desc">("desc");
@@ -445,9 +458,11 @@ export default function ClimateAnalysis() {
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-white drop-shadow-lg flex items-center gap-2">
               <BarChart3 className="w-6 h-6 md:w-8 md:h-8" />
-              Análisis Clima y Cosecha
+              Clima, Labores y Cosecha
             </h1>
-            <p className="text-white/70 text-sm mt-1 hidden md:block">Correlación entre condiciones climáticas y producción</p>
+            <p className="text-white/70 text-sm mt-1 hidden md:block">
+              Qué clima hubo en cada labor, qué clima habrá en las planeadas y cómo se comporta la cosecha
+            </p>
           </div>
         </div>
 
@@ -457,6 +472,30 @@ export default function ClimateAnalysis() {
         {/* Pronóstico - Componente independiente */}
         <ForecastSection />
 
+        {/* Fuera de temporada, planear labores es lo que importa: va primero */}
+        {!temporadaCosecha && <WeatherPlanner pastDays={30} aheadDays={7} />}
+
+        {/* ── Análisis de cosecha ── */}
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-lg md:text-xl font-bold text-white drop-shadow flex items-center gap-2">
+            <TrendingUp className="w-5 h-5" />
+            Cosecha y clima
+          </h2>
+          {!temporadaCosecha && (
+            <span className="text-[11px] text-white/80 bg-white/20 px-2 py-0.5 rounded-full">
+              fuera de temporada
+            </span>
+          )}
+          <button
+            onClick={() => setVerCosecha(!mostrarCosecha)}
+            className="ml-auto text-xs font-semibold text-white/90 hover:text-white bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg transition"
+          >
+            {mostrarCosecha ? "Ocultar" : "Ver análisis de cosecha"}
+          </button>
+        </div>
+
+        {mostrarCosecha && (
+        <>
         {/* Estadísticas de Correlación */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {dataLoading ? (
@@ -784,6 +823,11 @@ export default function ClimateAnalysis() {
             </>
           )}
         </GlassCard>
+        </>
+        )}
+
+        {/* En temporada la cosecha manda, pero las labores no se olvidan */}
+        {temporadaCosecha && <WeatherPlanner pastDays={30} aheadDays={7} />}
       </div>
     </div>
   );
