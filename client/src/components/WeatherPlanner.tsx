@@ -39,6 +39,16 @@ function VerdictChip({ nivel, texto }: { nivel: keyof typeof NIVELES; texto?: st
   );
 }
 
+/**
+ * Motivos que vale la pena mostrar. Se quita el relleno de "condiciones
+ * normales", pero SÍ se muestran los motivos buenos: saber por qué un día es
+ * bueno ("la lluvia moderada ayuda a incorporar el granulado") es tan útil
+ * como saber por qué es malo.
+ */
+function motivosUtiles(veredicto: any): string[] {
+  return (veredicto?.motivos ?? []).filter((m: string) => !m.startsWith("Condiciones normales"));
+}
+
 function fechaCorta(d: string) {
   return new Date(d + "T12:00:00").toLocaleDateString("es-MX", { weekday: "short", day: "numeric", month: "short" });
 }
@@ -156,7 +166,9 @@ function Agenda({ data }: { data: any }) {
                     nivel={v.nivel}
                     texto={v.nivel === "bueno" ? (cosecha ? "Buen día de corte" : "Buen día de campo") : undefined}
                   />
-                  <p className="text-[10px] text-gray-500 mt-1 leading-snug">{v.motivos[0]}</p>
+                  {motivosUtiles(v)[0] && (
+                    <p className="text-[10px] text-gray-500 mt-1 leading-snug">{motivosUtiles(v)[0]}</p>
+                  )}
                 </div>
               )}
 
@@ -292,9 +304,9 @@ function Planeadas({ data }: { data: any }) {
                 </div>
               </div>
 
-              {l.veredicto.motivos.length > 0 && l.veredicto.nivel !== "bueno" && (
+              {motivosUtiles(l.veredicto).length > 0 && (
                 <ul className="mt-2 pt-2 border-t border-gray-100 space-y-0.5">
-                  {l.veredicto.motivos.map((m: string, i: number) => (
+                  {motivosUtiles(l.veredicto).map((m: string, i: number) => (
                     <li key={i} className="text-[11px] text-gray-600 flex items-start gap-1.5">
                       <span className={`w-1 h-1 rounded-full mt-1.5 flex-shrink-0 ${NIVELES[l.veredicto.nivel as keyof typeof NIVELES]?.dot}`} />
                       {m}
@@ -386,8 +398,8 @@ function Pasadas({ data }: { data: any }) {
                     </td>
                     <td className="py-2">
                       <VerdictChip nivel={l.veredicto.nivel} texto={l.veredicto.nivel === "bueno" ? "Sin problema" : undefined} />
-                      {l.veredicto.nivel !== "bueno" && (
-                        <p className="text-[10px] text-gray-500 mt-0.5 max-w-[240px]">{l.veredicto.motivos[0]}</p>
+                      {motivosUtiles(l.veredicto)[0] && (
+                        <p className="text-[10px] text-gray-500 mt-0.5 max-w-[240px]">{motivosUtiles(l.veredicto)[0]}</p>
                       )}
                     </td>
                   </tr>

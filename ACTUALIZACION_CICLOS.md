@@ -1291,3 +1291,69 @@ git pull && docker-compose up -d --build
 Sin migraciones. Requiere que la **ubicación del huerto** esté configurada en
 Ajustes (es de donde sale el clima) y que las labores se registren en la
 Libreta de Campo con su fecha y estado.
+
+---
+
+# Arreglo — el veredicto del clima depende del MÉTODO, no del tipo de labor
+
+Reportado desde la pantalla: un **control de maleza mecánico (machete)** salía
+marcado como "Mal día · se esperan 10 mm de lluvia: la aplicación se lava".
+No tiene sentido: la lluvia no lava un machetazo.
+
+## Qué estaba mal
+
+Metí los cuatro tipos de labor "de aplicación" en un solo saco:
+
+```ts
+const SE_ASPERJA = new Set(["nutricion", "control_maleza", "control_plagas", "aplicacion_fitosanitaria"]);
+```
+
+Pero el tipo no dice cómo se hace la labor. El **subtipo sí**, y la libreta ya
+lo captura: "Mecánico (machete)", "Herbicida selectivo", "Foliar", "Trampas",
+"Monitoreo", "Granular al suelo".
+
+El mismo error afectaba a la fertilización al revés: una **fertilización
+foliar** se juzgaba con reglas de granulado, cuando en realidad es una
+aspersión y le pega el viento igual que a un fungicida.
+
+## Cómo quedó
+
+El veredicto ahora sale del **método**, deducido del subtipo:
+
+| Método | Qué le afecta |
+|---|---|
+| **Aspersión** (herbicida, insecticida, fungicida, foliar, fitosanitaria) | Viento, lluvia el mismo día o al siguiente, calor que evapora el caldo |
+| **Mecánico / manual** (machete, azadón, desbrozadora, trampas) | Solo el terreno mojado: a los 10 mm "se complica el paso y la máquina", a los 20 mm "queda intransitable". El viento no le hace nada |
+| **Al suelo** (granular, orgánica, enmiendas) | Lluvia fuerte lo lava; lluvia moderada lo incorpora; sin agua se queda en la superficie |
+| **Observación** (monitoreo) | Solo que llueva tanto que recorrer el huerto se complique |
+
+La poda y el riego siguen con sus propias reglas, que no dependen del método.
+
+Cuando el subtipo viene vacío se usa el método más común de ese tipo de labor
+(herbicida en control de maleza, granular en fertilización), que es lo que se
+venía suponiendo.
+
+De paso: ahora también se muestran los motivos **buenos**. Antes solo se veía
+el texto cuando algo salía mal, así que la fertilización de la captura decía
+"Buen día" sin explicar por qué. Ahora dice *"Lluvia moderada: ayuda a
+incorporar el fertilizante al suelo"*. Lo único que se oculta es el relleno de
+"condiciones normales".
+
+## Comprobado con el caso de la captura
+
+Mismo día de chubascos (9.5 mm, 70 % de probabilidad, 8 km/h):
+
+| Labor | Antes | Ahora |
+|---|---|---|
+| Poda · Formación | Mal día | **Mal día** — podar con humedad abre la puerta a enfermedades ✔ correcto |
+| Control de maleza · Mecánico (machete) | ❌ Mal día "la aplicación se lava" | **Buen día** |
+| Control de maleza · Herbicida selectivo | Mal día | **Mal día** — la aplicación se lava ✔ sigue avisando |
+| Fertilización · Granular al suelo | Buen día (sin explicación) | **Buen día** — la lluvia moderada ayuda a incorporarlo |
+
+7 pruebas nuevas cubren el reparto de métodos y los casos límite (viento sobre
+labor manual, terreno enlodado, foliar tratada como aspersión). En total
+**39 pruebas, todas pasan**; web compilada y `tsc` en los 204 errores previos.
+
+```bash
+git pull && docker-compose up -d --build
+```

@@ -86,8 +86,43 @@ export const TIPOS_LABOR: Record<string, string> = {
   otro: "Otra labor",
 };
 
-/** Labores que se asperjan: el viento y la lluvia posterior las arruinan */
-const SE_ASPERJA = new Set(["nutricion", "control_maleza", "control_plagas", "aplicacion_fitosanitaria"]);
+/**
+ * Cómo se hace la labor. Es lo que decide qué clima le afecta, y NO el tipo:
+ * un control de maleza con machete no lo lava la lluvia, pero uno con
+ * herbicida sí; una fertilización foliar se comporta como aspersión y una
+ * granular al suelo no.
+ */
+export type Metodo = "aspersion" | "suelo" | "mecanico" | "observacion";
+
+/**
+ * Se deduce del subtipo capturado en la libreta (el "método"). El orden
+ * importa: lo mecánico se descarta ANTES de buscar palabras de producto.
+ */
+const PISTAS_METODO: { metodo: Metodo; re: RegExp }[] = [
+  { metodo: "observacion", re: /monitore|revisi[óo]n|inspecci[óo]n/i },
+  { metodo: "mecanico", re: /mec[áa]nic|machete|azad[óo]n|desbroz|chape|manual|cobertura|trampa|acolch/i },
+  { metodo: "aspersion", re: /foliar|herbicida|insecticida|fungicida|acaricida|nematicida|aspersi[óo]n|fumig|biol[óo]gic|preventiva|curativa|erradicante|protectante|bioestimulante/i },
+  { metodo: "suelo", re: /granular|org[áa]nic|enmienda|cal agr|yeso|radicular|fertirriego|l[íi]quida|h[úu]mic|amino/i },
+];
+
+/** Cuando no se capturó el método, el más común de cada tipo de labor */
+const METODO_POR_TIPO: Record<string, Metodo> = {
+  aplicacion_fitosanitaria: "aspersion",
+  control_plagas: "aspersion",
+  control_maleza: "aspersion",
+  nutricion: "aspersion",
+  fertilizacion: "suelo",
+};
+
+export function metodoDeLabor(activityType: string, activitySubtype?: string | null): Metodo | null {
+  const sub = (activitySubtype ?? "").trim();
+  if (sub) {
+    for (const { metodo, re } of PISTAS_METODO) {
+      if (re.test(sub)) return metodo;
+    }
+  }
+  return METODO_POR_TIPO[activityType] ?? null;
+}
 
 const peor = (a: Nivel, b: Nivel): Nivel =>
   a === "malo" || b === "malo" ? "malo" : a === "cuidado" || b === "cuidado" ? "cuidado" : "bueno";
@@ -95,11 +130,15 @@ const peor = (a: Nivel, b: Nivel): Nivel =>
 /**
  * Qué tan buen día es (o fue) para una labor.
  *
+ * @param activitySubtype el método capturado en la libreta ("Mecánico
+ *        (machete)", "Herbicida selectivo", "Foliar"…). Es lo que evita
+ *        avisos absurdos, como decir que la lluvia lava un machetazo.
  * @param lluviaDespues mm que cayeron/caerán en las ~24 h siguientes. Es el
  *        dato que decide si una aspersión se lava, y por eso va aparte.
  */
 export function evaluarLabor(
   activityType: string,
+  activitySubtype: string | null,
   clima: ClimaDia | null,
   lluviaDespues: number | null,
 ): Veredicto {
@@ -127,8 +166,10 @@ export function evaluarLabor(
     motivos.push(`Riesgo de helada (mínima ${tMin.toFixed(0)}°C)`);
   }
 
-  // ── Reglas por tipo de labor ──
-  if (SE_ASPERJA.has(activityType)) {
+  // ── Reglas por MÉTODO ──
+  const metodo = metodoDeLabor(activityType, activitySubtype);
+
+  if (metodo === "aspersion") {
     if (lluvia >= 5) {
       nivel = peor(nivel, "malo");
       motivos.push(`${verbo} ${lluvia.toFixed(0)} mm de lluvia: la aplicación se lava`);
@@ -155,6 +196,25 @@ export function evaluarLabor(
     }
   }
 
+  if (metodo === "mecanico") {
+    // Aquí no hay nada que lavar ni que derive con el viento: lo único que
+    // estorba es el terreno mojado y resbaloso
+    if (lluvia >= 20) {
+      nivel = peor(nivel, "malo");
+      motivos.push(`${verbo} ${lluvia.toFixed(0)} mm: el terreno queda intransitable`);
+    } else if (lluvia >= 10) {
+      nivel = peor(nivel, "cuidado");
+      motivos.push(`${verbo} ${lluvia.toFixed(0)} mm: terreno mojado, se complica el paso y la máquina`);
+    }
+  }
+
+  if (metodo === "observacion") {
+    if (lluvia >= 10) {
+      nivel = peor(nivel, "cuidado");
+      motivos.push(`${verbo} ${lluvia.toFixed(0)} mm: recorrer el huerto se complica`);
+    }
+  }
+
   if (activityType === "riego") {
     if (lluvia >= 10 || (lluviaDespues ?? 0) >= 10) {
       nivel = peor(nivel, "malo");
@@ -176,13 +236,16 @@ export function evaluarLabor(
     }
   }
 
-  if (activityType === "fertilizacion") {
-    if (lluvia >= 25 || (lluviaDespues ?? 0) >= 25) {
+  // Fertilizante que va al suelo (granular, orgánico, enmiendas). La foliar no
+  // entra aquí: esa se comporta como aspersión y ya se evaluó arriba.
+  if (activityType === "fertilizacion" && metodo === "suelo") {
+    const agua = Math.max(lluvia, lluviaDespues ?? 0);
+    if (agua >= 25) {
       nivel = peor(nivel, "malo");
       motivos.push("Lluvia fuerte: el fertilizante se lava antes de que lo tome la planta");
-    } else if ((lluviaDespues ?? 0) >= 3 && (lluviaDespues ?? 0) < 25) {
-      motivos.push("Lluvia ligera después: ayuda a incorporar el granulado");
-    } else if (lluvia < 1 && (lluviaDespues ?? 0) < 1) {
+    } else if (agua >= 3) {
+      motivos.push("Lluvia moderada: ayuda a incorporar el fertilizante al suelo");
+    } else {
       nivel = peor(nivel, "cuidado");
       motivos.push("Sin lluvia ni riego el granulado se queda en la superficie");
     }
@@ -443,7 +506,7 @@ export async function getWeatherPlanner(
         parcelas: r.parcelas ? String(r.parcelas).split("||") : [],
         personas: Number(r.personas || 0),
         clima: c,
-        veredicto: evaluarLabor(tipo, c, lluviaSiguiente(clima, fecha)),
+        veredicto: evaluarLabor(tipo, r.activitySubtype ?? null, c, lluviaSiguiente(clima, fecha)),
         enDias: diasEntre(hoy, fecha),
       };
     });
@@ -472,7 +535,7 @@ export async function getWeatherPlanner(
     const sugerencias: string[] = [];
     if (c) {
       for (const tipo of ["aplicacion_fitosanitaria", "riego", "poda", "fertilizacion"]) {
-        const v = evaluarLabor(tipo, c, lluviaDespues);
+        const v = evaluarLabor(tipo, null, c, lluviaDespues);
         if (v.nivel === "bueno") sugerencias.push(TIPOS_LABOR[tipo]);
       }
     }
@@ -482,7 +545,7 @@ export async function getWeatherPlanner(
       clima: c,
       labores: delDia,
       cosecha: evaluarCosecha(c),
-      aspersion: evaluarLabor("aplicacion_fitosanitaria", c, lluviaDespues),
+      aspersion: evaluarLabor("aplicacion_fitosanitaria", null, c, lluviaDespues),
       sugerencias,
     });
   }

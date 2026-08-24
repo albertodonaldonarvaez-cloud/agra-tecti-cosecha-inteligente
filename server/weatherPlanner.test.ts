@@ -10,7 +10,7 @@
  *     el pronosticado si está por venir.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { evaluarLabor, evaluarCosecha, type ClimaDia } from "./weatherPlanner";
+import { evaluarLabor, evaluarCosecha, metodoDeLabor, type ClimaDia } from "./weatherPlanner";
 
 function clima(p: Partial<ClimaDia> = {}): ClimaDia {
   return {
@@ -24,49 +24,98 @@ function clima(p: Partial<ClimaDia> = {}): ClimaDia {
   };
 }
 
+/** Día de chubascos como el que destapó el falso positivo del machete */
+const chubascos = () => clima({ precipitation: 9.5, precipitationProbability: 70, windSpeed: 8, condition: "rainy", conditionText: "Chubascos" });
+
+describe("de qué depende cada labor: el MÉTODO, no el tipo", () => {
+  it("saca el método del subtipo capturado en la libreta", () => {
+    expect(metodoDeLabor("control_maleza", "Mecánico (machete)")).toBe("mecanico");
+    expect(metodoDeLabor("control_maleza", "Herbicida selectivo")).toBe("aspersion");
+    expect(metodoDeLabor("fertilizacion", "Foliar")).toBe("aspersion");
+    expect(metodoDeLabor("fertilizacion", "Granular al suelo")).toBe("suelo");
+    expect(metodoDeLabor("control_plagas", "Trampas")).toBe("mecanico");
+    expect(metodoDeLabor("control_plagas", "Monitoreo")).toBe("observacion");
+  });
+
+  it("sin subtipo usa el método más común de ese tipo de labor", () => {
+    expect(metodoDeLabor("control_maleza", null)).toBe("aspersion");
+    expect(metodoDeLabor("fertilizacion", "")).toBe("suelo");
+    expect(metodoDeLabor("poda", null)).toBeNull();
+  });
+
+  it("la lluvia NO arruina un control de maleza con machete", () => {
+    const v = evaluarLabor("control_maleza", "Mecánico (machete)", chubascos(), 0);
+    expect(v.nivel).toBe("bueno");
+    expect(v.motivos.join(" ")).not.toContain("se lava");
+  });
+
+  it("pero el mismo día SÍ arruina el control de maleza con herbicida", () => {
+    const v = evaluarLabor("control_maleza", "Herbicida postemergente", chubascos(), 0);
+    expect(v.nivel).toBe("malo");
+    expect(v.motivos.join(" ")).toContain("se lava");
+  });
+
+  it("con el terreno hecho un lodazal el trabajo mecánico sí se complica", () => {
+    const v = evaluarLabor("control_maleza", "Mecánico (desbrozadora)", clima({ precipitation: 26, condition: "rainy" }), 0);
+    expect(v.nivel).toBe("malo");
+    expect(v.motivos.join(" ")).toContain("intransitable");
+  });
+
+  it("el viento no le hace nada a una labor manual", () => {
+    const v = evaluarLabor("control_maleza", "Manual", clima({ windSpeed: 28 }), 0);
+    expect(v.nivel).toBe("bueno");
+  });
+
+  it("una fertilización FOLIAR se juzga como aspersión, no como granulado", () => {
+    const v = evaluarLabor("fertilizacion", "Foliar", clima({ windSpeed: 24 }), 0);
+    expect(v.nivel).toBe("malo");
+    expect(v.motivos.join(" ")).toContain("se va a otro lado");
+  });
+
+  it("una fertilización granular con lluvia moderada queda bien y lo explica", () => {
+    const v = evaluarLabor("fertilizacion", "Granular al suelo", chubascos(), 0);
+    expect(v.nivel).toBe("bueno");
+    expect(v.motivos.join(" ")).toContain("incorporar");
+  });
+});
+
 describe("criterio agronómico", () => {
   it("un día tranquilo sirve para asperjar", () => {
-    const v = evaluarLabor("aplicacion_fitosanitaria", clima(), 0);
+    const v = evaluarLabor("aplicacion_fitosanitaria", "Preventiva", clima(), 0);
     expect(v.nivel).toBe("bueno");
   });
 
   it("con viento fuerte la aspersión no sirve", () => {
-    const v = evaluarLabor("aplicacion_fitosanitaria", clima({ windSpeed: 24 }), 0);
+    const v = evaluarLabor("aplicacion_fitosanitaria", null, clima({ windSpeed: 24 }), 0);
     expect(v.nivel).toBe("malo");
     expect(v.motivos.join(" ")).toContain("se va a otro lado");
   });
 
   it("si llueve fuerte AL DÍA SIGUIENTE, la aplicación se lava", () => {
-    const v = evaluarLabor("control_plagas", clima(), 12);
+    const v = evaluarLabor("control_plagas", "Insecticida", clima(), 12);
     expect(v.nivel).toBe("malo");
     expect(v.motivos.join(" ")).toContain("día siguiente");
   });
 
   it("el riego se desperdicia si viene lluvia", () => {
-    const v = evaluarLabor("riego", clima({ precipitationProbability: 80 }), 18);
+    const v = evaluarLabor("riego", "Goteo", clima({ precipitationProbability: 80 }), 18);
     expect(v.nivel).toBe("malo");
   });
 
-  it("podar con humedad es mal día", () => {
-    const v = evaluarLabor("poda", clima({ precipitation: 4, condition: "rainy" }), 0);
+  it("podar con humedad es mal día, sea cual sea el tipo de poda", () => {
+    const v = evaluarLabor("poda", "Formación", clima({ precipitation: 4, condition: "rainy" }), 0);
     expect(v.nivel).toBe("malo");
     expect(v.motivos.join(" ")).toContain("enfermedades");
   });
 
-  it("una lluvia ligera DESPUÉS ayuda al granulado", () => {
-    const v = evaluarLabor("fertilizacion", clima(), 8);
-    expect(v.nivel).toBe("bueno");
-    expect(v.motivos.join(" ")).toContain("incorporar");
-  });
-
-  it("fertilizar sin nada de agua se marca como incompleto", () => {
-    const v = evaluarLabor("fertilizacion", clima(), 0);
+  it("fertilizar al suelo sin nada de agua se marca como incompleto", () => {
+    const v = evaluarLabor("fertilizacion", "Granular al suelo", clima(), 0);
     expect(v.nivel).toBe("cuidado");
     expect(v.motivos.join(" ")).toContain("superficie");
   });
 
   it("el calor extremo es malo para cualquier labor", () => {
-    const v = evaluarLabor("riego", clima({ temperatureMax: 39 }), 0);
+    const v = evaluarLabor("riego", null, clima({ temperatureMax: 39 }), 0);
     expect(v.nivel).toBe("malo");
     expect(v.motivos.join(" ")).toContain("Calor extremo");
   });
@@ -83,7 +132,7 @@ describe("criterio agronómico", () => {
   });
 
   it("sin datos de clima no se inventa un veredicto bueno", () => {
-    expect(evaluarLabor("riego", null, null).nivel).toBe("cuidado");
+    expect(evaluarLabor("riego", null, null, null).nivel).toBe("cuidado");
     expect(evaluarCosecha(null).nivel).toBe("cuidado");
   });
 
@@ -205,7 +254,8 @@ describe("getWeatherPlanner", () => {
       {
         match: "FROM fieldActivities", rows: [
           { id: 1, activityType: "poda", activitySubtype: null, description: "Poda de formación", activityDate: ayer, status: "completada", performedBy: "Cuadrilla 1", parcelas: "El Higueral", personas: 4 },
-          { id: 2, activityType: "aplicacion_fitosanitaria", activitySubtype: "Fungicida", description: "Aplicación preventiva", activityDate: enTres, status: "planificada", performedBy: "Cuadrilla 2", parcelas: "El Higueral||La Loma", personas: 3 },
+          { id: 2, activityType: "aplicacion_fitosanitaria", activitySubtype: "Preventiva", description: "Aplicación preventiva", activityDate: enTres, status: "planificada", performedBy: "Cuadrilla 2", parcelas: "El Higueral||La Loma", personas: 3 },
+          { id: 3, activityType: "control_maleza", activitySubtype: "Mecánico (machete)", description: "Rosando", activityDate: enTres, status: "planificada", performedBy: "Cuadrilla 3", parcelas: "MICAELA", personas: 7 },
         ],
       },
     ];
@@ -222,8 +272,8 @@ describe("getWeatherPlanner", () => {
     expect(poda.enDias).toBe(-1);
 
     // La aplicación de dentro de tres días, con el viento pronosticado
-    expect(r.planeadas).toHaveLength(1);
-    const app = r.planeadas[0];
+    expect(r.planeadas).toHaveLength(2);
+    const app = r.planeadas.find((l) => l.activityType === "aplicacion_fitosanitaria")!;
     expect(app.parcelas).toEqual(["El Higueral", "La Loma"]);
     expect(app.personas).toBe(3);
     expect(app.clima?.esPronostico).toBe(true);
@@ -233,7 +283,10 @@ describe("getWeatherPlanner", () => {
     // La agenda cubre hoy + los días pedidos y coloca la labor en su día
     expect(r.agenda).toHaveLength(8);
     expect(r.agenda[0].date).toBe(hoyMx());
-    expect(r.agenda[3].labores.map((l) => l.id)).toEqual([2]);
+    expect(r.agenda[3].labores.map((l) => l.id).sort()).toEqual([2, 3]);
+    // El machete del MISMO día ventoso no hereda el problema de la aspersión
+    const machete = r.planeadas.find((l) => l.activityType === "control_maleza")!;
+    expect(machete.veredicto.nivel).toBe("bueno");
     // Un día despejado sí sugiere labores y se marca como buen día de campo
     expect(r.agenda[1].sugerencias.length).toBeGreaterThan(0);
     expect(r.agenda[1].aspersion.nivel).toBe('bueno');
