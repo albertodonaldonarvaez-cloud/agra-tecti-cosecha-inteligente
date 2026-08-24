@@ -194,7 +194,7 @@ function Agenda({ data }: { data: any }) {
                   <p className="text-[10px] text-gray-400">Sin labores programadas</p>
                   {dia.sugerencias.length > 0 && (
                     <p className="text-[10px] text-green-600 mt-0.5 leading-snug">
-                      Buen día para: {dia.sugerencias.slice(0, 2).join(", ")}
+                      Buen día para: {dia.sugerencias.slice(0, 3).join(", ")}
                     </p>
                   )}
                 </div>

@@ -70,7 +70,12 @@ export interface ClimaDia {
 
 export interface Veredicto {
   nivel: Nivel;
-  /** Frases cortas, en el idioma del campo */
+  /**
+   * Frases cortas, en el idioma del campo, ORDENADAS DE LO MÁS GRAVE A LO
+   * MENOS. Importa el orden: las pantallas muestran solo la primera cuando no
+   * hay espacio, y si no fuera la que manda saldría un "Mal día" explicado con
+   * un motivo leve — que fue justo lo que se vio en la agenda.
+   */
   motivos: string[];
 }
 
@@ -127,6 +132,33 @@ export function metodoDeLabor(activityType: string, activitySubtype?: string | n
 const peor = (a: Nivel, b: Nivel): Nivel =>
   a === "malo" || b === "malo" ? "malo" : a === "cuidado" || b === "cuidado" ? "cuidado" : "bueno";
 
+const GRAVEDAD: Record<Nivel, number> = { malo: 0, cuidado: 1, bueno: 2 };
+
+/**
+ * Acumula los motivos con su gravedad y al final los devuelve del peor al
+ * menor, junto con el nivel del conjunto. Así la frase que se muestra cuando
+ * solo cabe una es siempre la que explica el veredicto.
+ */
+function nuevasNotas() {
+  const notas: { texto: string; nivel: Nivel }[] = [];
+  let nivel: Nivel = "bueno";
+  return {
+    anota(n: Nivel, texto: string) {
+      notas.push({ texto, nivel: n });
+      nivel = peor(nivel, n);
+    },
+    resultado(siNoHayNada: string): Veredicto {
+      if (notas.length === 0) return { nivel, motivos: [siNoHayNada] };
+      // sort es estable: dentro de la misma gravedad se respeta el orden de las reglas
+      const motivos = notas
+        .slice()
+        .sort((a, b) => GRAVEDAD[a.nivel] - GRAVEDAD[b.nivel])
+        .map((x) => x.texto);
+      return { nivel, motivos };
+    },
+  };
+}
+
 /**
  * Qué tan buen día es (o fue) para una labor.
  *
@@ -144,8 +176,7 @@ export function evaluarLabor(
 ): Veredicto {
   if (!clima) return { nivel: "cuidado", motivos: ["Sin datos de clima para ese día"] };
 
-  const motivos: string[] = [];
-  let nivel: Nivel = "bueno";
+  const notas = nuevasNotas();
   const lluvia = clima.precipitation ?? 0;
   const prob = clima.precipitationProbability ?? 0;
   const viento = clima.windSpeed ?? 0;
@@ -155,15 +186,12 @@ export function evaluarLabor(
 
   // ── Reglas comunes ──
   if (tMax >= 38) {
-    nivel = peor(nivel, "malo");
-    motivos.push(`Calor extremo (${tMax.toFixed(0)}°C): riesgo para la planta y para la gente`);
+    notas.anota("malo", `Calor extremo (${tMax.toFixed(0)}°C): riesgo para la planta y para la gente`);
   } else if (tMax >= 34) {
-    nivel = peor(nivel, "cuidado");
-    motivos.push(`Hace mucho calor (${tMax.toFixed(0)}°C): trabajar temprano`);
+    notas.anota("cuidado", `Hace mucho calor (${tMax.toFixed(0)}°C): trabajar temprano`);
   }
   if (tMin <= 2) {
-    nivel = peor(nivel, "malo");
-    motivos.push(`Riesgo de helada (mínima ${tMin.toFixed(0)}°C)`);
+    notas.anota("malo", `Riesgo de helada (mínima ${tMin.toFixed(0)}°C)`);
   }
 
   // ── Reglas por MÉTODO ──
@@ -171,68 +199,59 @@ export function evaluarLabor(
 
   if (metodo === "aspersion") {
     if (lluvia >= 5) {
-      nivel = peor(nivel, "malo");
-      motivos.push(`${verbo} ${lluvia.toFixed(0)} mm de lluvia: la aplicación se lava`);
+      notas.anota("malo", `${verbo} ${lluvia.toFixed(0)} mm de lluvia: la aplicación se lava`);
     } else if (lluvia >= 1 || prob >= 60) {
-      nivel = peor(nivel, "cuidado");
-      motivos.push(lluvia >= 1
+      notas.anota("cuidado", lluvia >= 1
         ? `${verbo} ${lluvia.toFixed(1)} mm: puede lavar parte del producto`
         : `${prob}% de probabilidad de lluvia`);
     }
     if (lluviaDespues != null && lluviaDespues >= 5 && lluvia < 5) {
-      nivel = peor(nivel, "malo");
-      motivos.push(`Llueve fuerte al día siguiente (${lluviaDespues.toFixed(0)} mm): no da tiempo de secar`);
+      notas.anota("malo", `Llueve fuerte al día siguiente (${lluviaDespues.toFixed(0)} mm): no da tiempo de secar`);
     }
     if (viento >= 20) {
-      nivel = peor(nivel, "malo");
-      motivos.push(`Viento de ${viento.toFixed(0)} km/h: la aspersión se va a otro lado`);
+      notas.anota("malo", `Viento de ${viento.toFixed(0)} km/h: la aspersión se va a otro lado`);
     } else if (viento >= 12) {
-      nivel = peor(nivel, "cuidado");
-      motivos.push(`Viento de ${viento.toFixed(0)} km/h: aplicar temprano o al atardecer`);
+      notas.anota("cuidado", `Viento de ${viento.toFixed(0)} km/h: aplicar temprano o al atardecer`);
     }
     if (tMax >= 32) {
-      nivel = peor(nivel, "cuidado");
-      motivos.push("Con este calor el caldo se evapora antes de entrar a la hoja");
+      notas.anota("cuidado", "Con este calor el caldo se evapora antes de entrar a la hoja");
     }
   }
 
   if (metodo === "mecanico") {
     // Aquí no hay nada que lavar ni que derive con el viento: lo único que
     // estorba es el terreno mojado y resbaloso
-    if (lluvia >= 20) {
-      nivel = peor(nivel, "malo");
-      motivos.push(`${verbo} ${lluvia.toFixed(0)} mm: el terreno queda intransitable`);
-    } else if (lluvia >= 10) {
-      nivel = peor(nivel, "cuidado");
-      motivos.push(`${verbo} ${lluvia.toFixed(0)} mm: terreno mojado, se complica el paso y la máquina`);
+    // Umbrales altos a propósito: el trabajo manual es JUSTO la alternativa de
+    // los días de lluvia. Una llovizna de temporal no estorba a un machete, y
+    // si esto se pusiera nervioso a los 10 mm la alternativa desaparecería
+    // precisamente los días en que hace falta.
+    if (lluvia >= 30) {
+      notas.anota("malo", `${verbo} ${lluvia.toFixed(0)} mm: el terreno queda intransitable`);
+    } else if (lluvia >= 15) {
+      notas.anota("cuidado", `${verbo} ${lluvia.toFixed(0)} mm: terreno mojado, se complica el paso y la máquina`);
     }
   }
 
   if (metodo === "observacion") {
     if (lluvia >= 10) {
-      nivel = peor(nivel, "cuidado");
-      motivos.push(`${verbo} ${lluvia.toFixed(0)} mm: recorrer el huerto se complica`);
+      notas.anota("cuidado", `${verbo} ${lluvia.toFixed(0)} mm: recorrer el huerto se complica`);
     }
   }
 
   if (activityType === "riego") {
     if (lluvia >= 10 || (lluviaDespues ?? 0) >= 10) {
-      nivel = peor(nivel, "malo");
-      motivos.push("Con esta lluvia el riego se desperdicia");
+      notas.anota("malo", "Con esta lluvia el riego se desperdicia");
     } else if (lluvia >= 3 || (lluviaDespues ?? 0) >= 5 || prob >= 60) {
-      nivel = peor(nivel, "cuidado");
-      motivos.push("Va a llover: conviene bajar la lámina o esperar");
+      notas.anota("cuidado", "Va a llover: conviene bajar la lámina o esperar");
     }
-    if (tMax >= 34 && lluvia < 1) motivos.push("Calor fuerte y sin lluvia: la planta lo va a agradecer");
+    if (tMax >= 34 && lluvia < 1) notas.anota("bueno", "Calor fuerte y sin lluvia: la planta lo va a agradecer");
   }
 
   if (activityType === "poda") {
     if (lluvia >= 1 || prob >= 60) {
-      nivel = peor(nivel, "malo");
-      motivos.push("Podar con humedad abre la puerta a enfermedades por el corte");
+      notas.anota("malo", "Podar con humedad abre la puerta a enfermedades por el corte");
     } else if ((lluviaDespues ?? 0) >= 5) {
-      nivel = peor(nivel, "cuidado");
-      motivos.push("Llueve al día siguiente: los cortes no alcanzan a cicatrizar");
+      notas.anota("cuidado", "Llueve al día siguiente: los cortes no alcanzan a cicatrizar");
     }
   }
 
@@ -241,45 +260,37 @@ export function evaluarLabor(
   if (activityType === "fertilizacion" && metodo === "suelo") {
     const agua = Math.max(lluvia, lluviaDespues ?? 0);
     if (agua >= 25) {
-      nivel = peor(nivel, "malo");
-      motivos.push("Lluvia fuerte: el fertilizante se lava antes de que lo tome la planta");
+      notas.anota("malo", "Lluvia fuerte: el fertilizante se lava antes de que lo tome la planta");
     } else if (agua >= 3) {
-      motivos.push("Lluvia moderada: ayuda a incorporar el fertilizante al suelo");
+      notas.anota("bueno", "Lluvia moderada: ayuda a incorporar el fertilizante al suelo");
     } else {
-      nivel = peor(nivel, "cuidado");
-      motivos.push("Sin lluvia ni riego el granulado se queda en la superficie");
+      notas.anota("cuidado", "Sin lluvia ni riego el granulado se queda en la superficie");
     }
   }
 
-  if (motivos.length === 0) motivos.push("Condiciones normales para esta labor");
-  return { nivel, motivos };
+  return notas.resultado("Condiciones normales para esta labor");
 }
 
 /** Veredicto pensado para el corte de fruta */
 export function evaluarCosecha(clima: ClimaDia | null): Veredicto {
   if (!clima) return { nivel: "cuidado", motivos: ["Sin datos de clima para ese día"] };
-  const motivos: string[] = [];
-  let nivel: Nivel = "bueno";
+  const notas = nuevasNotas();
   const lluvia = clima.precipitation ?? 0;
   const prob = clima.precipitationProbability ?? 0;
   const tMax = clima.temperatureMax ?? 0;
   const verbo = clima.esPronostico ? "se esperan" : "cayeron";
 
   if (lluvia >= 10) {
-    nivel = "malo";
-    motivos.push(`${verbo} ${lluvia.toFixed(0)} mm: el higo se abre y se pudre, y la caja llega mojada`);
+    notas.anota("malo", `${verbo} ${lluvia.toFixed(0)} mm: el higo se abre y se pudre, y la caja llega mojada`);
   } else if (lluvia >= 2 || prob >= 60) {
-    nivel = "cuidado";
-    motivos.push(lluvia >= 2
+    notas.anota("cuidado", lluvia >= 2
       ? `${verbo} ${lluvia.toFixed(1)} mm: cortar en cuanto seque`
       : `${prob}% de probabilidad de lluvia: adelantar el corte`);
   }
   if (tMax >= 36) {
-    nivel = peor(nivel, "cuidado");
-    motivos.push(`${tMax.toFixed(0)}°C: madura de golpe, hay que cortar temprano y sombrear la fruta`);
+    notas.anota("cuidado", `${tMax.toFixed(0)}°C: madura de golpe, hay que cortar temprano y sombrear la fruta`);
   }
-  if (motivos.length === 0) motivos.push("Buen día para cortar");
-  return { nivel, motivos };
+  return notas.resultado("Buen día para cortar");
 }
 
 // ============================================================
@@ -302,6 +313,24 @@ export interface LaborConClima {
   /** Días desde hoy: negativo = pasado, 0 = hoy, positivo = futuro */
   enDias: number;
 }
+
+/**
+ * Labores que se proponen cuando el día se ve bien para ellas.
+ *
+ * Van con MÉTODO explícito a propósito: decir solo "Fertilización" en un día
+ * de lluvia se lee como una contradicción, porque una foliar se lavaría y una
+ * granular al suelo no. Cada candidata se evalúa con su subtipo real.
+ *
+ * La última es la que rescata los días lluviosos: cuando no se puede asperjar,
+ * el machete y lo manual siguen siendo perfectamente trabajables.
+ */
+const CANDIDATAS_SUGERENCIA: { label: string; tipo: string; subtipo: string | null }[] = [
+  { label: "Aspersiones", tipo: "aplicacion_fitosanitaria", subtipo: "Preventiva" },
+  { label: "Riego", tipo: "riego", subtipo: null },
+  { label: "Poda", tipo: "poda", subtipo: null },
+  { label: "Fertilización al suelo", tipo: "fertilizacion", subtipo: "Granular al suelo" },
+  { label: "Trabajo manual o mecánico", tipo: "control_maleza", subtipo: "Mecánico (machete)" },
+];
 
 export interface DiaAgenda {
   date: string;
@@ -530,13 +559,14 @@ export async function getWeatherPlanner(
     const c = clima.get(fecha) ?? null;
     const delDia = planeadas.filter((l) => l.activityDate === fecha);
 
-    // Qué convendría hacer ese día según cómo se ve el clima
+    // Qué convendría hacer ese día según cómo se ve el clima (con el método
+    // dicho, para que la sugerencia no se contradiga con el sello del día)
     const lluviaDespues = lluviaSiguiente(clima, fecha);
     const sugerencias: string[] = [];
     if (c) {
-      for (const tipo of ["aplicacion_fitosanitaria", "riego", "poda", "fertilizacion"]) {
-        const v = evaluarLabor(tipo, null, c, lluviaDespues);
-        if (v.nivel === "bueno") sugerencias.push(TIPOS_LABOR[tipo]);
+      for (const cand of CANDIDATAS_SUGERENCIA) {
+        const v = evaluarLabor(cand.tipo, cand.subtipo, c, lluviaDespues);
+        if (v.nivel === "bueno") sugerencias.push(cand.label);
       }
     }
 

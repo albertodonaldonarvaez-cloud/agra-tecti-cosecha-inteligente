@@ -55,8 +55,14 @@ describe("de qué depende cada labor: el MÉTODO, no el tipo", () => {
     expect(v.motivos.join(" ")).toContain("se lava");
   });
 
-  it("con el terreno hecho un lodazal el trabajo mecánico sí se complica", () => {
-    const v = evaluarLabor("control_maleza", "Mecánico (desbrozadora)", clima({ precipitation: 26, condition: "rainy" }), 0);
+  it("aguanta la lluvia de temporal: es la alternativa de los días mojados", () => {
+    // 12 mm es un aguacero de tarde: el machete sigue siendo trabajable
+    const v = evaluarLabor("control_maleza", "Mecánico (machete)", clima({ precipitation: 12, condition: "rainy" }), 0);
+    expect(v.nivel).toBe("bueno");
+  });
+
+  it("pero con el terreno hecho un lodazal sí se complica", () => {
+    const v = evaluarLabor("control_maleza", "Mecánico (desbrozadora)", clima({ precipitation: 34, condition: "rainy" }), 0);
     expect(v.nivel).toBe("malo");
     expect(v.motivos.join(" ")).toContain("intransitable");
   });
@@ -134,6 +140,23 @@ describe("criterio agronómico", () => {
   it("sin datos de clima no se inventa un veredicto bueno", () => {
     expect(evaluarLabor("riego", null, null, null).nivel).toBe("cuidado");
     expect(evaluarCosecha(null).nivel).toBe("cuidado");
+  });
+
+  it("el primer motivo es SIEMPRE el que explica el veredicto", () => {
+    // 1.4 mm hoy solo merecen "cuidado", pero los 8 mm de mañana lo vuelven
+    // "malo". Si se mostrara el motivo leve, el sello diría "Mal día" y debajo
+    // una razón que no lo justifica: fue justo lo que se vio en la agenda.
+    const v = evaluarLabor("aplicacion_fitosanitaria", "Preventiva", clima({ precipitation: 1.4 }), 8);
+    expect(v.nivel).toBe("malo");
+    expect(v.motivos[0]).toContain("día siguiente");
+    expect(v.motivos[1]).toContain("puede lavar parte");
+  });
+
+  it("los motivos informativos van al final, no encabezando", () => {
+    const v = evaluarLabor("fertilizacion", "Granular al suelo", clima({ temperatureMax: 35, precipitation: 6 }), 0);
+    expect(v.nivel).toBe("cuidado");
+    expect(v.motivos[0]).toContain("calor");
+    expect(v.motivos[v.motivos.length - 1]).toContain("incorporar");
   });
 
   it("habla en pasado de lo que ya ocurrió y en futuro de lo que viene", () => {
@@ -288,11 +311,32 @@ describe("getWeatherPlanner", () => {
     const machete = r.planeadas.find((l) => l.activityType === "control_maleza")!;
     expect(machete.veredicto.nivel).toBe("bueno");
     // Un día despejado sí sugiere labores y se marca como buen día de campo
-    expect(r.agenda[1].sugerencias.length).toBeGreaterThan(0);
+    expect(r.agenda[1].sugerencias).toContain("Aspersiones");
+    // Las sugerencias dicen el MÉTODO: "Fertilización" a secas se contradecía
+    // con el sello del día en los días de lluvia
+    expect(r.agenda[1].sugerencias.join(" ")).not.toMatch(/^Fertilización$/);
     expect(r.agenda[1].aspersion.nivel).toBe('bueno');
     // El día ventoso NO es buen día de aspersión, aunque sí lo sea de corte
     expect(r.agenda[3].aspersion.nivel).toBe('malo');
     expect(r.agenda[3].cosecha.nivel).toBe('bueno');
+  });
+
+  it("un día de lluvia no propone asperjar, pero sí trabajo manual", async () => {
+    ponClima(hoyMx(), false, { precipitation: 12, precipitationProbability: 80, condition: "rainy" });
+    for (let i = 1; i <= 7; i++) ponClima(mas(i), false, { precipitation: 12, precipitationProbability: 80 });
+
+    respuestas = [
+      { match: "FROM productionCycles", rows: [] },
+      { match: "FROM boxes", rows: [{ cajas: 0, kg: 0 }] },
+      { match: "FROM fieldActivities", rows: [] },
+    ];
+
+    const r = await getWeatherPlanner(30, 7);
+    const hoy = r.agenda[0];
+
+    expect(hoy.aspersion.nivel).toBe("malo");
+    expect(hoy.sugerencias).not.toContain("Aspersiones");
+    expect(hoy.sugerencias).toContain("Trabajo manual o mecánico");
   });
 
   it("una labor vencida sin completar sigue contando como pendiente", async () => {

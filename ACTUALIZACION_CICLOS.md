@@ -1357,3 +1357,67 @@ labor manual, terreno enlodado, foliar tratada como aspersión). En total
 ```bash
 git pull && docker-compose up -d --build
 ```
+
+---
+
+# Arreglo — la agenda se contradecía sola
+
+Reportado desde la agenda de próximos días: el día 4 decía **"Mal día"** pero
+abajo sugería **"Buen día para: Fertilización"**, sin decir de qué tipo.
+
+Eran dos problemas distintos y el segundo era el de fondo.
+
+## 1. El motivo mostrado no era el que mandaba
+
+El día 4 tenía 1.4 mm de lluvia (solo "con cuidado") pero 8 mm al día
+siguiente, que es lo que lo volvía "Mal día". Como en la tarjeta solo cabe una
+frase, se mostraba la primera de la lista —la leve— y quedaba un sello rojo
+explicado con un motivo que no lo justificaba.
+
+Ahora cada motivo lleva su gravedad y **la lista sale del peor al menor**, así
+que la frase que se ve siempre es la que explica el veredicto:
+
+| | Antes | Ahora |
+|---|---|---|
+| Día 4 | Mal día · "puede lavar parte del producto" | Mal día · **"Llueve fuerte al día siguiente (8 mm): no da tiempo de secar"** |
+
+Los motivos informativos ("la lluvia moderada ayuda a incorporar el
+fertilizante") quedan al final, nunca encabezando.
+
+## 2. Las sugerencias no decían el método
+
+"Buen día para: Fertilización" en un día de lluvia se lee como una
+contradicción, porque una foliar se lavaría y una granular al suelo no. Ahora
+cada sugerencia se evalúa **con su método real y lo dice**:
+
+- Aspersiones
+- Riego
+- Poda
+- **Fertilización al suelo**
+- **Trabajo manual o mecánico**
+
+La última es la que rescata los días lluviosos: cuando no se puede asperjar, el
+machete y lo manual siguen siendo perfectamente trabajables, y ahora la agenda
+lo propone en vez de dejar el día en blanco.
+
+De paso subí los umbrales del trabajo mecánico (de 10/20 mm a 15/30 mm). Una
+prueba lo destapó: con 12 mm —un aguacero de tarde normal en temporal— la
+alternativa manual salía en ámbar y desaparecía de las sugerencias justo los
+días en que hace falta.
+
+## La agenda de la captura, ya corregida
+
+| Día | Sello | Sugiere |
+|---|---|---|
+| Hoy (9.5 mm) | Mal día · la aplicación se lava | Fertilización al suelo, Trabajo manual o mecánico |
+| Mañana (4.3 mm) | Con cuidado · puede lavar parte del producto | Fertilización al suelo, Trabajo manual o mecánico |
+| En 2 días (0 mm) | Buen día de campo | Aspersiones, Riego, Poda, Trabajo manual o mecánico |
+| En 3 días (32 °C) | Con cuidado · el caldo se evapora | Riego, Poda, Trabajo manual o mecánico |
+| **En 4 días** (1.4 mm) | **Mal día · llueve fuerte al día siguiente** | Fertilización al suelo, Trabajo manual o mecánico |
+| En 5 días (7.9 mm) | Mal día · la aplicación se lava | Fertilización al suelo, Trabajo manual o mecánico |
+
+43 pruebas, todas pasan. Web compilada; `tsc` en los 204 errores previos.
+
+```bash
+git pull && docker-compose up -d --build
+```
