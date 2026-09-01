@@ -28,6 +28,9 @@ export async function saveWebodmConfig(data: {
   // Limpiar URL trailing slash
   const cleanUrl = data.serverUrl.replace(/\/+$/, "");
 
+  // Si venían credenciales rechazadas, el arreglo debe surtir efecto de una vez
+  clearWebodmAuthFailure();
+
   if (existing.length > 0) {
     await db
       .update(webodmConfig)
@@ -46,9 +49,38 @@ export async function saveWebodmConfig(data: {
 
 // ============ AUTENTICACIÓN WebODM ============
 
-async function getValidToken(): Promise<{ token: string; serverUrl: string } | null> {
+/**
+ * Último rechazo de WebODM al iniciar sesión.
+ *
+ * El escaneo pide las tareas proyecto por proyecto, así que unas credenciales
+ * malas provocaban 17 intentos de login seguidos contra WebODM (con el riesgo
+ * de que la cuenta acabe bloqueada) y 17 rastros de error idénticos en el log.
+ * Recordando el rechazo un rato, se intenta una vez y las demás llamadas
+ * reciben el mismo motivo sin volver a salir a la red.
+ */
+let lastAuthFailure: { at: number; reason: string } | null = null;
+const AUTH_FAILURE_TTL_MS = 5 * 60 * 1000;
+
+/** Se llama al guardar la configuración para que un arreglo surta efecto ya */
+export function clearWebodmAuthFailure() {
+  lastAuthFailure = null;
+}
+
+/** Primeras líneas de la respuesta, para saber POR QUÉ rechazó WebODM */
+async function describeResponse(response: Response): Promise<string> {
+  try {
+    const texto = (await response.text()).replace(/\s+/g, " ").trim();
+    return texto ? texto.slice(0, 200) : "(sin detalle)";
+  } catch {
+    return "(sin detalle)";
+  }
+}
+
+async function getValidToken(): Promise<{ token: string; serverUrl: string }> {
   const config = await getWebodmConfig();
-  if (!config) return null;
+  if (!config || !config.serverUrl || !config.username || !config.password) {
+    throw new Error("WebODM no está configurado: falta URL, usuario o contraseña en Ajustes");
+  }
 
   // Verificar si el token cacheado aún es válido (con 10 min de margen)
   if (config.token && config.tokenExpiresAt) {
@@ -59,21 +91,52 @@ async function getValidToken(): Promise<{ token: string; serverUrl: string } | n
     }
   }
 
+  // Si acaba de rechazarnos, no insistir una vez por cada proyecto
+  if (lastAuthFailure && Date.now() - lastAuthFailure.at < AUTH_FAILURE_TTL_MS) {
+    throw new Error(lastAuthFailure.reason);
+  }
+
   // Solicitar nuevo token
+  let response: Response;
   try {
-    const response = await fetch(`${config.serverUrl}/api/token-auth/`, {
+    response = await fetch(`${config.serverUrl}/api/token-auth/`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: `username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}`,
+      signal: AbortSignal.timeout(20000),
     });
+  } catch (err: any) {
+    const reason = `No se pudo conectar con WebODM en ${config.serverUrl}: ${err?.message || err}`;
+    lastAuthFailure = { at: Date.now(), reason };
+    console.error(`[WebODM] ${reason}`);
+    throw new Error(reason);
+  }
 
-    if (!response.ok) {
-      console.error(`[WebODM] Auth failed: ${response.status} ${response.statusText}`);
-      return null;
-    }
+  if (!response.ok) {
+    // WebODM (Django REST) responde 400 cuando el usuario o la contraseña no
+    // son válidos, así que el cuerpo es lo único que distingue "credenciales
+    // incorrectas" de "esta URL no es una instancia de WebODM".
+    const detalle = await describeResponse(response);
+    const reason =
+      response.status === 400 || response.status === 401
+        ? `WebODM rechazó el usuario "${config.username}" (${response.status}): ${detalle}`
+        : `WebODM respondió ${response.status} ${response.statusText} al iniciar sesión: ${detalle}`;
+    lastAuthFailure = { at: Date.now(), reason };
+    console.error(`[WebODM] ${reason}`);
+    console.error(`[WebODM] URL de login: ${config.serverUrl}/api/token-auth/`);
+    throw new Error(reason);
+  }
 
+  try {
     const data = await response.json();
     const token = data.token;
+    if (!token) {
+      const reason = `WebODM aceptó el login pero no devolvió token. ¿Es ${config.serverUrl} una instancia de WebODM?`;
+      lastAuthFailure = { at: Date.now(), reason };
+      console.error(`[WebODM] ${reason}`);
+      throw new Error(reason);
+    }
+    lastAuthFailure = null;
 
     // Guardar token (expira en 6 horas por defecto)
     const expiresAt = new Date(Date.now() + 5.5 * 60 * 60 * 1000); // 5.5h para margen
@@ -86,15 +149,17 @@ async function getValidToken(): Promise<{ token: string; serverUrl: string } | n
     }
 
     return { token, serverUrl: config.serverUrl };
-  } catch (err) {
-    console.error("[WebODM] Auth error:", err);
-    return null;
+  } catch (err: any) {
+    if (err?.message) throw err;
+    const reason = `Respuesta ilegible de WebODM al iniciar sesión: ${err}`;
+    lastAuthFailure = { at: Date.now(), reason };
+    console.error(`[WebODM] ${reason}`);
+    throw new Error(reason);
   }
 }
 
 async function webodmFetch(path: string): Promise<any> {
   const auth = await getValidToken();
-  if (!auth) throw new Error("WebODM no configurado o credenciales inválidas");
 
   const url = `${auth.serverUrl}${path}`;
   const response = await fetch(url, {
@@ -102,7 +167,9 @@ async function webodmFetch(path: string): Promise<any> {
   });
 
   if (!response.ok) {
-    if (response.status === 403) {
+    // 401 = token vencido o inválido; 403 = sin permiso. En ambos casos el
+    // token guardado ya no sirve y hay que pedir uno nuevo.
+    if (response.status === 401 || response.status === 403) {
       // Token expirado, limpiar cache
       const db = await getDb();
       const config = await getWebodmConfig();
@@ -158,8 +225,8 @@ export async function getOdmProjectTasks(projectId: number): Promise<any[]> {
       uuid: t.uuid || t.id,  // Si uuid está vacío, usar id (que ya es UUID en esta instancia)
     })) : [];
     return normalized;
-  } catch (err) {
-    console.error(`[WebODM] Error fetching tasks for project ${projectId}:`, err);
+  } catch (err: any) {
+    console.error(`[WebODM] No se pudieron leer los vuelos del proyecto ${projectId}: ${err?.message || err}`);
     return [];
   }
 }
@@ -177,17 +244,27 @@ export async function getOdmTilesJson(projectId: number, taskId: string, type: "
  * Incluye el JWT token como querystring
  */
 export async function getOdmTileUrl(projectId: number, taskUuid: string, type: "orthophoto" | "dsm" | "dtm" = "orthophoto"): Promise<string | null> {
-  const auth = await getValidToken();
-  if (!auth) return null;
-  return `${auth.serverUrl}/api/projects/${projectId}/tasks/${taskUuid}/${type}/tiles/{z}/{x}/{y}.png?jwt=${auth.token}`;
+  try {
+    const auth = await getValidToken();
+    return `${auth.serverUrl}/api/projects/${projectId}/tasks/${taskUuid}/${type}/tiles/{z}/{x}/{y}.png?jwt=${auth.token}`;
+  } catch (err: any) {
+    // Sin sesión en WebODM no hay capa que mostrar; el mapa se dibuja sin ella
+    console.error(`[WebODM] Sin capa ${type} del proyecto ${projectId}: ${err?.message || err}`);
+    return null;
+  }
 }
 
 /**
  * Obtiene URLs de tiles para todas las capas disponibles de una tarea
  */
 export async function getOdmTaskTileUrls(projectId: number, taskUuid: string, availableAssets: string[]): Promise<Record<string, string>> {
-  const auth = await getValidToken();
-  if (!auth) return {};
+  let auth: { token: string; serverUrl: string };
+  try {
+    auth = await getValidToken();
+  } catch (err: any) {
+    console.error(`[WebODM] Sin capas del proyecto ${projectId}: ${err?.message || err}`);
+    return {};
+  }
 
   const urls: Record<string, string> = {};
   const baseUrl = `${auth.serverUrl}/api/projects/${projectId}/tasks/${taskUuid}`;

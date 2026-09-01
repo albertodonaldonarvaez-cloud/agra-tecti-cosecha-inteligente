@@ -63,7 +63,13 @@ async function getToken(): Promise<{ token: string; serverUrl: string } | null> 
     });
 
     if (!response.ok) {
-      console.error(`[ODM Tile Proxy] Auth failed: ${response.status}`);
+      // El cuerpo es lo que distingue "contraseña incorrecta" de "esta URL no
+      // es WebODM"; sin él, el log no alcanza para arreglar nada.
+      let detalle = "(sin detalle)";
+      try {
+        detalle = (await response.text()).replace(/\s+/g, " ").trim().slice(0, 200) || detalle;
+      } catch { /* respuesta ilegible */ }
+      console.error(`[ODM Tile Proxy] WebODM rechazó el login del usuario "${config.username}" (${response.status}): ${detalle}`);
       return null;
     }
 
