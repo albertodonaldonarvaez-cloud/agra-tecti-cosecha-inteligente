@@ -656,6 +656,41 @@ export const appRouter = router({
       }),
   }),
 
+  // Archivo local de las fotos de KoboToolbox
+  koboPhotos: router({
+    status: adminProcedure.query(async () => {
+      const { getPhotoArchiveStatus } = await import("./koboPhotoStore");
+      return await getPhotoArchiveStatus();
+    }),
+
+    // Dispara una ronda de descarga sin bloquear la respuesta: bajar miles de
+    // fotos puede tardar minutos y la peticion se caeria por timeout.
+    download: adminProcedure
+      .input(z.object({ retryFailed: z.boolean().optional() }).optional())
+      .mutation(async ({ input }) => {
+        const { queuePhotoBackfill, runPhotoBackfill, getPhotoArchiveStatus } =
+          await import("./koboPhotoStore");
+        const estado = await getPhotoArchiveStatus();
+
+        if (estado.isRunning) {
+          return { started: false, message: "Ya hay una descarga de fotos en curso" };
+        }
+
+        if (input?.retryFailed) {
+          setImmediate(() => {
+            runPhotoBackfill({ trigger: "reintento manual", retryFailed: true }).catch(console.error);
+          });
+        } else {
+          queuePhotoBackfill("manual");
+        }
+
+        return {
+          started: true,
+          message: `Descarga iniciada en segundo plano (${estado.pending} foto(s) pendientes)`,
+        };
+      }),
+  }),
+
   // Telegram
   telegram: router({
     getConfig: adminProcedure.query(async () => {

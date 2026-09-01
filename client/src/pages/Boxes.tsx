@@ -4,7 +4,7 @@ import { ProtectedPage } from "@/components/ProtectedPage";
 import { GlassCard } from "@/components/GlassCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { getProxiedImageUrl } from "@/lib/imageProxy";
+import { getBoxPhotoUrl } from "@/lib/imageProxy";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +33,7 @@ interface Box {
   parcelName: string;
   weight: number;
   photoUrl: string | null;
+  photoLocalPath?: string | null; // Copia guardada en el servidor
   submissionTime: Date;
 }
 
@@ -426,7 +427,7 @@ function BoxesContent() {
               {selectedBox.photoUrl && (
                 <div className="flex-1 bg-gray-100 flex items-center justify-center p-4 lg:p-6 min-h-[40vh] lg:min-h-[70vh]">
                   <img
-                    src={getProxiedImageUrl(selectedBox.photoUrl)}
+                    src={getBoxPhotoUrl(selectedBox) || ""}
                     alt={`Caja ${selectedBox.boxCode}`}
                     className="w-full h-full object-contain max-h-[50vh] lg:max-h-[80vh]"
                   />

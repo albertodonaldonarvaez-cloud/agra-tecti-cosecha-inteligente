@@ -2,7 +2,7 @@ import { Loading } from "@/components/Loading";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { GlassCard } from "@/components/GlassCard";
 import { ProtectedPage } from "@/components/ProtectedPage";
-import { getProxiedImageUrl } from "@/lib/imageProxy";
+import { getBoxPhotoUrl } from "@/lib/imageProxy";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
@@ -923,7 +923,7 @@ function HomeContent() {
               {/* Imagen - Lado izquierdo */}
               <div className="flex-1 bg-gray-100 flex items-center justify-center p-4 lg:p-6 min-h-[40vh] lg:min-h-[70vh]">
                 <img
-                  src={getProxiedImageUrl(selectedBox.photoLargeUrl || selectedBox.photoUrl)}
+                  src={getBoxPhotoUrl(selectedBox) || ""}
                   alt={selectedBox.boxCode}
                   className="w-full h-full object-contain max-h-[50vh] lg:max-h-[80vh]"
                 />

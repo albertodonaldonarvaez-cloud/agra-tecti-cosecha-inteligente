@@ -126,6 +126,7 @@ export async function getAllBoxes() {
     parcelName: boxes.parcelName,
     weight: boxes.weight,
     photoUrl: boxes.photoUrl,
+    photoLocalPath: boxes.photoLocalPath, // Copia en el servidor; si existe, se muestra esta
     photoFilename: boxes.photoFilename,
     submissionTime: boxes.submissionTime,
     latitude: boxes.latitude,
@@ -192,6 +193,7 @@ export async function getBoxesPaginated(params: {
     parcelName: boxes.parcelName,
     weight: boxes.weight,
     photoUrl: boxes.photoUrl,
+    photoLocalPath: boxes.photoLocalPath, // Copia en el servidor; si existe, se muestra esta
     submissionTime: boxes.submissionTime,
   })
     .from(boxes)
@@ -499,6 +501,7 @@ export async function getBoxesForEditor(params: {
     parcelName: boxes.parcelName,
     weight: boxes.weight,
     photoUrl: boxes.photoUrl,
+    photoLocalPath: boxes.photoLocalPath, // Copia en el servidor; si existe, se muestra esta
     photoFilename: boxes.photoFilename,
     submissionTime: boxes.submissionTime,
     latitude: boxes.latitude,
@@ -593,6 +596,7 @@ export async function getArchivedBoxes(params: {
     parcelName: boxes.parcelName,
     weight: boxes.weight,
     photoUrl: boxes.photoUrl,
+    photoLocalPath: boxes.photoLocalPath, // Copia en el servidor; si existe, se muestra esta
     submissionTime: boxes.submissionTime,
     archivedAt: boxes.archivedAt,
   })
@@ -786,6 +790,7 @@ export async function getRecentBoxesWithPhotos(limit: number = 5) {
     parcelName: boxes.parcelName,
     weight: boxes.weight,
     photoUrl: boxes.photoUrl,
+    photoLocalPath: boxes.photoLocalPath, // Copia en el servidor; si existe, se muestra esta
     photoLargeUrl: boxes.photoLargeUrl,
     submissionTime: boxes.submissionTime,
   })

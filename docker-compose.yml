@@ -17,6 +17,10 @@ services:
       - VITE_APP_TITLE=${VITE_APP_TITLE}
       - VITE_APP_LOGO=${VITE_APP_LOGO}
       - APP_VERSION=${APP_VERSION:-latest}
+      # Carpeta donde se guardan las fotos (montada en el volumen ./photos)
+      - PHOTOS_DIR=${PHOTOS_DIR:-/app/photos}
+      # Descarga de las fotos de KoboToolbox al servidor. "false" la desactiva.
+      - KOBO_PHOTO_ARCHIVE=${KOBO_PHOTO_ARCHIVE:-true}
     extra_hosts:
       - "smart-harvest.tecti-cloud.com:172.16.3.3"
       - "kf.smart-harvest.tecti-cloud.com:172.16.3.3"

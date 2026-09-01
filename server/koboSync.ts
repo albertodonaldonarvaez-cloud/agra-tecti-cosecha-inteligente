@@ -287,6 +287,18 @@ export async function syncFromKoboAPI(apiUrl: string, apiToken: string, assetId:
       }
     }
     
+    // Bajar al servidor las fotos de las cajas nuevas. Va en segundo plano a
+    // proposito: si Kobo tarda o falla al servir una imagen, los datos ya
+    // quedaron sincronizados y no se cae todo por una foto.
+    if (result.processedCount > 0) {
+      try {
+        const { queuePhotoBackfill } = await import("./koboPhotoStore");
+        queuePhotoBackfill("sync");
+      } catch (photoError) {
+        console.error('[FotosKobo] No se pudo iniciar la descarga de fotos:', photoError);
+      }
+    }
+
     return { ...result, autoResolveResult };
   } catch (error: any) {
     console.error('\u274c Error en sincronización:', error);

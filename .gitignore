@@ -143,3 +143,8 @@ android-app/.cxx/
 *.apk
 *.aab
 *.hprof
+
+# Fotos descargadas de KoboToolbox y subidas desde la app.
+# Viven en el volumen ./photos del docker-compose, nunca en el repositorio.
+/photos/
+/data/

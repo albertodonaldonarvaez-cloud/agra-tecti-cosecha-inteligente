@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { APP_LOGO, getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { getProxiedImageUrl } from "@/lib/imageProxy";
+import { getBoxPhotoUrl } from "@/lib/imageProxy";
 import { BarChart3, TrendingUp, Package, Weight, Calendar, X } from "lucide-react";
 import { useEffect, useState, useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
@@ -403,11 +403,11 @@ function HarvesterPerformanceContent() {
                   </div>
                   {stats.maxWeightBox?.photoUrl ? (
                     <img
-                      src={getProxiedImageUrl(stats.maxWeightBox.photoUrl)}
+                      src={getBoxPhotoUrl(stats.maxWeightBox) || ""}
                       alt="Caja más pesada"
                       className="h-32 w-full cursor-pointer rounded object-cover transition-transform hover:scale-105"
                       onClick={() => openPhotoModal(
-                        stats.maxWeightBox.photoUrl,
+                        getBoxPhotoUrl(stats.maxWeightBox) || "",
                         "Caja Más Pesada",
                         stats.maxWeight,
                         stats.maxWeightBox.boxCode
@@ -431,11 +431,11 @@ function HarvesterPerformanceContent() {
                   </div>
                   {stats.minWeightBox?.photoUrl ? (
                     <img
-                      src={getProxiedImageUrl(stats.minWeightBox.photoUrl)}
+                      src={getBoxPhotoUrl(stats.minWeightBox) || ""}
                       alt="Caja más liviana"
                       className="h-32 w-full cursor-pointer rounded object-cover transition-transform hover:scale-105"
                       onClick={() => openPhotoModal(
-                        stats.minWeightBox.photoUrl,
+                        getBoxPhotoUrl(stats.minWeightBox) || "",
                         "Caja Más Liviana",
                         stats.minWeight,
                         stats.minWeightBox.boxCode
@@ -483,7 +483,7 @@ function HarvesterPerformanceContent() {
           {selectedPhoto && (
             <div className="space-y-4">
               <img
-                src={getProxiedImageUrl(selectedPhoto.url)}
+                src={selectedPhoto.url}
                 alt={selectedPhoto.title}
                 className="w-full rounded-lg"
               />

@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save, Clock, Timer, CheckCircle, XCircle, Zap, Send, MessageCircle, Eye, EyeOff, Plane, Link2, Unlink, Wheat, ClipboardList, Loader2 } from "lucide-react";
+import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save, Clock, Timer, CheckCircle, XCircle, Zap, Send, MessageCircle, Eye, EyeOff, Plane, Link2, Unlink, Wheat, ClipboardList, Loader2, ImageDown, HardDrive } from "lucide-react";
 import LocationMapPicker from "@/components/LocationMapPicker";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -489,6 +489,9 @@ export default function Settings() {
           {/* Sincronización Automática */}
           <AutoSyncSection />
 
+          {/* Fotos de Kobo guardadas en el servidor */}
+          <PhotoArchiveSection />
+
           {/* Notificaciones Telegram */}
           <TelegramSection />
 
@@ -853,6 +856,144 @@ function AutoSyncSection() {
                     })}
                   </p>
                 </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </GlassCard>
+  );
+}
+
+// Componente del archivo local de fotos de KoboToolbox
+function PhotoArchiveSection() {
+  const TIMEZONE = "America/Mexico_City";
+
+  const { data: estado, refetch } = trpc.koboPhotos.status.useQuery(undefined, {
+    refetchInterval: 30000,
+  });
+
+  const descargar = trpc.koboPhotos.download.useMutation({
+    onSuccess: (data: any) => {
+      if (data.started) toast.success(data.message);
+      else toast.info(data.message);
+      refetch();
+    },
+    onError: (error: any) => toast.error(error.message),
+  });
+
+  const total = estado?.total || 0;
+  const guardadas = estado?.downloaded || 0;
+  const porcentaje = total > 0 ? Math.round((guardadas / total) * 100) : 0;
+
+  const formatBytes = (bytes: number) => {
+    if (!bytes) return "0 MB";
+    const mb = bytes / (1024 * 1024);
+    return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`;
+  };
+
+  const formatDate = (value: string | Date | null | undefined) => {
+    if (!value) return "Nunca";
+    return new Date(value).toLocaleString("es-MX", {
+      timeZone: TIMEZONE,
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  return (
+    <GlassCard className="p-4 md:p-6 border-2 border-purple-200 bg-purple-50/30">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <ImageDown className="h-6 w-6 text-purple-600" />
+          <h2 className="text-lg md:text-2xl font-semibold text-purple-900">Fotos en el Servidor</h2>
+        </div>
+        {estado?.isRunning ? (
+          <span className="flex items-center gap-1 rounded-full bg-purple-100 px-3 py-1 text-xs font-medium text-purple-700">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Descargando
+          </span>
+        ) : estado?.isActive ? (
+          <span className="flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
+            <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+            Activo
+          </span>
+        ) : null}
+      </div>
+
+      <p className="mb-4 text-sm text-purple-700">
+        Las fotos de las cajas se descargan de KoboToolbox y quedan guardadas en el servidor, para que
+        el histórico siga viéndose aunque Kobo no esté disponible.
+      </p>
+
+      {/* Avance */}
+      <div className="mb-4">
+        <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
+          <span>{guardadas.toLocaleString("es-MX")} de {total.toLocaleString("es-MX")} fotos guardadas</span>
+          <span className="font-semibold text-purple-700">{porcentaje}%</span>
+        </div>
+        <div className="h-2 w-full overflow-hidden rounded-full bg-purple-100">
+          <div className="h-full rounded-full bg-purple-500 transition-all" style={{ width: `${porcentaje}%` }} />
+        </div>
+      </div>
+
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded-lg bg-white/60 p-3 text-center">
+          <p className="text-xs text-gray-500">Pendientes</p>
+          <p className="text-sm font-semibold text-purple-700">{(estado?.pending || 0).toLocaleString("es-MX")}</p>
+        </div>
+        <div className="rounded-lg bg-white/60 p-3 text-center">
+          <p className="text-xs text-gray-500">Con error</p>
+          <p className={`text-sm font-semibold ${(estado?.failed || 0) > 0 ? "text-red-600" : "text-gray-700"}`}>
+            {(estado?.failed || 0).toLocaleString("es-MX")}
+          </p>
+        </div>
+        <div className="rounded-lg bg-white/60 p-3 text-center">
+          <p className="text-xs text-gray-500">Espacio usado</p>
+          <p className="text-sm font-semibold text-gray-700">{formatBytes(estado?.sizeBytes || 0)}</p>
+        </div>
+        <div className="rounded-lg bg-white/60 p-3 text-center">
+          <p className="text-xs text-gray-500">Última revisión</p>
+          <p className="text-sm font-semibold text-gray-700">{formatDate(estado?.lastRun)}</p>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Button
+          onClick={() => descargar.mutate({})}
+          disabled={descargar.isPending || estado?.isRunning}
+          className="flex-1 bg-purple-600 hover:bg-purple-700"
+        >
+          <HardDrive className="mr-2 h-4 w-4" />
+          {estado?.isRunning ? "Descargando..." : "Descargar fotos pendientes"}
+        </Button>
+        {(estado?.failed || 0) > 0 && (
+          <Button
+            onClick={() => descargar.mutate({ retryFailed: true })}
+            disabled={descargar.isPending || estado?.isRunning}
+            variant="outline"
+            className="border-purple-300 text-purple-700 hover:bg-purple-100"
+          >
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Reintentar las que fallaron
+          </Button>
+        )}
+      </div>
+
+      {estado?.storageDir && (
+        <p className="mt-3 text-xs text-gray-400">Carpeta en el servidor: {estado.storageDir}</p>
+      )}
+
+      {estado?.history && estado.history.length > 0 && (
+        <div className="mt-4">
+          <Label className="text-purple-800 font-medium">Historial reciente</Label>
+          <div className="mt-2 max-h-40 overflow-y-auto rounded-lg border border-purple-200 bg-white/60">
+            {estado.history.map((log: any, i: number) => (
+              <div key={i} className="border-b border-purple-100 px-3 py-2 text-xs text-gray-700 last:border-0">
+                <p>{log.message}</p>
+                <p className="text-gray-400">{formatDate(log.timestamp)} · {log.trigger}</p>
               </div>
             ))}
           </div>

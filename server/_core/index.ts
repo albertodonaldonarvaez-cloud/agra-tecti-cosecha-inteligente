@@ -222,7 +222,8 @@ async function startServer() {
   });
   
   // Servir fotos estáticas desde /app/photos con cache de 7 días
-  app.use("/app/photos", express.static("/app/photos", {
+  const { PHOTOS_ROOT, PHOTOS_PUBLIC_PREFIX } = await import("../koboPhotoStore");
+  app.use(PHOTOS_PUBLIC_PREFIX, express.static(PHOTOS_ROOT, {
     maxAge: "7d",
     immutable: true,
     etag: true,
@@ -766,6 +767,14 @@ async function startServer() {
       startAutoSync([7, 18]);
     }).catch((err) => {
       console.error("Error al iniciar AutoSync:", err);
+    });
+
+    // Descargar al servidor las fotos de KoboToolbox que aun no tienen copia
+    // local. Revisa cada media hora por si quedaron cajas rezagadas.
+    import("../koboPhotoStore").then(({ startPhotoArchive }) => {
+      startPhotoArchive(30);
+    }).catch((err) => {
+      console.error("Error al iniciar el archivo de fotos de Kobo:", err);
     });
 
     // Iniciar sincronización semanal de vuelos WebODM

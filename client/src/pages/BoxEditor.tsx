@@ -24,7 +24,7 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { MapModal } from "../components/MapModal";
 import { APP_LOGO } from "../const";
-import { getProxiedImageUrl } from "../lib/imageProxy";
+import { getBoxPhotoUrl } from "../lib/imageProxy";
 import { useDebouncedCallback } from "use-debounce";
 
 interface Box {
@@ -35,6 +35,7 @@ interface Box {
   parcelName: string;
   weight: number;
   photoUrl: string | null;
+  photoLocalPath?: string | null; // Copia guardada en el servidor
   photoFilename: string | null;
   submissionTime: Date;
   latitude: string | null;
@@ -479,7 +480,8 @@ export default function BoxEditor() {
   }, [harvesters]);
 
   const getPhotoUrl = useCallback((box: Box) => {
-    if (box.photoUrl) return getProxiedImageUrl(box.photoUrl);
+    const url = getBoxPhotoUrl(box);
+    if (url) return url;
     if (box.photoFilename) return `/app/photos/${box.photoFilename}`;
     return null;
   }, []);

@@ -142,6 +142,12 @@ export const boxes = mysqlTable("boxes", {
   photoLargeUrl: text("photoLargeUrl"),
   photoMediumUrl: text("photoMediumUrl"),
   photoSmallUrl: text("photoSmallUrl"),
+  // Copia de la foto guardada en el servidor (ruta pública /app/photos/kobo/...).
+  // Mientras sea NULL la foto solo vive en KoboToolbox.
+  photoLocalPath: varchar("photoLocalPath", { length: 512 }),
+  photoDownloadedAt: timestamp("photoDownloadedAt"),
+  photoDownloadAttempts: int("photoDownloadAttempts").default(0).notNull(),
+  photoDownloadError: varchar("photoDownloadError", { length: 255 }),
   latitude: varchar("latitude", { length: 64 }),
   longitude: varchar("longitude", { length: 64 }),
   submissionTime: timestamp("submissionTime").notNull(),
@@ -156,6 +162,26 @@ export const boxes = mysqlTable("boxes", {
 
 export type Box = typeof boxes.$inferSelect;
 export type InsertBox = typeof boxes.$inferInsert;
+
+// Índice de las fotos de KoboToolbox ya descargadas al servidor.
+// Se guarda una fila por cada URL conocida (original, large, medium y small)
+// apuntando al mismo archivo, para que el proxy resuelva cualquier variante
+// sin volver a salir a internet.
+export const koboPhotos = mysqlTable("koboPhotos", {
+  id: int("id").autoincrement().primaryKey(),
+  urlHash: varchar("urlHash", { length: 40 }).notNull().unique(), // sha1 de la URL de Kobo
+  koboUrl: text("koboUrl").notNull(),
+  boxId: int("boxId"),
+  boxCode: varchar("boxCode", { length: 64 }),
+  variant: mysqlEnum("variant", ["original", "large", "medium", "small"]).default("original").notNull(),
+  localPath: varchar("localPath", { length: 512 }).notNull(), // Ruta pública: /app/photos/kobo/...
+  contentType: varchar("contentType", { length: 128 }),
+  sizeBytes: int("sizeBytes"),
+  downloadedAt: timestamp("downloadedAt").defaultNow().notNull(),
+});
+
+export type KoboPhoto = typeof koboPhotos.$inferSelect;
+export type InsertKoboPhoto = typeof koboPhotos.$inferInsert;
 
 // Tabla de configuración de API de KoboToolbox
 export const apiConfig = mysqlTable("apiConfig", {

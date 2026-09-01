@@ -377,6 +377,39 @@ async function migrate() {
       "ALTER TABLE userActivityLogs ADD UNIQUE INDEX userActivityLogs_clientLogId_unique (clientLogId)");
     await ensureIndex('userActivityLogs', 'idx_activity_source_date',
       "ALTER TABLE userActivityLogs ADD INDEX idx_activity_source_date (source, createdAt)");
+
+    // ── Archivo local de fotos de KoboToolbox (0024) ──────────
+    // Las fotos vivían solo en Kobo y el dashboard las pedía prestadas en cada
+    // vista. Ahora se descargan al servidor (/app/photos/kobo) y la tabla
+    // koboPhotos hace de índice URL → archivo, con una fila por cada variante
+    // (original, large, medium, small) apuntando al mismo archivo.
+    await conn.query(`CREATE TABLE IF NOT EXISTS koboPhotos (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      urlHash VARCHAR(40) NOT NULL,
+      koboUrl TEXT NOT NULL,
+      boxId INT NULL,
+      boxCode VARCHAR(64) NULL,
+      variant ENUM('original','large','medium','small') NOT NULL DEFAULT 'original',
+      localPath VARCHAR(512) NOT NULL,
+      contentType VARCHAR(128) NULL,
+      sizeBytes INT NULL,
+      downloadedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY koboPhotos_urlHash_unique (urlHash),
+      KEY idx_koboPhotos_box (boxId)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+    await ensureColumn('boxes', 'photoLocalPath',
+      "ALTER TABLE boxes ADD COLUMN photoLocalPath VARCHAR(512) NULL");
+    await ensureColumn('boxes', 'photoDownloadedAt',
+      "ALTER TABLE boxes ADD COLUMN photoDownloadedAt TIMESTAMP NULL");
+    await ensureColumn('boxes', 'photoDownloadAttempts',
+      "ALTER TABLE boxes ADD COLUMN photoDownloadAttempts INT NOT NULL DEFAULT 0");
+    await ensureColumn('boxes', 'photoDownloadError',
+      "ALTER TABLE boxes ADD COLUMN photoDownloadError VARCHAR(255) NULL");
+    // El rezagado busca cajas con foto en Kobo pero sin copia local; sin índice
+    // eso es un escaneo completo de la tabla en cada ronda.
+    await ensureIndex('boxes', 'idx_boxes_photo_pending',
+      "ALTER TABLE boxes ADD INDEX idx_boxes_photo_pending (photoLocalPath(16), photoDownloadAttempts, submissionTime)");
   } catch (err) {
     console.error('[Migration] Error:', err.message);
   } finally {
