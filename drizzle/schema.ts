@@ -905,3 +905,55 @@ export const labelPrintHistory = mysqlTable("labelPrintHistory", {
 });
 export type LabelPrintHistory = typeof labelPrintHistory.$inferSelect;
 export type InsertLabelPrintHistory = typeof labelPrintHistory.$inferInsert;
+
+// ══════════════════════════════════════
+// LLAVES DE API PARA AGENTES
+// ══════════════════════════════════════
+// La API pública (/api/v1) la consumen scripts y agentes de IA, no personas.
+// Darles el correo y contraseña de un administrador era la única opción antes:
+// una llave se puede acotar a solo lectura, revocar sola y auditar aparte.
+//
+// La llave NUNCA se guarda completa. Se guarda su hash sha256; el prefijo
+// (agt_live_xxxxxxxx) se guarda aparte solo para poder identificarla en pantalla.
+export const API_KEY_SCOPES = ["lectura", "lectura_ia"] as const;
+
+export const apiKeys = mysqlTable("apiKeys", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 128 }).notNull(), // "Agente de análisis", "Script de Pedro"
+  keyHash: varchar("keyHash", { length: 64 }).notNull().unique(), // sha256 en hexadecimal
+  keyPrefix: varchar("keyPrefix", { length: 24 }).notNull(), // agt_live_a1b2c3d4 (para reconocerla)
+  // lectura     → todo lo que no cuesta dinero
+  // lectura_ia  → además los endpoints que llaman a DeepSeek y Copernicus
+  scope: mysqlEnum("scope", API_KEY_SCOPES).default("lectura").notNull(),
+  // La llave actúa en nombre de este usuario: hereda sus permisos
+  userId: int("userId").notNull(),
+  createdByUserId: int("createdByUserId"),
+  // Topes. Sin ellos, un script en bucle vacía la cuota de DeepSeek en una tarde
+  rateLimitPerMin: int("rateLimitPerMin").default(60).notNull(),
+  dailyQuota: int("dailyQuota").default(5000).notNull(),
+  dailyAiQuota: int("dailyAiQuota").default(20).notNull(),
+  expiresAt: timestamp("expiresAt"), // NULL = no caduca
+  revokedAt: timestamp("revokedAt"), // NULL = activa
+  lastUsedAt: timestamp("lastUsedAt"),
+  lastUsedIp: varchar("lastUsedIp", { length: 64 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ApiKey = typeof apiKeys.$inferSelect;
+export type InsertApiKey = typeof apiKeys.$inferInsert;
+
+// Consumo diario por llave. Hace dos trabajos con la misma fila: es la bitácora
+// que responde "cuánto usó este agente el martes" y es el contador que hace
+// cumplir la cuota, sin necesidad de guardar una fila por petición.
+export const apiKeyUsage = mysqlTable("apiKeyUsage", {
+  id: int("id").autoincrement().primaryKey(),
+  keyId: int("keyId").notNull(),
+  day: date("day", { mode: "string" }).notNull(), // "YYYY-MM-DD" en hora de México
+  calls: int("calls").default(0).notNull(),
+  aiCalls: int("aiCalls").default(0).notNull(), // las que cuestan dinero
+  errors: int("errors").default(0).notNull(),
+  lastPath: varchar("lastPath", { length: 255 }),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ApiKeyUsage = typeof apiKeyUsage.$inferSelect;

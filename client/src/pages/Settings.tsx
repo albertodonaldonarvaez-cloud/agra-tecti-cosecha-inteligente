@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save, Clock, Timer, CheckCircle, XCircle, Zap, Send, MessageCircle, Eye, EyeOff, Plane, Link2, Unlink, Wheat, ClipboardList, Loader2, ImageDown, HardDrive, Mail, AtSign } from "lucide-react";
+import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save, Clock, Timer, CheckCircle, XCircle, Zap, Send, MessageCircle, Eye, EyeOff, Plane, Link2, Unlink, Wheat, ClipboardList, Loader2, ImageDown, HardDrive, Mail, AtSign, KeyRound, Copy, Trash2, Terminal } from "lucide-react";
 import LocationMapPicker from "@/components/LocationMapPicker";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -515,6 +515,9 @@ export default function Settings() {
 
           {/* App Móvil - Distribución del APK */}
           <AppReleaseSection />
+
+          {/* Llaves de API para agentes y scripts */}
+          <ApiKeysSection />
 
           {/* Carga Manual */}
           <GlassCard className="p-4 md:p-6">
@@ -2406,6 +2409,342 @@ function AppReleaseSection() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+    </GlassCard>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// Llaves de API para agentes de IA y scripts
+// ═══════════════════════════════════════════════════════════
+// La API /api/v1 sale a internet, así que cada llave trae sus propios topes.
+// El de IA es el que importa: son las llamadas que le cuestan dinero al negocio.
+function ApiKeysSection() {
+  const { data: llaves, refetch } = trpc.apiKeys.list.useQuery(undefined, { retry: false });
+  const { data: usuarios } = trpc.usersAdmin.list.useQuery(undefined, { retry: false });
+
+  const [nombre, setNombre] = useState("");
+  // La llave hereda los permisos de este usuario. Por omisión, los de quien la
+  // crea; ligarla a una cuenta acotada es lo que limita qué alcanza el agente.
+  const [comoUsuario, setComoUsuario] = useState<number | "">("");
+  const [alcance, setAlcance] = useState<"lectura" | "lectura_ia">("lectura");
+  const [porMinuto, setPorMinuto] = useState(60);
+  const [cuotaDiaria, setCuotaDiaria] = useState(5000);
+  const [cuotaIa, setCuotaIa] = useState(20);
+  const [vigencia, setVigencia] = useState<number | "">("");
+  const [creada, setCreada] = useState<{ llave: string; nombre: string } | null>(null);
+  const [mostrarFormulario, setMostrarFormulario] = useState(false);
+
+  const crear = trpc.apiKeys.create.useMutation({
+    onSuccess: (r: any) => {
+      // Es la única vez que la llave completa existe fuera del servidor
+      setCreada({ llave: r.llave, nombre });
+      setNombre("");
+      setMostrarFormulario(false);
+      refetch();
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const revocar = trpc.apiKeys.revoke.useMutation({
+    onSuccess: () => {
+      toast.success("Llave revocada. Deja de funcionar de inmediato.");
+      refetch();
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const copiar = async (texto: string) => {
+    try {
+      await navigator.clipboard.writeText(texto);
+      toast.success("Llave copiada");
+    } catch {
+      toast.error("No se pudo copiar. Selecciónala y cópiala a mano.");
+    }
+  };
+
+  const handleCrear = () => {
+    if (nombre.trim().length < 3) {
+      toast.error("Ponle un nombre que diga para qué es, por ejemplo “Agente de análisis”");
+      return;
+    }
+    crear.mutate({
+      name: nombre.trim(),
+      scope: alcance,
+      userId: comoUsuario === "" ? undefined : Number(comoUsuario),
+      rateLimitPerMin: Number(porMinuto) || 60,
+      dailyQuota: Number(cuotaDiaria) || 5000,
+      dailyAiQuota: Number(cuotaIa) || 0,
+      diasDeVigencia: vigencia === "" ? null : Number(vigencia),
+    });
+  };
+
+  const activas = (llaves || []).filter((k: any) => k.estado === "activa");
+
+  return (
+    <GlassCard className="p-4 md:p-6">
+      <div className="mb-4 flex items-center gap-2">
+        <KeyRound className="h-6 w-6 text-green-600" />
+        <h2 className="text-lg md:text-2xl font-semibold text-green-900">Llaves de API</h2>
+      </div>
+
+      <p className="mb-4 text-sm text-gray-600">
+        Para que un agente de IA o un script consulte los datos sin entrar al sistema. Cada llave
+        es de <strong>solo lectura</strong> y se puede revocar sola, sin tocar la cuenta de nadie.
+      </p>
+
+      {/* La llave recién creada: se muestra una vez y nunca más */}
+      {creada && (
+        <div className="mb-4 rounded-lg border-2 border-amber-300 bg-amber-50 p-4">
+          <div className="mb-2 flex items-center gap-2 text-amber-900">
+            <AlertTriangle className="h-5 w-5 shrink-0" />
+            <span className="font-semibold">Cópiala ahora: no se vuelve a mostrar</span>
+          </div>
+          <p className="mb-3 text-sm text-amber-800">
+            Esta es la llave de “{creada.nombre}”. En el servidor solo queda guardado su resumen
+            cifrado, así que si se pierde hay que crear otra.
+          </p>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <code className="flex-1 overflow-x-auto rounded border border-amber-300 bg-white px-3 py-2 font-mono text-sm text-gray-900">
+              {creada.llave}
+            </code>
+            <Button onClick={() => copiar(creada.llave)} className="bg-amber-600 hover:bg-amber-700">
+              <Copy className="mr-2 h-4 w-4" />
+              Copiar
+            </Button>
+            <Button variant="outline" onClick={() => setCreada(null)}>
+              Ya la guardé
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Listado */}
+      {(llaves || []).length === 0 ? (
+        <p className="mb-4 rounded-lg bg-gray-50 p-4 text-sm text-gray-500">
+          Todavía no hay llaves. Crea una para conectar tu primer agente.
+        </p>
+      ) : (
+        <div className="mb-4 space-y-2">
+          {(llaves || []).map((k: any) => (
+            <div
+              key={k.id}
+              className={`rounded-lg border p-3 ${
+                k.estado === "activa" ? "border-gray-200 bg-white" : "border-gray-200 bg-gray-50 opacity-70"
+              }`}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-gray-900">{k.name}</span>
+                    <span
+                      className={`rounded px-2 py-0.5 text-xs font-medium ${
+                        k.estado === "activa"
+                          ? "bg-green-100 text-green-800"
+                          : k.estado === "caducada"
+                            ? "bg-amber-100 text-amber-800"
+                            : "bg-red-100 text-red-800"
+                      }`}
+                    >
+                      {k.estado}
+                    </span>
+                    <span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
+                      {k.scope === "lectura_ia" ? "lectura + IA" : "solo lectura"}
+                    </span>
+                  </div>
+                  <code className="mt-1 block font-mono text-xs text-gray-500">{k.prefijo}</code>
+                  {k.actuaComo && (
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      Actúa como {k.actuaComo.nombre}
+                      {k.actuaComo.esAdmin && " (admin: alcanza todo)"}
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs text-gray-500">
+                    {k.lastUsedAt
+                      ? `Último uso: ${new Date(k.lastUsedAt).toLocaleString("es-MX")}`
+                      : "Nunca se ha usado"}
+                    {" · "}
+                    Hoy: {k.hoy.llamadas} de {k.dailyQuota}
+                    {k.scope === "lectura_ia" && ` (IA: ${k.hoy.llamadasIa} de ${k.dailyAiQuota})`}
+                    {" · "}
+                    7 días: {k.semana.llamadas} llamadas
+                    {k.semana.errores > 0 && `, ${k.semana.errores} con error`}
+                  </p>
+                </div>
+                {k.estado === "activa" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-red-200 text-red-700 hover:bg-red-50"
+                    disabled={revocar.isPending}
+                    onClick={() => {
+                      if (confirm(`¿Revocar la llave “${k.name}”? Lo que la esté usando dejará de funcionar ahora mismo.`)) {
+                        revocar.mutate({ id: k.id });
+                      }
+                    }}
+                  >
+                    <Trash2 className="mr-1 h-4 w-4" />
+                    Revocar
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Alta */}
+      {!mostrarFormulario ? (
+        <Button onClick={() => setMostrarFormulario(true)} className="bg-green-600 hover:bg-green-700">
+          <KeyRound className="mr-2 h-4 w-4" />
+          Crear llave
+        </Button>
+      ) : (
+        <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <div>
+            <Label htmlFor="llave-nombre">¿Para qué es?</Label>
+            <Input
+              id="llave-nombre"
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              placeholder="Agente de análisis de cosecha"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              El nombre es lo único que verás después para saber cuál revocar.
+            </p>
+          </div>
+
+          <div>
+            <Label>Alcance</Label>
+            <div className="mt-1 grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => setAlcance("lectura")}
+                className={`rounded-lg border p-3 text-left text-sm transition ${
+                  alcance === "lectura" ? "border-green-500 bg-green-50" : "border-gray-200 bg-white"
+                }`}
+              >
+                <span className="block font-medium text-gray-900">Solo lectura</span>
+                <span className="text-xs text-gray-500">
+                  Todos los datos. No puede pedir resúmenes de IA, así que no gasta.
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAlcance("lectura_ia")}
+                className={`rounded-lg border p-3 text-left text-sm transition ${
+                  alcance === "lectura_ia" ? "border-green-500 bg-green-50" : "border-gray-200 bg-white"
+                }`}
+              >
+                <span className="block font-medium text-gray-900">Lectura + IA</span>
+                <span className="text-xs text-gray-500">
+                  Además puede pedir reportes redactados. Cada uno consume cuota de DeepSeek.
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <Label htmlFor="llave-usuario">Actúa como</Label>
+            <select
+              id="llave-usuario"
+              value={comoUsuario}
+              onChange={(e) => setComoUsuario(e.target.value === "" ? "" : Number(e.target.value))}
+              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm"
+            >
+              <option value="">Yo (quien crea la llave)</option>
+              {(usuarios || []).map((u: any) => (
+                <option key={u.id} value={u.id}>
+                  {u.name} — {u.email} ({u.role === "admin" ? "admin" : "usuario"})
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-500">
+              La llave solo alcanza lo que alcanza este usuario. Si el agente no necesita verlo
+              todo, lígala a una cuenta con permisos acotados.
+            </p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <Label htmlFor="llave-min">Peticiones por minuto</Label>
+              <Input
+                id="llave-min"
+                type="number"
+                min={1}
+                max={1000}
+                value={porMinuto}
+                onChange={(e) => setPorMinuto(Number(e.target.value))}
+              />
+            </div>
+            <div>
+              <Label htmlFor="llave-dia">Peticiones por día</Label>
+              <Input
+                id="llave-dia"
+                type="number"
+                min={1}
+                value={cuotaDiaria}
+                onChange={(e) => setCuotaDiaria(Number(e.target.value))}
+              />
+            </div>
+            <div>
+              <Label htmlFor="llave-ia">Llamadas de IA por día</Label>
+              <Input
+                id="llave-ia"
+                type="number"
+                min={0}
+                max={1000}
+                disabled={alcance !== "lectura_ia"}
+                value={cuotaIa}
+                onChange={(e) => setCuotaIa(Number(e.target.value))}
+              />
+            </div>
+            <div>
+              <Label htmlFor="llave-vig">Vigencia (días)</Label>
+              <Input
+                id="llave-vig"
+                type="number"
+                min={1}
+                placeholder="Sin caducidad"
+                value={vigencia}
+                onChange={(e) => setVigencia(e.target.value === "" ? "" : Number(e.target.value))}
+              />
+            </div>
+          </div>
+
+          <p className="text-xs text-gray-500">
+            Los topes protegen la operación: sin ellos, un script con un bucle mal cerrado puede
+            dejar lenta la base de datos o vaciar la cuota contratada de IA en una tarde.
+          </p>
+
+          <div className="flex gap-2">
+            <Button onClick={handleCrear} disabled={crear.isPending} className="bg-green-600 hover:bg-green-700">
+              {crear.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <KeyRound className="mr-2 h-4 w-4" />}
+              Crear llave
+            </Button>
+            <Button variant="outline" onClick={() => setMostrarFormulario(false)}>
+              Cancelar
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Cómo se usa */}
+      {activas.length > 0 && (
+        <div className="mt-4 rounded-lg border border-gray-200 bg-gray-900 p-4">
+          <div className="mb-2 flex items-center gap-2 text-gray-300">
+            <Terminal className="h-4 w-4" />
+            <span className="text-xs font-medium uppercase tracking-wide">Cómo se usa</span>
+          </div>
+          <pre className="overflow-x-auto text-xs leading-relaxed text-gray-200">
+{`curl -H "X-API-Key: agt_live_..." \\
+  ${typeof window !== "undefined" ? window.location.origin : ""}/api/v1/contexto
+
+# Para saber qué más se puede consultar:
+#   /api/v1/catalogo      qué endpoints existen
+#   /api/v1/diccionario   unidades y códigos (el peso viene en kilos)`}
+          </pre>
         </div>
       )}
     </GlassCard>

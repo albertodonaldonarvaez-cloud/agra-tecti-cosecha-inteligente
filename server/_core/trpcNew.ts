@@ -27,3 +27,8 @@ export const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   }
   return next({ ctx });
 });
+
+// Permite llamar a los procedimientos desde el propio servidor, sin pasar por
+// HTTP ni por superjson. Lo usa la fachada REST /api/v1: así los endpoints para
+// agentes reutilizan la misma lógica que la web, en vez de duplicarla.
+export const createCallerFactory = t.createCallerFactory;

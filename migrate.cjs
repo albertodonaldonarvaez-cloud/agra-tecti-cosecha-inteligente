@@ -441,6 +441,48 @@ async function migrate() {
       createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       KEY idx_sentEmails_fecha (createdAt)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+    // -- Llaves de API para agentes y scripts (0026) --------------
+    // La API publica /api/v1 no la usan personas: la usan scripts. Una llave
+    // se acota a solo lectura, se revoca sola y se audita sin tocar la cuenta
+    // de nadie. Solo se guarda el hash: la llave completa se muestra una vez.
+    await conn.query(`CREATE TABLE IF NOT EXISTS apiKeys (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(128) NOT NULL,
+      keyHash VARCHAR(64) NOT NULL,
+      keyPrefix VARCHAR(24) NOT NULL,
+      scope ENUM('lectura','lectura_ia') NOT NULL DEFAULT 'lectura',
+      userId INT NOT NULL,
+      createdByUserId INT NULL,
+      rateLimitPerMin INT NOT NULL DEFAULT 60,
+      dailyQuota INT NOT NULL DEFAULT 5000,
+      dailyAiQuota INT NOT NULL DEFAULT 20,
+      expiresAt TIMESTAMP NULL,
+      revokedAt TIMESTAMP NULL,
+      lastUsedAt TIMESTAMP NULL,
+      lastUsedIp VARCHAR(64) NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY apiKeys_keyHash_unique (keyHash)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+    // Consumo diario por llave: es a la vez la bitacora y el contador de cuota.
+    // Una fila por llave y dia evita guardar una fila por peticion.
+    await conn.query(`CREATE TABLE IF NOT EXISTS apiKeyUsage (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      keyId INT NOT NULL,
+      day DATE NOT NULL,
+      calls INT NOT NULL DEFAULT 0,
+      aiCalls INT NOT NULL DEFAULT 0,
+      errors INT NOT NULL DEFAULT 0,
+      lastPath VARCHAR(255) NULL,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY apiKeyUsage_key_day (keyId, day)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+    // La exportacion por cursor recorre las cajas por id; sin indice de fecha
+    // el filtro por rango de un agente es un escaneo completo de la tabla.
+    await ensureIndex('boxes', 'idx_boxes_submission',
+      "ALTER TABLE boxes ADD INDEX idx_boxes_submission (submissionTime)");
   } catch (err) {
     console.error('[Migration] Error:', err.message);
   } finally {

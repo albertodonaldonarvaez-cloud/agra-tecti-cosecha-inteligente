@@ -736,6 +736,12 @@ async function startServer() {
     }
   });
 
+  // API REST v1 para agentes de IA y scripts (solo lectura, con llave propia).
+  // Va antes de tRPC y de los estáticos para que /api/v1/* no caiga en el catch-all
+  // del cliente y devuelva el index.html en vez de un JSON.
+  const { crearApiV1 } = await import("../api/index");
+  app.use("/api/v1", crearApiV1());
+
   // tRPC API
   app.use(
     "/api/trpc",

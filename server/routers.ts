@@ -729,6 +729,69 @@ export const appRouter = router({
       }),
   }),
 
+  // ============ Llaves de API para agentes y scripts ============
+  // Solo administradores: una llave da acceso de lectura a todo /api/v1, que
+  // sale a internet. La llave completa se devuelve UNA vez, al crearla.
+  apiKeys: router({
+    list: adminProcedure.query(async () => {
+      const { listarLlaves } = await import("./apiKeys");
+      return listarLlaves();
+    }),
+
+    usage: adminProcedure
+      .input(z.object({ id: z.number(), dias: z.number().min(1).max(90).default(30) }))
+      .query(async ({ input }) => {
+        const { consumoDeLlave } = await import("./apiKeys");
+        return consumoDeLlave(input.id, input.dias);
+      }),
+
+    create: adminProcedure
+      .input(z.object({
+        name: z.string().min(3).max(128),
+        scope: z.enum(["lectura", "lectura_ia"]).default("lectura"),
+        // La llave actua en nombre de un usuario y hereda sus permisos.
+        // Si no se dice cual, actua como quien la crea.
+        userId: z.number().optional(),
+        rateLimitPerMin: z.number().min(1).max(1000).default(60),
+        dailyQuota: z.number().min(1).max(1000000).default(5000),
+        dailyAiQuota: z.number().min(0).max(1000).default(20),
+        diasDeVigencia: z.number().min(1).max(3650).nullable().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const { crearLlave } = await import("./apiKeys");
+        const expiresAt = input.diasDeVigencia
+          ? new Date(Date.now() + input.diasDeVigencia * 24 * 60 * 60 * 1000)
+          : null;
+
+        const { id, plain, prefix } = await crearLlave({
+          name: input.name,
+          scope: input.scope,
+          userId: input.userId ?? ctx.user.id,
+          createdByUserId: ctx.user.id,
+          rateLimitPerMin: input.rateLimitPerMin,
+          dailyQuota: input.dailyQuota,
+          dailyAiQuota: input.dailyAiQuota,
+          expiresAt,
+        });
+
+        // Es la unica vez que `llave` sale del servidor: no se guarda en claro
+        return {
+          id,
+          prefijo: prefix,
+          llave: plain,
+          aviso: "Copiala ahora: no se puede volver a mostrar. Si se pierde, hay que crear otra.",
+        };
+      }),
+
+    revoke: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const { revocarLlave } = await import("./apiKeys");
+        await revocarLlave(input.id);
+        return { success: true };
+      }),
+  }),
+
   // Telegram
   telegram: router({
     getConfig: adminProcedure.query(async () => {
