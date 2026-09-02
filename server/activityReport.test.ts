@@ -9,7 +9,7 @@
  *  3. Las horas salen de las jornadas, no del calendario.
  */
 import { describe, it, expect } from "vitest";
-import { summarizeActivities } from "./activityReport";
+import { summarizeActivities, extractJson, separarPersonas } from "./activityReport";
 
 function labor(over: Partial<any> = {}): any {
   return {
@@ -118,5 +118,72 @@ describe("totales del reporte de actividades", () => {
 
     expect(s.parcelsWorked).toBe(0);
     expect(s.byParcel[0].name).toBe("General (todas)");
+  });
+});
+
+describe("cuadrillas capturadas en un solo campo", () => {
+  it("cuenta personas, no combinaciones de cuadrilla", () => {
+    // En campo se captura la cuadrilla entera en el mismo texto. Agrupar por la
+    // cadena completa daba "19 personas" cuando eran 19 formas de juntar a la
+    // misma gente, y la tabla salía con renglones de tres líneas.
+    const s = summarizeActivities([
+      labor({ id: 1, performedBy: "Juan, Pedro, María", hours: 9 }),
+      labor({ id: 2, performedBy: "Juan, Pedro", hours: 4 }),
+    ]);
+
+    expect(s.peopleCount).toBe(3);
+    const juan = s.byPerson.find((p) => p.name === "Juan");
+    expect(juan?.count).toBe(2);
+    // Las horas se reparten: 9/3 + 4/2 = 5
+    expect(juan?.hours).toBe(5);
+    // Y la suma de la columna sigue siendo el tiempo real de la operación
+    expect(Math.round(s.byPerson.reduce((t, p) => t + p.hours, 0))).toBe(13);
+    expect(s.hours).toBe(13);
+  });
+
+  it("separa nombres y no se traga los repetidos", () => {
+    expect(separarPersonas("Juan, Pedro,  Juan ")).toEqual(["Juan", "Pedro"]);
+    expect(separarPersonas("")).toEqual(["Sin responsable"]);
+    expect(separarPersonas(null)).toEqual(["Sin responsable"]);
+  });
+});
+
+describe("respuesta de la IA", () => {
+  it("lee el JSON normal", () => {
+    const r = extractJson('{"resumen":"Todo bien","recomendaciones":["Regar"]}');
+    expect(r.resumen).toBe("Todo bien");
+    expect(r.recomendaciones).toEqual(["Regar"]);
+  });
+
+  it("le quita el envoltorio de bloque de código", () => {
+    const r = extractJson('```json\n{"resumen":"Con envoltorio"}\n```');
+    expect(r.resumen).toBe("Con envoltorio");
+  });
+
+  it("rescata un JSON cortado a media frase", () => {
+    // Esto es lo que llegó al reporte del cliente: la IA se quedó sin
+    // presupuesto de tokens, el JSON quedó abierto y las llaves y comillas se
+    // imprimieron tal cual dentro del PDF.
+    const cortado = `{
+ "resumen": "Durante el periodo se registraron 26 labores.",
+ "porLabor": [
+  {"labor": "Poda", "texto": "Se realizaron 12 podas"},
+  {"labor": "Otra", "texto": "Se registró 1 labor de sellado en PILLA`;
+    const r = extractJson(cortado);
+
+    expect(r).not.toBeNull();
+    expect(r.resumen).toBe("Durante el periodo se registraron 26 labores.");
+    // Lo que sí se alcanzó a cerrar se aprovecha
+    expect(r.porLabor[0].labor).toBe("Poda");
+  });
+
+  it("rescata el resumen aunque el resto sea irreparable", () => {
+    const roto = '{"resumen": "Solo esto se salva", "porLabor": [{"labor": ';
+    const r = extractJson(roto);
+    expect(r.resumen).toBe("Solo esto se salva");
+  });
+
+  it("devuelve null cuando no hay nada que rescatar", () => {
+    expect(extractJson("lo siento, no puedo responder")).toBeNull();
   });
 });

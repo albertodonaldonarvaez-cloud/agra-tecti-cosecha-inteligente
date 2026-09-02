@@ -350,7 +350,8 @@ export function getReportCss(): string {
     .ndvi-bar-fill.moderate { background: ${REPORT_COLORS.ambar}; }
     .ndvi-bar-fill.critical { background: ${REPORT_COLORS.rojo}; }
     .ndvi-bar-val, .bar-val {
-      font-size: 8.5px; font-weight: 700; width: 52px; text-align: left; flex-shrink: 0; color: var(--tinta);
+      font-size: 8.5px; font-weight: 700; width: 92px; text-align: left; flex-shrink: 0;
+      color: var(--tinta); white-space: nowrap;
     }
 
     /* ── Otros bloques heredados ───────────────────────────── */

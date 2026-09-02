@@ -20,7 +20,10 @@ import {
 // ============================================================
 
 const AI_MODEL = "deepseek-v4-flash";
-const AI_MAX_TOKENS = 4000;
+// El prompt lleva el detalle de todas las labores del periodo y el modelo
+// razona antes de responder: con 4000 la respuesta salía cortada a media frase
+// y el JSON llegaba roto.
+const AI_MAX_TOKENS = 8000;
 
 export const ACTIVITY_LABELS: Record<string, string> = {
   riego: "Riego",
@@ -256,6 +259,31 @@ export async function getActivityDetail(input: {
 
 // ── Agregados ────────────────────────────────────────────────
 
+/**
+ * Separa el campo de responsables en personas.
+ *
+ * En campo se captura la cuadrilla completa en un solo texto: "Juan, Pedro,
+ * María…". Ese campo está limitado a 255 caracteres en la base, así que en
+ * cuadrillas grandes el último nombre puede venir cortado; se conserva tal cual
+ * porque inventar un recorte perdería a alguien.
+ */
+export function separarPersonas(texto: string | null | undefined): string[] {
+  const limpio = (texto ?? "").trim();
+  if (limpio === "") return ["Sin responsable"];
+  const nombres = limpio
+    .split(",")
+    .map((x) => x.trim())
+    .filter((x) => x.length > 0);
+  return nombres.length > 0 ? Array.from(new Set(nombres)) : ["Sin responsable"];
+}
+
+/** "Juan, Pedro y 12 más": para no gastar el prompt en listas de nombres */
+export function resumirCuadrilla(texto: string | null | undefined): string {
+  const personas = separarPersonas(texto);
+  if (personas.length <= 2) return personas.join(" y ");
+  return `${personas.slice(0, 2).join(", ")} y ${personas.length - 2} más`;
+}
+
 export function summarizeActivities(activities: ActivityLine[]) {
   const byType: Record<string, { label: string; count: number; hours: number }> = {};
   const byParcel: Record<string, { count: number; hours: number }> = {};
@@ -274,10 +302,18 @@ export function summarizeActivities(activities: ActivityLine[]) {
     t.count++;
     t.hours += a.hours || 0;
 
-    const responsable = a.performedBy?.trim() || "Sin responsable";
-    const per = (byPerson[responsable] ||= { count: 0, hours: 0 });
-    per.count++;
-    per.hours += a.hours || 0;
+    // performedBy guarda la cuadrilla completa separada por comas. Agrupar por
+    // la cadena entera contaba cada combinación de gente como si fuera una
+    // persona distinta: el reporte decía "19 personas" cuando eran 19 formas de
+    // juntar a la misma cuadrilla, y la tabla salía con renglones ilegibles.
+    const personas = separarPersonas(a.performedBy);
+    for (const persona of personas) {
+      const per = (byPerson[persona] ||= { count: 0, hours: 0 });
+      per.count++;
+      // Las horas son de la labor, no de cada quien: se reparten para que la
+      // suma de la columna siga siendo el tiempo real de la operación
+      per.hours += (a.hours || 0) / personas.length;
+    }
 
     const destinos = a.parcelNames.length > 0 ? a.parcelNames : ["General (todas)"];
     for (const p of destinos) {
@@ -350,17 +386,71 @@ export interface ActivityAiSummary {
   recomendaciones: string[];
 }
 
-/** La IA a veces envuelve el JSON en ```json … ```; esto lo desenvuelve */
-function extractJson(text: string): any | null {
+/**
+ * Saca el objeto JSON de la respuesta de la IA.
+ *
+ * Viene envuelto en ```json … ``` a veces, y sobre todo puede venir CORTADO si
+ * se acabó el presupuesto de tokens a media frase. Un JSON truncado no se
+ * parsea, y antes eso terminaba imprimiendo las llaves y las comillas dentro
+ * del reporte del cliente. Aquí se intenta cerrar lo que quedó abierto y, si
+ * ni así, se rescata al menos el resumen a mano.
+ */
+export function extractJson(text: string): any | null {
   const limpio = text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
   const inicio = limpio.indexOf("{");
-  const fin = limpio.lastIndexOf("}");
-  if (inicio === -1 || fin === -1 || fin <= inicio) return null;
-  try {
-    return JSON.parse(limpio.slice(inicio, fin + 1));
-  } catch {
-    return null;
+  if (inicio === -1) return null;
+
+  const desdeLlave = limpio.slice(inicio);
+
+  // 1) Tal cual, por si vino completo
+  const fin = desdeLlave.lastIndexOf("}");
+  if (fin > 0) {
+    try {
+      return JSON.parse(desdeLlave.slice(0, fin + 1));
+    } catch { /* sigue el intento de reparación */ }
   }
+
+  // 2) Cerrar comillas y corchetes que quedaron abiertos por el corte
+  try {
+    return JSON.parse(repararJsonCortado(desdeLlave));
+  } catch { /* último recurso abajo */ }
+
+  // 3) Rescatar el resumen con una expresión regular
+  const soloResumen = desdeLlave.match(/"resumen"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  if (soloResumen) {
+    try {
+      return { resumen: JSON.parse(`"${soloResumen[1]}"`) };
+    } catch {
+      return { resumen: soloResumen[1] };
+    }
+  }
+
+  return null;
+}
+
+/** Cierra strings, arreglos y objetos que quedaron abiertos en un JSON truncado */
+function repararJsonCortado(texto: string): string {
+  let dentroDeTexto = false;
+  let escapado = false;
+  const pila: string[] = [];
+
+  for (const ch of texto) {
+    if (escapado) { escapado = false; continue; }
+    if (ch === "\\") { escapado = true; continue; }
+    if (ch === '"') { dentroDeTexto = !dentroDeTexto; continue; }
+    if (dentroDeTexto) continue;
+    if (ch === "{" || ch === "[") pila.push(ch);
+    else if (ch === "}" || ch === "]") pila.pop();
+  }
+
+  let reparado = texto;
+  if (dentroDeTexto) reparado += '"';
+  // Una coma o dos puntos colgando dejan el JSON inválido aunque se cierre bien
+  reparado = reparado.replace(/[,:]\s*$/, "");
+  while (pila.length > 0) {
+    reparado += pila.pop() === "[" ? "]" : "}";
+  }
+  return reparado;
 }
 
 /**
@@ -443,7 +533,9 @@ export async function buildAiSummary(
       `- ${a.date}${a.endDate ? ` a ${a.endDate}` : ""} · ${a.typeLabel}${a.subtype ? ` (${a.subtype})` : ""}`,
       `estado: ${a.statusLabel}`,
       a.parcelNames.length ? `parcelas: ${a.parcelNames.join(", ")}` : "parcelas: general",
-      `responsable: ${a.performedBy || "sin asignar"}`,
+      // La cuadrilla completa son cientos de caracteres por labor y no aporta
+      // al análisis: basta con cuántos fueron
+      `responsable: ${resumirCuadrilla(a.performedBy)}`,
       a.hours ? `${a.hours} h en ${a.days} día(s)` : null,
       a.products.length
         ? `insumos: ${a.products
@@ -464,7 +556,7 @@ export async function buildAiSummary(
   const prompt = `Redacta el resumen de la libreta de campo del periodo ${period.from} a ${period.to}.
 
 TOTALES
-${summary.total} labores (${summary.completed} completadas, ${summary.inProgress} en proceso, ${summary.planned} planificadas, ${summary.cancelled} canceladas), ${summary.hours} horas de trabajo, ${summary.parcelsWorked} parcelas atendidas, ${summary.peopleCount} responsables.
+${summary.total} labores (${summary.completed} completadas, ${summary.inProgress} en proceso, ${summary.planned} planificadas, ${summary.cancelled} canceladas), ${summary.hours} horas de trabajo, ${summary.parcelsWorked} parcelas atendidas, ${summary.peopleCount} personas distintas.
 
 LABORES POR TIPO
 ${summary.byType.map((t) => `${t.label}: ${t.count} vez(ces), ${t.hours} h`).join("\n") || "ninguna"}

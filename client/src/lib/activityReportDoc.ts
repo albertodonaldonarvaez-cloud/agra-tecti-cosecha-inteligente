@@ -135,6 +135,21 @@ function bloqueIa(titulo: string, texto: string, subtitulo: string): string {
   </div>`;
 }
 
+/**
+ * "Juan, Pedro, María y 12 más". El campo de responsables trae la cuadrilla
+ * completa —a veces quince nombres— y ponerla entera hacía que cada ficha
+ * ocupara media hoja y el reporte fuera ilegible.
+ */
+function cuadrillaCorta(texto: string | null | undefined): string {
+  const nombres = (texto ?? "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter((x) => x.length > 0);
+  if (nombres.length === 0) return "sin asignar";
+  if (nombres.length <= 3) return nombres.join(", ");
+  return `${nombres.slice(0, 3).join(", ")} y ${nombres.length - 3} más`;
+}
+
 /** Ficha de una labor con todo su detalle */
 function tarjetaActividad(a: ActivityLine): string {
   const clase =
@@ -154,8 +169,10 @@ function tarjetaActividad(a: ActivityLine): string {
     })
     .join(", ");
 
+
+
   const meta: string[] = [];
-  meta.push(`<span><b>Responsable:</b> ${esc(a.performedBy || "sin asignar")}</span>`);
+  meta.push(`<span><b>Responsable:</b> ${esc(cuadrillaCorta(a.performedBy))}</span>`);
   meta.push(
     `<span><b>Parcela:</b> ${esc(a.parcelNames.length ? a.parcelNames.join(", ") : "General (todas)")}</span>`
   );
@@ -181,18 +198,55 @@ function tarjetaActividad(a: ActivityLine): string {
 }
 
 /**
- * Cuánto ocupa una tarjeta, en "renglones" aproximados.
- * No hay forma de medir el alto real antes de imprimir, así que se estima para
- * repartir las labores entre páginas sin que queden cortadas.
+ * Alto aproximado de una ficha, en píxeles.
+ * No se puede medir el alto real antes de imprimir, así que se estima con
+ * holgura para repartir las labores entre hojas sin que queden cortadas.
  */
-function pesoTarjeta(a: ActivityLine): number {
-  let peso = 3; // encabezado + meta
-  if (a.description) peso += Math.ceil(a.description.length / 110);
-  if (a.products.length) peso += Math.ceil((a.products.length * 45) / 110) + 1;
-  return peso;
+function altoTarjeta(a: ActivityLine): number {
+  let alto = 24 + 30; // renglón de título + margen, relleno y borde
+  if (a.description) alto += Math.max(1, Math.ceil(a.description.length / 118)) * 14;
+  if (a.products.length) {
+    const largo = a.products.reduce((s, p) => s + p.name.length + 34, 0);
+    alto += Math.max(1, Math.ceil(largo / 118)) * 14;
+  }
+  // Renglón de datos: responsable, parcela, tiempo, equipo, clima, fotos
+  const datos = 2 + (a.hours ? 1 : 0) + (a.tools.length ? 1 : 0) + (a.weather ? 1 : 0) + (a.photoCount > 0 ? 1 : 0);
+  alto += 10 + Math.ceil(datos / 3) * 13;
+  return alto;
 }
 
-// ── Documento ─────────────────────────────────────────────────
+// ── Maquetación por bloques ───────────────────────────────────
+//
+// El reporte no puede repartirse "a ojo": la primera versión metía en la
+// portada las cifras, el resumen, dos gráficas y la tabla de gente, y con una
+// cuadrilla grande eso se pasaba de la hoja —el pie de página terminaba
+// impreso arriba de la hoja siguiente y la numeración dejaba de cuadrar—.
+//
+// Ahora cada pieza declara cuánto ocupa y se van acomodando en las hojas hasta
+// llenarlas. Las medidas son estimaciones en píxeles, deliberadamente
+// generosas: es preferible que sobre blanco al pie de una hoja a que el
+// contenido se derrame.
+
+interface Bloque {
+  html: string;
+  alto: number;
+  /** Título del encabezado corrido cuando el bloque abre una hoja */
+  grupo: string;
+}
+
+/** Alto aproximado de un texto corrido, en píxeles */
+function altoTexto(texto: string, porRenglon = 112, alturaRenglon = 15.5): number {
+  const renglones = Math.max(1, Math.ceil(texto.length / porRenglon));
+  return renglones * alturaRenglon;
+}
+
+const ALTO_TITULO = 36;
+const ALTO_NOTA = 24;
+
+/** Espacio útil de la portada: descuenta encabezado, banda, cifras y pie */
+const ALTO_UTIL_PORTADA = 675;
+/** Espacio útil de las hojas siguientes: descuenta encabezado corrido y pie */
+const ALTO_UTIL_HOJA = 875;
 
 export interface ActivityDocOptions {
   scopeLabel: string;
@@ -205,30 +259,222 @@ export function buildActivityReportHtml(data: ActivityReportData, opts: Activity
   const generado = opts.generatedAt || new Date();
   const periodo = `${fechaLarga(data.period.from)} — ${fechaLarga(data.period.to)}`;
 
-  // ── Reparto de las labores por página ──
-  // Estimación deliberadamente conservadora: es preferible que sobre espacio
-  // en la hoja a que una labor se derrame y empuje la maquetación
-  const PESO_MAX = 22;
-  const paginasDetalle: ActivityLine[][] = [];
-  let actual: ActivityLine[] = [];
-  let peso = 0;
-  for (const a of activities) {
-    const p = pesoTarjeta(a);
-    if (actual.length > 0 && peso + p > PESO_MAX) {
-      paginasDetalle.push(actual);
-      actual = [];
-      peso = 0;
-    }
-    actual.push(a);
-    peso += p;
+  // ── Las piezas del reporte, cada una con lo que ocupa ──
+  const bloques: Bloque[] = [];
+  const agregar = (grupo: string, html: string, alto: number) => bloques.push({ grupo, html, alto });
+
+  // Resumen ejecutivo
+  if (ai?.resumen) {
+    agregar(
+      "Panorama del periodo",
+      seccion("Resumen ejecutivo") +
+        bloqueIa("Análisis Agra Tec-Ti", ai.resumen, "redactado con IA sobre el registro del periodo"),
+      ALTO_TITULO + 47 + altoTexto(ai.resumen, 104)
+    );
+  } else {
+    const texto = `Se registraron ${summary.total} labores en el periodo, ${summary.completed} de ellas completadas, con ${num(summary.hours)} horas de trabajo repartidas en ${summary.parcelsWorked} parcela(s).`;
+    agregar(
+      "Panorama del periodo",
+      seccion("Resumen del periodo") + `<div class="prose"><p>${esc(texto)}</p></div>`,
+      ALTO_TITULO + altoTexto(texto)
+    );
   }
-  if (actual.length > 0) paginasDetalle.push(actual);
 
-  const hayPaginaInsumos = summary.products.length > 0 || summary.tools.length > 0 || !!ai?.insumos;
-  // Sin labores igual se imprime una página de detalle que lo dice
-  const paginasDeDetalle = paginasDetalle.length || 1;
-  const totalPaginas = 1 + (hayPaginaInsumos ? 1 : 0) + paginasDeDetalle;
+  // La barra mide horas cuando las hay: es lo que de verdad distingue una labor
+  // de otra. Contando veces, cinco labores hechas una vez cada una dan cinco
+  // barras iguales que no dicen nada.
+  const hayHoras = summary.hours > 0;
 
+  /** Ordena por la misma magnitud que dibuja la barra, si no se ve revuelta */
+  const porValor = <T extends { count: number; hours: number }>(filas: T[]): T[] =>
+    [...filas].sort((a, b) => (hayHoras ? b.hours - a.hours : b.count - a.count));
+
+  if (summary.byType.length > 0) {
+    agregar(
+      "Panorama del periodo",
+      seccion("Labores por tipo") +
+        `<div class="section-note">Cuántas veces se hizo cada labor y cuánto tiempo se le dedicó.</div>` +
+        barras(
+          porValor(summary.byType).map((t) => ({
+            label: t.label,
+            value: hayHoras ? t.hours : t.count,
+            caption: `${t.count === 1 ? "1 vez" : `${t.count} veces`} · ${num(t.hours)} h`,
+          })),
+          "veces"
+        ),
+      ALTO_TITULO + ALTO_NOTA + 34 + summary.byType.length * 16
+    );
+  }
+
+  if (summary.byParcel.length > 0) {
+    const filas = porValor(summary.byParcel).slice(0, 12);
+    agregar(
+      "Panorama del periodo",
+      seccion("Dónde se trabajó") +
+        barras(
+          filas.map((p) => ({
+            label: p.name,
+            value: hayHoras ? p.hours : p.count,
+            caption: `${p.count === 1 ? "1 labor" : `${p.count} labores`} · ${num(p.hours)} h`,
+          })),
+          "labores"
+        ) +
+        (summary.byParcel.length > filas.length
+          ? `<div class="fine-print">Y ${summary.byParcel.length - filas.length} parcela(s) más con una labor cada una.</div>`
+          : ""),
+      ALTO_TITULO + 34 + filas.length * 16 + (summary.byParcel.length > filas.length ? 26 : 0)
+    );
+  }
+
+  if (summary.byPerson.length > 0) {
+    const filas = summary.byPerson.slice(0, 20);
+    agregar(
+      "Quién trabajó",
+      seccion("Quién trabajó") +
+        `<div class="section-note">Personas que participaron. Las horas de una labor se reparten entre quienes la hicieron, para que la suma siga siendo el tiempo real de la operación.</div>` +
+        `<div class="glass-table-container"><table>
+          <thead><tr><th>Persona</th><th class="text-right">Labores</th><th class="text-right">Horas</th></tr></thead>
+          <tbody>${filas
+            .map(
+              (p) =>
+                `<tr><td class="parcel-name">${esc(p.name)}</td><td class="text-right">${p.count}</td><td class="text-right">${num(p.hours)}</td></tr>`
+            )
+            .join("")}</tbody>
+        </table></div>` +
+        (summary.byPerson.length > filas.length
+          ? `<div class="fine-print">Y ${summary.byPerson.length - filas.length} persona(s) más con menos labores en el periodo.</div>`
+          : ""),
+      ALTO_TITULO + ALTO_NOTA + 38 + filas.length * 21 + (summary.byPerson.length > filas.length ? 26 : 0)
+    );
+  }
+
+  // Insumos
+  if (summary.products.length > 0) {
+    agregar(
+      "Insumos y equipo",
+      seccion("Insumos aplicados") +
+        `<div class="section-note">Suma de lo aplicado en el periodo. Las cantidades solo se suman entre sí cuando comparten unidad.</div>` +
+        `<div class="glass-table-container"><table>
+          <thead><tr><th>Producto</th><th>Tipo</th><th class="text-right">Cantidad total</th><th class="text-right">Aplicaciones</th></tr></thead>
+          <tbody>${summary.products
+            .map(
+              (p) => `<tr>
+                <td class="parcel-name">${esc(p.name)}</td>
+                <td class="muted">${esc(p.typeLabel)}</td>
+                <td class="text-right">${p.total > 0 ? `${num(p.total)} ${esc(p.unit)}` : "—"}${p.sinCantidad > 0 ? ` <span class="muted">(${p.sinCantidad} sin registrar)</span>` : ""}</td>
+                <td class="text-right">${p.times}</td>
+              </tr>`
+            )
+            .join("")}</tbody>
+        </table></div>`,
+      ALTO_TITULO + ALTO_NOTA + 38 + summary.products.length * 22
+    );
+  } else {
+    agregar(
+      "Insumos y equipo",
+      seccion("Insumos aplicados") +
+        `<div class="prose"><p>No se registró ningún producto aplicado en las labores de este periodo. Sin ese registro no se puede calcular dosis por hectárea ni consumo del almacén.</p></div>`,
+      ALTO_TITULO + 40
+    );
+  }
+
+  if (ai?.insumos) {
+    agregar(
+      "Insumos y equipo",
+      bloqueIa("Lectura de los insumos", ai.insumos, "análisis con IA"),
+      47 + altoTexto(ai.insumos, 104)
+    );
+  }
+
+  if (summary.tools.length > 0) {
+    agregar(
+      "Insumos y equipo",
+      seccion("Equipo utilizado") +
+        `<div class="cat-pills">${summary.tools
+          .map((t) => `<div class="cat-pill"><span class="cp-count">${t.count}</span><span class="cp-label">${esc(t.name)}</span></div>`)
+          .join("")}</div>`,
+      ALTO_TITULO + Math.ceil(summary.tools.length / 4) * 28 + 10
+    );
+  }
+
+  if (ai && ai.porLabor.length > 0) {
+    const texto = ai.porLabor.map((l) => `${l.labor}. ${l.texto}`).join(" ");
+    agregar(
+      "Cómo se ejecutó cada labor",
+      seccion("Cómo se ejecutó cada labor") +
+        `<div class="prose">${ai.porLabor
+          .map((l) => `<p><strong>${esc(l.labor)}.</strong> ${esc(l.texto)}</p>`)
+          .join("")}</div>`,
+      ALTO_TITULO + altoTexto(texto) + ai.porLabor.length * 8
+    );
+  }
+
+  const pendientes = ai?.pendientes
+    ?? (summary.inProgress + summary.planned > 0
+      ? `${summary.inProgress} labor(es) en proceso y ${summary.planned} planificada(s) sin cerrar al final del periodo.`
+      : null);
+  if (pendientes) {
+    agregar(
+      "Pendientes y recomendaciones",
+      seccion("Pendientes") + `<div class="sla-alert">${esc(pendientes)}</div>`,
+      ALTO_TITULO + altoTexto(pendientes, 118) + 22
+    );
+  }
+
+  if (ai && ai.recomendaciones.length > 0) {
+    agregar(
+      "Pendientes y recomendaciones",
+      seccion("Recomendaciones") +
+        `<ul class="check-list">${ai.recomendaciones.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>`,
+      ALTO_TITULO + ai.recomendaciones.reduce((s, r) => s + altoTexto(r, 108) + 12, 0)
+    );
+  }
+
+  // Detalle de cada labor
+  if (activities.length === 0) {
+    agregar(
+      "Detalle de labores",
+      seccion("Detalle de labores") +
+        `<div class="prose"><p>No se registraron actividades de campo en este periodo.</p></div>`,
+      ALTO_TITULO + 40
+    );
+  } else {
+    agregar(
+      "Detalle de labores",
+      seccion("Detalle de labores") +
+        `<div class="section-note">Cada labor con su registro completo: descripción, insumos, equipo, responsable y tiempo.</div>`,
+      ALTO_TITULO + ALTO_NOTA
+    );
+    for (const a of activities) {
+      agregar("Detalle de labores", tarjetaActividad(a), altoTarjeta(a));
+    }
+  }
+
+  const nota = `Este reporte se arma con lo capturado en la libreta de campo durante el periodo. Las labores sin parcela asignada se consideran generales. Las horas salen de las jornadas registradas; una labor sin jornada capturada aparece sin tiempo.${ai ? " El texto de análisis fue redactado con inteligencia artificial a partir de ese mismo registro: valídelo con su ingeniero agrónomo antes de aplicar productos o dosis." : ""}`;
+  agregar("Detalle de labores", `<div class="fine-print">${esc(nota)}</div>`, altoTexto(nota, 150, 13) + 14);
+
+  // ── Reparto en hojas ──
+  const hojas: Bloque[][] = [];
+  let actual: Bloque[] = [];
+  let alto = 0;
+  let capacidad = ALTO_UTIL_PORTADA;
+
+  for (const bloque of bloques) {
+    // Un bloque más alto que la hoja no se puede partir: se le da una hoja
+    // propia y se deja que se derrame, antes que perderlo
+    if (actual.length > 0 && alto + bloque.alto > capacidad) {
+      hojas.push(actual);
+      actual = [];
+      alto = 0;
+      capacidad = ALTO_UTIL_HOJA;
+    }
+    actual.push(bloque);
+    alto += bloque.alto;
+  }
+  if (actual.length > 0) hojas.push(actual);
+  if (hojas.length === 0) hojas.push([]);
+
+  const totalPaginas = hojas.length;
   let numeroPagina = 0;
 
   // Cierra el contenido, pone el pie y cierra la página. El orden importa: si
@@ -245,183 +491,53 @@ export function buildActivityReportHtml(data: ActivityReportData, opts: Activity
   </div>`;
   };
 
-  const encabezadoCorrido = (titulo: string) => `<div class="page">
-    <div class="sub-header">
-      <h2>${opts.logo ? `<img src="${opts.logo}" alt="" />` : ""}${esc(titulo)}</h2>
-      <span class="sh-info">${esc(opts.scopeLabel)} · ${esc(periodo)}</span>
-    </div>
-    <div class="main-content">`;
-
   let html = "";
 
-  // ══════════════ PÁGINA 1 — PANORAMA ══════════════
-  html += `<div class="page"><div class="main-content">`;
-  html += `<div class="header">
-    <div class="brand">
-      ${opts.logo ? `<img src="${opts.logo}" alt="Agra Tec-Ti" />` : ""}
-      <div class="brand-text">
-        <h1>REPORTE DE ACTIVIDADES DE CAMPO</h1>
-        <span>Libreta de campo · Insumos · Inteligencia artificial</span>
-      </div>
-    </div>
-    <div class="header-right">
-      <div class="report-type">Emitido</div>
-      <div class="report-name">${esc(
-        generado.toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" })
-      )}</div>
-    </div>
-  </div>`;
-
-  html += `<div class="date-banner">
-    <div class="period">${esc(opts.scopeLabel)} &nbsp;·&nbsp; ${esc(periodo)}</div>
-    <div class="badge">${summary.total} labor${summary.total === 1 ? "" : "es"}</div>
-  </div>`;
-
-  html += `<div class="metrics-grid">`;
-  html += kpi("Labores", String(summary.total), "en el periodo", "green");
-  html += kpi("Completadas", String(summary.completed), `${summary.inProgress + summary.planned} sin cerrar`, summary.completed === summary.total ? "green" : "amber");
-  html += kpi("Horas", num(summary.hours), `${summary.workDays} jornada(s)`, "purple");
-  html += kpi("Parcelas", String(summary.parcelsWorked), "atendidas", "blue");
-  html += kpi("Personas", String(summary.peopleCount), "participaron", "cyan");
-  html += kpi("Insumos", String(summary.products.length), "productos usados", "green");
-  html += `</div>`;
-
-  if (ai?.resumen) {
-    html += seccion("Resumen ejecutivo");
-    html += bloqueIa("Análisis Agra Tec-Ti", ai.resumen, "redactado con IA sobre el registro del periodo");
-  } else {
-    html += seccion("Resumen del periodo");
-    html += `<div class="prose"><p>Se registraron ${summary.total} labores en el periodo, ${summary.completed} de ellas completadas, con ${num(summary.hours)} horas de trabajo repartidas en ${summary.parcelsWorked} parcela(s).</p></div>`;
-  }
-
-  // La barra mide horas cuando las hay: es lo que de verdad distingue una labor
-  // de otra. Contando veces, cinco labores hechas una vez cada una dan cinco
-  // barras iguales que no dicen nada.
-  const hayHoras = summary.hours > 0;
-
-  if (summary.byType.length > 0) {
-    html += seccion("Labores por tipo");
-    html += `<div class="section-note">Cuántas veces se hizo cada labor y cuánto tiempo se le dedicó.</div>`;
-    html += barras(
-      summary.byType.map((t) => ({
-        label: t.label,
-        value: hayHoras ? t.hours : t.count,
-        caption: `${t.count} vez${t.count === 1 ? "" : "ces"} · ${num(t.hours)} h`,
-      })),
-      "veces"
-    );
-  }
-
-  if (summary.byParcel.length > 0) {
-    html += seccion("Dónde se trabajó");
-    html += barras(
-      summary.byParcel.slice(0, 12).map((p) => ({
-        label: p.name,
-        value: hayHoras ? p.hours : p.count,
-        caption: `${p.count} labor${p.count === 1 ? "" : "es"} · ${num(p.hours)} h`,
-      })),
-      "labores"
-    );
-  }
-
-  if (summary.byPerson.length > 0) {
-    html += seccion("Quién trabajó");
-    html += `<div class="glass-table-container"><table>
-      <thead><tr><th>Responsable</th><th class="text-right">Labores</th><th class="text-right">Horas</th></tr></thead>
-      <tbody>${summary.byPerson
-        .map(
-          (p) =>
-            `<tr><td class="parcel-name">${esc(p.name)}</td><td class="text-right">${p.count}</td><td class="text-right">${num(p.hours)}</td></tr>`
-        )
-        .join("")}</tbody>
-    </table></div>`;
-  }
-
-  html += pie();
-
-  // ══════════════ PÁGINA 2 — INSUMOS Y CIERRE ══════════════
-  if (hayPaginaInsumos) {
-    html += encabezadoCorrido("Insumos, equipo y pendientes");
-
-    if (summary.products.length > 0) {
-      html += seccion("Insumos aplicados");
-      html += `<div class="section-note">Suma de lo aplicado en el periodo. Las cantidades solo se suman entre sí cuando comparten unidad.</div>`;
-      html += `<div class="glass-table-container"><table>
-        <thead><tr><th>Producto</th><th>Tipo</th><th class="text-right">Cantidad total</th><th class="text-right">Aplicaciones</th></tr></thead>
-        <tbody>${summary.products
-          .map(
-            (p) => `<tr>
-              <td class="parcel-name">${esc(p.name)}</td>
-              <td class="muted">${esc(p.typeLabel)}</td>
-              <td class="text-right">${p.total > 0 ? `${num(p.total)} ${esc(p.unit)}` : "—"}${p.sinCantidad > 0 ? ` <span class="muted">(${p.sinCantidad} sin registrar)</span>` : ""}</td>
-              <td class="text-right">${p.times}</td>
-            </tr>`
-          )
-          .join("")}</tbody>
-      </table></div>`;
+  hojas.forEach((hoja, indice) => {
+    if (indice === 0) {
+      // ── Portada ──
+      html += `<div class="page"><div class="main-content">`;
+      html += `<div class="header">
+        <div class="brand">
+          ${opts.logo ? `<img src="${opts.logo}" alt="Agra Tec-Ti" />` : ""}
+          <div class="brand-text">
+            <h1>REPORTE DE ACTIVIDADES DE CAMPO</h1>
+            <span>Libreta de campo · Insumos · Inteligencia artificial</span>
+          </div>
+        </div>
+        <div class="header-right">
+          <div class="report-type">Emitido</div>
+          <div class="report-name">${esc(
+            generado.toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" })
+          )}</div>
+        </div>
+      </div>`;
+      html += `<div class="date-banner">
+        <div class="period">${esc(opts.scopeLabel)} &nbsp;·&nbsp; ${esc(periodo)}</div>
+        <div class="badge">${summary.total === 1 ? "1 labor" : `${summary.total} labores`}</div>
+      </div>`;
+      html += `<div class="metrics-grid">`;
+      html += kpi("Labores", String(summary.total), "en el periodo", "green");
+      html += kpi("Completadas", String(summary.completed), `${summary.inProgress + summary.planned} sin cerrar`, summary.completed === summary.total ? "green" : "amber");
+      html += kpi("Horas", num(summary.hours), `${summary.workDays} jornada(s)`, "purple");
+      html += kpi("Parcelas", String(summary.parcelsWorked), "atendidas", "blue");
+      html += kpi("Personas", String(summary.peopleCount), "participaron", "cyan");
+      html += kpi("Insumos", String(summary.products.length), "productos usados", "green");
+      html += `</div>`;
+    } else {
+      // ── Hojas siguientes: encabezado corrido con el tema que abre la hoja ──
+      const titulo = hoja[0]?.grupo || "Reporte de actividades";
+      html += `<div class="page">
+        <div class="sub-header">
+          <h2>${opts.logo ? `<img src="${opts.logo}" alt="" />` : ""}${esc(titulo)}</h2>
+          <span class="sh-info">${esc(opts.scopeLabel)} · ${esc(periodo)}</span>
+        </div>
+        <div class="main-content">`;
     }
 
-    if (ai?.insumos) {
-      html += bloqueIa("Lectura de los insumos", ai.insumos, "análisis con IA");
-    }
-
-    if (summary.tools.length > 0) {
-      html += seccion("Equipo utilizado");
-      html += `<div class="cat-pills">${summary.tools
-        .map((t) => `<div class="cat-pill"><span class="cp-count">${t.count}</span><span class="cp-label">${esc(t.name)}</span></div>`)
-        .join("")}</div>`;
-    }
-
-    if (ai && ai.porLabor.length > 0) {
-      html += seccion("Cómo se ejecutó cada labor");
-      html += `<div class="prose">${ai.porLabor
-        .map((l) => `<p><strong>${esc(l.labor)}.</strong> ${esc(l.texto)}</p>`)
-        .join("")}</div>`;
-    }
-
-    if (ai?.pendientes) {
-      html += seccion("Pendientes");
-      html += `<div class="sla-alert">${esc(ai.pendientes)}</div>`;
-    } else if (summary.inProgress + summary.planned > 0) {
-      html += seccion("Pendientes");
-      html += `<div class="sla-alert">${summary.inProgress} labor(es) en proceso y ${summary.planned} planificada(s) sin cerrar al final del periodo.</div>`;
-    }
-
-    if (ai && ai.recomendaciones.length > 0) {
-      html += seccion("Recomendaciones");
-      html += `<ul class="check-list">${ai.recomendaciones.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>`;
-    }
-
-    html += `<div class="fine-print">
-      Este reporte se arma con lo capturado en la libreta de campo durante el periodo. Las labores sin
-      parcela asignada se consideran generales y aplican a toda la operación. Las horas salen de las
-      jornadas registradas; una labor sin jornada capturada aparece sin tiempo.
-      ${ai ? " El texto de análisis fue redactado con inteligencia artificial a partir de ese mismo registro: valídelo con su ingeniero agrónomo antes de tomar decisiones de aplicación." : ""}
-    </div>`;
-
-    html += pie();
-  }
-
-  // ══════════════ PÁGINAS DE DETALLE ══════════════
-  paginasDetalle.forEach((grupo, i) => {
-    html += encabezadoCorrido(
-      paginasDetalle.length > 1
-        ? `Detalle de labores (${i + 1}/${paginasDetalle.length})`
-        : "Detalle de labores"
-    );
-    if (i === 0) {
-      html += `<div class="section-note">Cada labor con su registro completo: descripción, insumos, equipo, responsable y tiempo.</div>`;
-    }
-    html += grupo.map(tarjetaActividad).join("");
+    html += hoja.map((b) => b.html).join("");
     html += pie();
   });
-
-  // Sin actividades: una sola página lo dice y ya
-  if (activities.length === 0) {
-    html += encabezadoCorrido("Detalle de labores");
-    html += `<div class="prose"><p>No se registraron actividades de campo en este periodo.</p></div>`;
-    html += pie();
-  }
 
   return `<!DOCTYPE html>
 <html lang="es">
