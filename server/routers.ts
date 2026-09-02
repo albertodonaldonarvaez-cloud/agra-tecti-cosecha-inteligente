@@ -656,6 +656,44 @@ export const appRouter = router({
       }),
   }),
 
+  // ============ CORREO SALIENTE (SMTP) ============
+  smtp: router({
+    getConfig: adminProcedure.query(async () => {
+      const { getSmtpConfigPublic } = await import("./mailer");
+      return await getSmtpConfigPublic();
+    }),
+
+    saveConfig: adminProcedure
+      .input(z.object({
+        host: z.string().min(1),
+        port: z.number().int().min(1).max(65535),
+        secure: z.boolean(),
+        username: z.string().optional(),
+        // Vacío = conservar la contraseña que ya estaba guardada
+        password: z.string().optional(),
+        fromName: z.string().optional(),
+        fromEmail: z.string().email(),
+        defaultRecipients: z.string().optional(),
+        enabled: z.boolean().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const { saveSmtpConfig } = await import("./mailer");
+        return await saveSmtpConfig(input);
+      }),
+
+    test: adminProcedure
+      .input(z.object({ sendTo: z.string().optional() }).optional())
+      .mutation(async ({ input }) => {
+        const { testSmtp } = await import("./mailer");
+        return await testSmtp(input?.sendTo);
+      }),
+
+    history: adminProcedure.query(async () => {
+      const { getRecentEmails } = await import("./mailer");
+      return await getRecentEmails(15);
+    }),
+  }),
+
   // Archivo local de las fotos de KoboToolbox
   koboPhotos: router({
     status: adminProcedure.query(async () => {
@@ -5620,6 +5658,105 @@ Da un análisis ejecutivo de 6-8 líneas máximo: estado general de la operació
           weatherData,
           period: { from: input.fromDate, to: input.toDate },
         };
+      }),
+
+    // ═══════════════════════════════════════════════════════
+    // REPORTE DE ACTIVIDADES DE CAMPO
+    // Todo lo registrado de cada labor del periodo, con el resumen que
+    // redacta DeepSeek a partir de ese mismo detalle.
+    // ═══════════════════════════════════════════════════════
+    getActivityReport: protectedProcedure
+      .input(z.object({
+        fromDate: z.string(),
+        toDate: z.string(),
+        parcelId: z.number().nullable().optional(),
+        withAi: z.boolean().optional(),
+        forceAi: z.boolean().optional(),
+      }))
+      .query(async ({ input }) => {
+        const { buildActivityReport } = await import("./activityReport");
+        return await buildActivityReport({
+          fromDate: input.fromDate,
+          toDate: input.toDate,
+          parcelId: input.parcelId ?? null,
+          withAi: input.withAi,
+          forceAi: input.forceAi,
+        });
+      }),
+
+    /**
+     * Manda el reporte por correo. El cuerpo se arma aquí (para que se vea
+     * bien en cualquier cliente de correo) y el documento completo que ya
+     * generó el navegador viaja como adjunto.
+     */
+    emailActivityReport: adminProcedure
+      .input(z.object({
+        fromDate: z.string(),
+        toDate: z.string(),
+        parcelId: z.number().nullable().optional(),
+        scopeLabel: z.string().optional(),
+        recipients: z.array(z.string()).optional(),
+        subject: z.string().optional(),
+        // Documento completo tal como se ve en pantalla (opcional)
+        reportHtml: z.string().max(6_000_000).optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const { buildActivityReport } = await import("./activityReport");
+        const { renderActivityEmailHtml, renderActivityEmailText } = await import("./activityReportEmail");
+        const { sendMail, parseRecipients, getSmtpConfigPublic } = await import("./mailer");
+
+        const config = await getSmtpConfigPublic();
+        if (!config) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Falta configurar el correo. Ve a Ajustes → Correo (SMTP).",
+          });
+        }
+
+        // Destinatarios del formulario o, si no se indicaron, los de Ajustes
+        const destinatarios = input.recipients?.length
+          ? parseRecipients(input.recipients.join(","))
+          : parseRecipients(config.defaultRecipients);
+        if (destinatarios.length === 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "No hay destinatarios: escribe al menos un correo o define los predeterminados en Ajustes.",
+          });
+        }
+
+        const data = await buildActivityReport({
+          fromDate: input.fromDate,
+          toDate: input.toDate,
+          parcelId: input.parcelId ?? null,
+        });
+
+        const scopeLabel = input.scopeLabel || "Todas las parcelas";
+        const html = renderActivityEmailHtml({ ...data, scopeLabel, hasAttachment: !!input.reportHtml });
+        const text = renderActivityEmailText({ ...data, scopeLabel });
+        const subject = input.subject
+          || `Reporte de actividades ${input.fromDate} a ${input.toDate} — Agra Tec-Ti`;
+
+        const result = await sendMail({
+          to: destinatarios,
+          subject,
+          html,
+          text,
+          attachments: input.reportHtml
+            ? [{
+                filename: `reporte-actividades-${input.fromDate}_${input.toDate}.html`,
+                content: input.reportHtml,
+                contentType: "text/html; charset=utf-8",
+              }]
+            : undefined,
+          kind: "reporte-actividades",
+          userId: ctx.user?.id ?? null,
+        });
+
+        if (!result.ok) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: result.error || "No se pudo enviar el correo" });
+        }
+
+        return { ok: true, recipients: destinatarios, subject };
       }),
 
     getSpatialAnalysis: protectedProcedure

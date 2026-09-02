@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save, Clock, Timer, CheckCircle, XCircle, Zap, Send, MessageCircle, Eye, EyeOff, Plane, Link2, Unlink, Wheat, ClipboardList, Loader2, ImageDown, HardDrive } from "lucide-react";
+import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save, Clock, Timer, CheckCircle, XCircle, Zap, Send, MessageCircle, Eye, EyeOff, Plane, Link2, Unlink, Wheat, ClipboardList, Loader2, ImageDown, HardDrive, Mail, AtSign } from "lucide-react";
 import LocationMapPicker from "@/components/LocationMapPicker";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -491,6 +491,9 @@ export default function Settings() {
 
           {/* Fotos de Kobo guardadas en el servidor */}
           <PhotoArchiveSection />
+
+          {/* Correo saliente */}
+          <SmtpSection />
 
           {/* Notificaciones Telegram */}
           <TelegramSection />
@@ -994,6 +997,209 @@ function PhotoArchiveSection() {
               <div key={i} className="border-b border-purple-100 px-3 py-2 text-xs text-gray-700 last:border-0">
                 <p>{log.message}</p>
                 <p className="text-gray-400">{formatDate(log.timestamp)} · {log.trigger}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </GlassCard>
+  );
+}
+
+// Componente del servidor de correo saliente
+function SmtpSection() {
+  const { data: config, refetch } = trpc.smtp.getConfig.useQuery(undefined, { retry: false });
+  const { data: historial } = trpc.smtp.history.useQuery(undefined, { retry: false });
+
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState(587);
+  const [secure, setSecure] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [fromName, setFromName] = useState("Agra Tec-Ti");
+  const [fromEmail, setFromEmail] = useState("");
+  const [recipients, setRecipients] = useState("");
+  const [testTo, setTestTo] = useState("");
+
+  useEffect(() => {
+    if (!config) return;
+    setHost(config.host || "");
+    setPort(config.port || 587);
+    setSecure(!!config.secure);
+    setUsername(config.username || "");
+    setFromName(config.fromName || "Agra Tec-Ti");
+    setFromEmail(config.fromEmail || "");
+    setRecipients(config.defaultRecipients || "");
+  }, [config]);
+
+  const saveConfig = trpc.smtp.saveConfig.useMutation({
+    onSuccess: () => {
+      toast.success("Configuración de correo guardada");
+      setPassword("");
+      refetch();
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const testMutation = trpc.smtp.test.useMutation({
+    onSuccess: (r: any) => {
+      if (r.ok) toast.success(r.message);
+      else toast.error(r.message);
+      refetch();
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const handleSave = () => {
+    if (!host.trim() || !fromEmail.trim()) {
+      toast.error("El servidor y el correo remitente son obligatorios");
+      return;
+    }
+    if (!config?.hasPassword && username.trim() && !password.trim()) {
+      toast.error("Escribe la contraseña de la cuenta de correo");
+      return;
+    }
+    saveConfig.mutate({
+      host: host.trim(),
+      port: Number(port) || 587,
+      secure,
+      username: username.trim() || undefined,
+      password: password.trim() || undefined,
+      fromName: fromName.trim() || undefined,
+      fromEmail: fromEmail.trim(),
+      defaultRecipients: recipients.trim() || undefined,
+      enabled: true,
+    });
+  };
+
+  return (
+    <GlassCard className="p-4 md:p-6 border-2 border-sky-200 bg-sky-50/30">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Mail className="h-6 w-6 text-sky-600" />
+          <h2 className="text-lg md:text-2xl font-semibold text-sky-900">Correo (SMTP)</h2>
+        </div>
+        {config?.lastTestOk === true && (
+          <span className="flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
+            <CheckCircle className="h-3 w-3" /> Probado
+          </span>
+        )}
+        {config?.lastTestOk === false && (
+          <span className="flex items-center gap-1 rounded-full bg-red-100 px-3 py-1 text-xs font-medium text-red-700">
+            <XCircle className="h-3 w-3" /> Falló la última prueba
+          </span>
+        )}
+      </div>
+
+      <p className="mb-4 text-sm text-sky-700">
+        Cuenta desde la que el sistema envía los reportes. La contraseña se guarda cifrada y no vuelve a
+        salir del servidor.
+      </p>
+
+      <div className="space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="sm:col-span-2">
+            <Label className="text-sky-800 text-sm font-medium">Servidor SMTP</Label>
+            <Input value={host} onChange={(e) => setHost(e.target.value)} placeholder="smtp.gmail.com"
+              className="mt-1 bg-white/60 border-sky-200" />
+          </div>
+          <div>
+            <Label className="text-sky-800 text-sm font-medium">Puerto</Label>
+            <Input type="number" value={port} onChange={(e) => setPort(Number(e.target.value))}
+              className="mt-1 bg-white/60 border-sky-200" />
+          </div>
+        </div>
+
+        <label className="flex items-center gap-2 text-sm text-sky-800">
+          <input type="checkbox" checked={secure} onChange={(e) => setSecure(e.target.checked)}
+            className="h-4 w-4 rounded border-sky-300" />
+          Conexión cifrada directa (SSL/TLS, puerto 465). Déjalo desmarcado para el puerto 587.
+        </label>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <Label className="text-sky-800 text-sm font-medium">Usuario</Label>
+            <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="cuenta@dominio.com"
+              className="mt-1 bg-white/60 border-sky-200" />
+          </div>
+          <div>
+            <Label className="text-sky-800 text-sm font-medium">Contraseña</Label>
+            <div className="relative mt-1">
+              <Input type={showPassword ? "text" : "password"} value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={config?.hasPassword ? "•••••••• (guardada)" : "Contraseña de la cuenta"}
+                className="bg-white/60 border-sky-200 pr-10" />
+              <button type="button" onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-sky-500 hover:text-sky-700">
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <Label className="text-sky-800 text-sm font-medium">Nombre del remitente</Label>
+            <Input value={fromName} onChange={(e) => setFromName(e.target.value)} placeholder="Agra Tec-Ti"
+              className="mt-1 bg-white/60 border-sky-200" />
+          </div>
+          <div>
+            <Label className="text-sky-800 text-sm font-medium">Correo remitente</Label>
+            <Input value={fromEmail} onChange={(e) => setFromEmail(e.target.value)} placeholder="reportes@agra-tecti.com"
+              className="mt-1 bg-white/60 border-sky-200" />
+          </div>
+        </div>
+
+        <div>
+          <Label className="text-sky-800 text-sm font-medium">Destinatarios predeterminados</Label>
+          <Input value={recipients} onChange={(e) => setRecipients(e.target.value)}
+            placeholder="gerencia@empresa.com, agronomo@empresa.com"
+            className="mt-1 bg-white/60 border-sky-200" />
+          <p className="mt-1 text-xs text-gray-400">
+            A quién se manda el reporte cuando no se escribe otro correo. Sepáralos con coma.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Button onClick={handleSave} disabled={saveConfig.isPending}
+            className="bg-sky-600 hover:bg-sky-700 text-white">
+            <Save className="h-4 w-4 mr-1" />
+            {saveConfig.isPending ? "Guardando..." : "Guardar configuración"}
+          </Button>
+          <Button onClick={() => testMutation.mutate({ sendTo: testTo.trim() || undefined })}
+            disabled={testMutation.isPending || !config}
+            variant="outline" className="border-sky-300 text-sky-700 hover:bg-sky-50">
+            <AtSign className="h-4 w-4 mr-1" />
+            {testMutation.isPending ? "Probando..." : "Probar conexión"}
+          </Button>
+          <Input value={testTo} onChange={(e) => setTestTo(e.target.value)}
+            placeholder="correo para la prueba (opcional)"
+            className="flex-1 min-w-[200px] bg-white/60 border-sky-200" />
+        </div>
+
+        {config?.lastTestError && (
+          <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+            Último error: {config.lastTestError}
+          </p>
+        )}
+      </div>
+
+      {historial && historial.length > 0 && (
+        <div className="mt-4">
+          <Label className="text-sky-800 font-medium">Últimos envíos</Label>
+          <div className="mt-2 max-h-40 overflow-y-auto rounded-lg border border-sky-200 bg-white/60">
+            {historial.map((m: any) => (
+              <div key={m.id} className="flex items-start gap-2 border-b border-sky-100 px-3 py-2 text-xs last:border-0">
+                {m.ok ? <CheckCircle className="mt-0.5 h-3 w-3 flex-shrink-0 text-green-600" />
+                      : <XCircle className="mt-0.5 h-3 w-3 flex-shrink-0 text-red-600" />}
+                <div className="flex-1">
+                  <p className="text-gray-700">{m.subject}</p>
+                  <p className="text-gray-400">
+                    {m.recipients} · {new Date(m.createdAt).toLocaleString("es-MX", { timeZone: "America/Mexico_City", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                  {m.error && <p className="text-red-500">{m.error}</p>}
+                </div>
               </div>
             ))}
           </div>

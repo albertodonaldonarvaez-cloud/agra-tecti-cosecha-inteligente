@@ -183,6 +183,45 @@ export const koboPhotos = mysqlTable("koboPhotos", {
 export type KoboPhoto = typeof koboPhotos.$inferSelect;
 export type InsertKoboPhoto = typeof koboPhotos.$inferInsert;
 
+// Servidor de correo saliente. Una sola fila: el sistema manda desde una única
+// cuenta. La contraseña se guarda cifrada (ver server/encryption.ts).
+export const smtpConfig = mysqlTable("smtpConfig", {
+  id: int("id").autoincrement().primaryKey(),
+  host: varchar("host", { length: 255 }).notNull(),
+  port: int("port").default(587).notNull(),
+  // true = TLS directo (puerto 465); false = STARTTLS (587) o sin cifrar (25)
+  secure: boolean("secure").default(false).notNull(),
+  username: varchar("username", { length: 255 }),
+  password: varchar("password", { length: 1024 }), // cifrada
+  fromName: varchar("fromName", { length: 128 }).default("Agra Tec-Ti"),
+  fromEmail: varchar("fromEmail", { length: 255 }).notNull(),
+  // Destinatarios por omisión del reporte, separados por coma
+  defaultRecipients: text("defaultRecipients"),
+  enabled: boolean("enabled").default(true).notNull(),
+  lastTestAt: timestamp("lastTestAt"),
+  lastTestOk: boolean("lastTestOk"),
+  lastTestError: varchar("lastTestError", { length: 512 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type SmtpConfig = typeof smtpConfig.$inferSelect;
+export type InsertSmtpConfig = typeof smtpConfig.$inferInsert;
+
+// Bitácora de correos enviados: sirve para saber si el reporte salió y a quién
+export const sentEmails = mysqlTable("sentEmails", {
+  id: int("id").autoincrement().primaryKey(),
+  subject: varchar("subject", { length: 512 }).notNull(),
+  recipients: text("recipients").notNull(),
+  kind: varchar("kind", { length: 64 }).default("reporte").notNull(),
+  ok: boolean("ok").default(false).notNull(),
+  error: varchar("error", { length: 512 }),
+  sentByUserId: int("sentByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type SentEmail = typeof sentEmails.$inferSelect;
+
 // Tabla de configuración de API de KoboToolbox
 export const apiConfig = mysqlTable("apiConfig", {
   id: int("id").autoincrement().primaryKey(),

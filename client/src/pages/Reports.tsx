@@ -7,8 +7,10 @@ import {
   FileText, Download, Calendar, Package, TrendingUp,
   ClipboardList, CloudSun, Brain, ChevronDown, Loader2,
   BarChart3, Globe, Filter, Satellite, AlertTriangle,
-  CheckCircle, Leaf, Droplets, Thermometer, Box, Layers, BookOpen
+  CheckCircle, Leaf, Droplets, Thermometer, Box, Layers, BookOpen, Mail, Send, Sparkles
 } from "lucide-react";
+import { getReportCss } from "@/lib/reportTheme";
+import { buildActivityReportHtml } from "@/lib/activityReportDoc";
 
 
 // ── Helpers ──
@@ -52,206 +54,6 @@ function ndviBadgeClass(v: number|null|undefined): string {
   return "healthy";
 }
 
-function getReportCss(): string {
-  return `
-    :root {
-      --primary: #064e3b;
-      --primary-light: #10b981;
-      --accent: #00a8e8;
-      --bg-glass: rgba(255,255,255,0.55);
-      --border-glass: rgba(255,255,255,0.5);
-      --text-dark: #1e293b;
-      --text-muted: #64748b;
-    }
-    @page { size: letter; margin: 0; }
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: #f0fdf4; color: var(--text-dark); -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    .page { width: 8.5in; min-height: 11in; position: relative; padding: 0; margin: 0 auto; background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 30%, #f8fafc 100%); page-break-after: always; display: flex; flex-direction: column; }
-    .page:last-child { page-break-after: auto; }
-    .glass-bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: hidden; }
-    .blob { position: absolute; border-radius: 50%; filter: blur(60px); opacity: 0.5; }
-    .blob-1 { width: 350px; height: 350px; top: -80px; right: -60px; background: radial-gradient(circle, rgba(16,185,129,0.25), transparent 70%); }
-    .blob-2 { width: 300px; height: 300px; bottom: 40px; left: -80px; background: radial-gradient(circle, rgba(0,168,232,0.15), transparent 70%); }
-    .blob-3 { width: 200px; height: 200px; top: 40%; left: 50%; background: radial-gradient(circle, rgba(6,78,59,0.1), transparent 70%); }
-    .main-content { position: relative; z-index: 1; padding: 18px 28px 10px 28px; flex: 1; }
-
-    /* Header */
-    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-    .brand { display: flex; align-items: center; gap: 10px; }
-    .brand img { height: 36px; width: 36px; border-radius: 10px; }
-    .brand-text h1 { font-size: 17px; font-weight: 800; color: var(--primary); letter-spacing: -0.5px; }
-    .brand-text span { font-size: 8px; color: var(--primary-light); text-transform: uppercase; letter-spacing: 2px; font-weight: 600; }
-    .header-right { text-align: right; }
-    .header-right .report-type { font-size: 9px; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: 1px; }
-    .header-right .report-name { font-size: 11px; font-weight: 600; color: var(--text-dark); margin-top: 1px; }
-
-    /* Date Banner */
-    .date-banner { background: linear-gradient(135deg, var(--primary), #065f46); color: white; border-radius: 10px; padding: 7px 16px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-    .date-banner .period { font-size: 10px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
-    .date-banner .badge { background: var(--primary-light); border-radius: 20px; padding: 2px 10px; font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
-    .date-banner svg { width: 14px; height: 14px; }
-
-    /* Metric Cards */
-    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 7px; margin-bottom: 10px; }
-    .metric-card { background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 12px; padding: 8px 10px; position: relative; overflow: hidden; }
-    .metric-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; border-radius: 12px 12px 0 0; }
-    .metric-card.green::before { background: linear-gradient(90deg, #10b981, #059669); }
-    .metric-card.blue::before { background: linear-gradient(90deg, #3b82f6, #2563eb); }
-    .metric-card.amber::before { background: linear-gradient(90deg, #f59e0b, #d97706); }
-    .metric-card.purple::before { background: linear-gradient(90deg, #8b5cf6, #7c3aed); }
-    .metric-card.red::before { background: linear-gradient(90deg, #ef4444, #dc2626); }
-    .metric-card.cyan::before { background: linear-gradient(90deg, #06b6d4, #0891b2); }
-    .metric-label { font-size: 7.5px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 2px; margin-top: 3px; }
-    .metric-value { font-size: 16px; font-weight: 800; color: var(--primary); }
-    .metric-sub { font-size: 7px; color: var(--text-muted); margin-top: 1px; }
-
-    /* Section Titles */
-    .section-title { font-size: 10px; font-weight: 700; color: var(--primary); margin-bottom: 5px; display: flex; align-items: center; gap: 6px; padding-bottom: 2px; position: relative; }
-    .section-title::after { content: ''; flex: 1; height: 2px; background: linear-gradient(90deg, rgba(16,185,129,0.3), transparent); border-radius: 2px; }
-    .section-title svg { width: 12px; height: 12px; color: var(--primary-light); }
-
-    /* Glass Table */
-    .glass-table-container { background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 10px; overflow: hidden; margin-bottom: 8px; }
-    table { width: 100%; border-collapse: collapse; font-size: 8px; }
-    thead tr { background: linear-gradient(135deg, var(--primary), #065f46); }
-    thead th { color: white; padding: 5px 8px; font-weight: 600; text-align: left; font-size: 7.5px; text-transform: uppercase; letter-spacing: 0.5px; }
-    thead th.text-right { text-align: right; }
-    tbody tr { border-bottom: 1px solid rgba(16,185,129,0.08); }
-    tbody tr:nth-child(even) { background: rgba(240,253,244,0.4); }
-    tbody tr:nth-child(odd) { background: rgba(255,255,255,0.3); }
-    tbody tr.risk-row { background: rgba(254,226,226,0.4) !important; }
-    tbody td { padding: 4px 8px; color: var(--text-dark); }
-    tbody td.text-right { text-align: right; }
-    tbody td.font-bold { font-weight: 700; }
-    tbody td.parcel-name { font-weight: 600; color: var(--primary); }
-    tfoot tr { background: linear-gradient(135deg, var(--primary), #065f46); }
-    tfoot td { color: white; padding: 5px 8px; font-weight: 700; font-size: 7.5px; }
-    tfoot td.text-right { text-align: right; }
-
-    /* NDVI Badges */
-    .ndvi-badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 7.5px; font-weight: 700; }
-    .ndvi-badge.healthy { background: #dcfce7; color: #166534; }
-    .ndvi-badge.moderate { background: #fef9c3; color: #854d0e; }
-    .ndvi-badge.critical { background: #fee2e2; color: #991b1b; }
-
-    /* Risk Alert */
-    .risk-alert { background: rgba(254,226,226,0.5); backdrop-filter: blur(12px); border: 1px solid rgba(252,165,165,0.5); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
-    .risk-icon { width: 24px; height: 24px; background: linear-gradient(135deg, #ef4444, #dc2626); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-    .risk-icon svg { width: 12px; height: 12px; color: white; }
-    .risk-text strong { font-size: 9px; color: #991b1b; display: block; }
-    .risk-text span { font-size: 7.5px; color: #b91c1c; }
-
-    /* Climate Strip */
-    .climate-strip { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
-    .climate-item { flex: 1; min-width: 90px; background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 8px; padding: 5px 10px; display: flex; align-items: center; gap: 6px; }
-    .climate-item svg { width: 14px; height: 14px; flex-shrink: 0; }
-    .climate-item .cl-label { font-size: 7px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
-    .climate-item .cl-value { font-size: 11px; font-weight: 700; }
-    .cl-temp-max { color: #dc2626; }
-    .cl-temp-min { color: #2563eb; }
-    .cl-rain { color: #0891b2; }
-    .cl-days { color: #059669; }
-
-    /* Climate Vertical (for two-col layout) */
-    .climate-vertical { background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 10px; padding: 8px 12px; }
-    .climate-v-item { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(16,185,129,0.08); }
-    .climate-v-item:last-child { border-bottom: none; }
-
-    /* AI Card */
-    .ia-card { background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 12px; padding: 0; overflow: hidden; margin-bottom: 8px; }
-    .ia-card-bar { height: 3px; background: linear-gradient(90deg, var(--primary-light), var(--primary)); }
-    .ia-card-header { display: flex; align-items: center; gap: 6px; padding: 6px 14px 2px 14px; }
-    .ia-card-header svg { width: 14px; height: 14px; color: var(--primary-light); }
-    .ia-card-header .ia-title { font-size: 9px; font-weight: 700; color: var(--primary); }
-    .ia-card-header .ia-sub { font-size: 7px; color: var(--text-muted); margin-left: 6px; }
-    .ia-card-body { padding: 6px 14px 12px 14px; font-size: 8px; line-height: 1.55; color: var(--text-dark); white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word; }
-
-    /* NDVI Bar Chart */
-    .ndvi-chart-container { background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; }
-    .ndvi-chart-title { font-size: 8px; font-weight: 700; color: var(--primary); margin-bottom: 6px; }
-    .ndvi-bar-row { display: flex; align-items: center; gap: 4px; margin-bottom: 3px; }
-    .ndvi-bar-label { font-size: 7px; font-weight: 600; color: var(--text-dark); width: 65px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
-    .ndvi-bar-track { flex: 1; height: 11px; background: rgba(240,253,244,0.5); border-radius: 6px; overflow: hidden; position: relative; }
-    .ndvi-bar-fill { height: 100%; border-radius: 6px; }
-    .ndvi-bar-fill.healthy { background: linear-gradient(90deg, #10b981, #059669); }
-    .ndvi-bar-fill.moderate { background: linear-gradient(90deg, #f59e0b, #d97706); }
-    .ndvi-bar-fill.critical { background: linear-gradient(90deg, #ef4444, #dc2626); }
-    .ndvi-bar-val { font-size: 7px; font-weight: 700; width: 34px; text-align: left; flex-shrink: 0; }
-
-    /* Summary Bar */
-    .summary-bar { background: linear-gradient(135deg, var(--primary), #065f46); border-radius: 10px; padding: 8px 16px; color: white; font-size: 10px; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
-    .summary-bar svg { width: 14px; height: 14px; }
-
-    /* Two Column Layout */
-    .two-col { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 10px; margin-bottom: 8px; }
-
-    /* Notes KPIs inline */
-    .notes-kpis { display: flex; gap: 6px; margin-bottom: 8px; }
-    .note-kpi { flex: 1; background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 8px; padding: 6px; text-align: center; }
-    .note-kpi .nk-val { font-size: 15px; font-weight: 800; }
-    .note-kpi .nk-label { font-size: 7px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 1px; }
-
-    /* Spatial Grid */
-    .spatial-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
-    .spatial-cell { background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 8px; padding: 8px; text-align: center; position: relative; }
-    .spatial-cell.problem { border-color: rgba(252,165,165,0.6); background: rgba(254,242,242,0.5); }
-    .spatial-cell .sc-label { font-size: 7px; font-weight: 700; color: var(--primary); margin-bottom: 3px; }
-    .spatial-cell.problem .sc-label { color: #991b1b; }
-    .spatial-cell .sc-ndvi { font-size: 17px; font-weight: 800; color: var(--primary-light); }
-    .spatial-cell.problem .sc-ndvi { color: #dc2626; }
-    .spatial-cell .sc-sub { font-size: 6.5px; color: var(--text-muted); margin-top: 1px; }
-
-    /* Maps Row */
-    .maps-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
-    .map-card { background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); border-radius: 10px; overflow: hidden; text-align: center; }
-    .map-card .map-title { font-size: 10px; font-weight: 700; color: var(--primary); padding: 6px 0 3px 0; }
-    .map-card img { width: 100%; max-height: 130px; object-fit: contain; padding: 0 6px 3px 6px; }
-    .map-card .map-no-img { padding: 24px 8px; font-size: 8px; color: var(--text-muted); }
-    .map-card .map-trend { font-size: 8px; font-weight: 600; padding: 3px 0 6px 0; }
-    .trend-up { color: #10b981; }
-    .trend-down { color: #ef4444; }
-    .trend-stable { color: #f59e0b; }
-
-    /* Category pills */
-    .cat-pills { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
-    .cat-pill { background: rgba(240,253,244,0.7); border: 1px solid rgba(209,250,229,0.6); border-radius: 6px; padding: 3px 8px; display: flex; align-items: center; gap: 4px; }
-    .cat-pill .cp-count { font-size: 11px; font-weight: 800; color: var(--primary); }
-    .cat-pill .cp-label { font-size: 7px; color: var(--text-dark); }
-
-    /* Footer */
-    .page-footer { position: relative; padding: 6px 28px; border-top: 1px solid rgba(16,185,129,0.15); display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.6); backdrop-filter: blur(8px); z-index: 2; margin-top: auto; }
-    .footer-brand { font-size: 7px; color: var(--text-muted); display: flex; align-items: center; gap: 5px; }
-    .footer-brand img { height: 10px; width: 10px; border-radius: 2px; }
-    .page-pill { background: var(--primary); color: white; border-radius: 8px; padding: 2px 8px; font-size: 7px; font-weight: 700; }
-
-    /* Liquid line */
-    .liquid-line { position: relative; margin: 4px 28px; height: 3px; background: linear-gradient(90deg, var(--primary-light), var(--accent), var(--primary-light)); border-radius: 3px; opacity: 0.3; z-index: 2; }
-
-    /* Sub-header for subsequent pages */
-    .sub-header { background: linear-gradient(135deg, var(--primary), #065f46); padding: 8px 28px; display: flex; align-items: center; justify-content: space-between; }
-    .sub-header h2 { color: white; font-size: 12px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
-    .sub-header h2 img { height: 18px; width: 18px; border-radius: 5px; }
-    .sub-header .sh-info { font-size: 7px; color: #a7f3d0; }
-    .sub-header + .main-content { padding-top: 10px; }
-
-    /* SLA alert */
-    .sla-alert { background: rgba(254,242,242,0.5); border: 1px solid rgba(252,165,165,0.4); border-radius: 8px; padding: 6px 12px; font-size: 8px; font-weight: 600; color: #991b1b; margin-bottom: 8px; }
-
-    /* Inactive parcels chips */
-    .inactive-chips { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 8px; }
-    .inactive-chip { background: rgba(245,245,245,0.7); border: 1px solid rgba(220,220,220,0.5); border-radius: 6px; padding: 2px 6px; font-size: 7px; color: #6b7280; }
-
-    @media print {
-      body { background: white; }
-      .page { box-shadow: none; }
-      .no-print { display: none !important; }
-    }
-    @media screen {
-      .page { box-shadow: 0 4px 30px rgba(0,0,0,0.08); margin-bottom: 20px; }
-    }
-  `;
-}
-
 function svgCalendar(): string { return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>'; }
 function svgThermH(): string { return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>'; }
 function svgThermC(): string { return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>'; }
@@ -270,6 +72,11 @@ export default function Reports() {
   const [periodDays, setPeriodDays] = useState(7);
   const [reportMode, setReportMode] = useState<"compact"|"extended">("compact");
   const [generating, setGenerating] = useState(false);
+  // Reporte de actividades: vive aparte del de cosecha porque contesta otra
+  // pregunta (qué se trabajó) y se manda por correo
+  const [isActivities, setIsActivities] = useState(false);
+  const [emailTo, setEmailTo] = useState("");
+  const [sendingEmail, setSendingEmail] = useState(false);
   const logoB64 = useLogoBase64();
 
   const toDate = useMemo(()=>new Date().toISOString().split("T")[0],[]);
@@ -303,8 +110,39 @@ export default function Reports() {
   );
   const satMaps = { NDVI: ndviMap?.image, NDRE: ndreMap?.image, NDMI: ndmiMap?.image };
 
-  const dataReady = isGeneral ? !!generalData : !!reportData;
-  const loading = isGeneral ? generalLoading : isLoading;
+  // Reporte de actividades (labores de la libreta de campo + resumen con IA).
+  // El resumen lo redacta DeepSeek en el servidor, por eso puede tardar.
+  const { data: activityData, isLoading: activityLoading, isFetching: activityFetching } =
+    trpc.reports.getActivityReport.useQuery(
+      { fromDate, toDate, parcelId: selectedParcelId, withAi: true },
+      { enabled: isActivities, staleTime: 10 * 60 * 1000 }
+    );
+
+  const { data: smtpConfig } = trpc.smtp.getConfig.useQuery(undefined, {
+    enabled: isActivities,
+    retry: false,
+  });
+
+  const emailReport = trpc.reports.emailActivityReport.useMutation({
+    onSuccess: (res: any) => {
+      toast.success(`Reporte enviado a ${res.recipients.join(", ")}`, { id: "mail" });
+      setSendingEmail(false);
+    },
+    onError: (error: any) => {
+      toast.error(error.message || "No se pudo enviar el correo", { id: "mail" });
+      setSendingEmail(false);
+    },
+  });
+
+  const activityScopeLabel = useMemo(() => {
+    if (!isActivities) return "";
+    if (!selectedParcelId) return "Todas las parcelas";
+    const p = (parcels || []).find((x: any) => x.id === selectedParcelId);
+    return p ? `Parcela ${p.name || p.code}` : "Todas las parcelas";
+  }, [isActivities, selectedParcelId, parcels]);
+
+  const dataReady = isActivities ? !!activityData : isGeneral ? !!generalData : !!reportData;
+  const loading = isActivities ? activityLoading || activityFetching : isGeneral ? generalLoading : isLoading;
 
   const weeklyHarvestTotal = useMemo(()=>{if(isGeneral)return generalData?.totals?.harvest||0;return(reportData?.dailyHarvest||[]).reduce((s:number,d:any)=>s+(d.totalWeight||0),0);},[reportData,generalData,isGeneral]);
   const weeklyFirstQ = useMemo(()=>{if(isGeneral)return generalData?.totals?.firstQ||0;return(reportData?.dailyHarvest||[]).reduce((s:number,d:any)=>s+(d.firstQualityWeight||0),0);},[reportData,generalData,isGeneral]);
@@ -907,12 +745,40 @@ ${html}
 </html>`;
   }
 
+  /** Documento del reporte de actividades, listo para imprimir o adjuntar */
+  function buildActivityDoc(): string {
+    return buildActivityReportHtml(activityData as any, {
+      scopeLabel: activityScopeLabel,
+      logo: logoB64,
+    });
+  }
+
+  async function enviarPorCorreo() {
+    if (!activityData) return;
+    const destinatarios = emailTo
+      .split(/[,;\s]+/)
+      .map((r) => r.trim())
+      .filter((r) => r.includes("@"));
+
+    setSendingEmail(true);
+    toast.loading("Enviando reporte por correo...", { id: "mail" });
+    emailReport.mutate({
+      fromDate,
+      toDate,
+      parcelId: selectedParcelId,
+      scopeLabel: activityScopeLabel,
+      recipients: destinatarios.length > 0 ? destinatarios : undefined,
+      // El documento completo viaja adjunto tal como se ve en pantalla
+      reportHtml: buildActivityDoc(),
+    });
+  }
+
   async function generatePDF() {
     if (!dataReady) return;
     setGenerating(true);
     toast.loading("Generando reporte...", { id: "pdf-gen" });
     try {
-      const htmlContent = buildReportHtml();
+      const htmlContent = isActivities ? buildActivityDoc() : buildReportHtml();
       const printWindow = window.open('', '_blank');
       if (!printWindow) {
         toast.error("No se pudo abrir la ventana de impresion. Permite ventanas emergentes.", { id: "pdf-gen" });
@@ -962,24 +828,27 @@ ${html}
                 <Layers className="h-3.5 w-3.5" /> Alcance
               </label>
               <div className="flex gap-2">
-                <button onClick={()=>setIsGeneral(false)} className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-300 flex items-center justify-center gap-2 ${!isGeneral?"bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg shadow-green-500/25":"rounded-lg border border-green-200 bg-white/50 text-green-700 hover:bg-green-50"}`}>
-                  <Filter className="h-4 w-4"/> Por Parcela
+                <button onClick={()=>{setIsGeneral(false);setIsActivities(false);}} className={`flex-1 rounded-xl px-2 py-2.5 text-xs md:text-sm font-medium transition-all duration-300 flex items-center justify-center gap-1.5 ${!isGeneral&&!isActivities?"bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg shadow-green-500/25":"rounded-lg border border-green-200 bg-white/50 text-green-700 hover:bg-green-50"}`}>
+                  <Filter className="h-4 w-4"/> Parcela
                 </button>
-                <button onClick={()=>{setIsGeneral(true);setSelectedParcelId(null);}} className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-300 flex items-center justify-center gap-2 ${isGeneral?"bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg shadow-green-500/25":"rounded-lg border border-green-200 bg-white/50 text-green-700 hover:bg-green-50"}`}>
+                <button onClick={()=>{setIsGeneral(true);setIsActivities(false);setSelectedParcelId(null);}} className={`flex-1 rounded-xl px-2 py-2.5 text-xs md:text-sm font-medium transition-all duration-300 flex items-center justify-center gap-1.5 ${isGeneral?"bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg shadow-green-500/25":"rounded-lg border border-green-200 bg-white/50 text-green-700 hover:bg-green-50"}`}>
                   <Globe className="h-4 w-4"/> General
+                </button>
+                <button onClick={()=>{setIsActivities(true);setIsGeneral(false);}} className={`flex-1 rounded-xl px-2 py-2.5 text-xs md:text-sm font-medium transition-all duration-300 flex items-center justify-center gap-1.5 ${isActivities?"bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg shadow-green-500/25":"rounded-lg border border-green-200 bg-white/50 text-green-700 hover:bg-green-50"}`}>
+                  <ClipboardList className="h-4 w-4"/> Actividades
                 </button>
               </div>
             </div>
             {!isGeneral && (
               <div>
                 <label className="text-xs font-semibold text-green-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <Leaf className="h-3.5 w-3.5" /> Parcela (con polígono)
+                  <Leaf className="h-3.5 w-3.5" /> {isActivities ? "Parcela (opcional)" : "Parcela (con polígono)"}
                 </label>
                 <div className="relative">
-                  <select value={selectedParcelId||""} onChange={e=>{const id=Number(e.target.value);setSelectedParcelId(id||null);const p=parcelsWithPolygon.find((p:any)=>p.id===id);setSelectedParcelCode(p?.code||"");}}
+                  <select value={selectedParcelId||""} onChange={e=>{const id=Number(e.target.value);setSelectedParcelId(id||null);const lista=isActivities?(parcels||[]):parcelsWithPolygon;const p=lista.find((p:any)=>p.id===id);setSelectedParcelCode(p?.code||"");}}
                     className="w-full rounded-xl border border-green-200/50 bg-white/70 backdrop-blur-sm px-4 py-2.5 text-sm text-green-900 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500/20 appearance-none cursor-pointer transition-all">
-                    <option value="">Selecciona parcela...</option>
-                    {parcelsWithPolygon.map((p:any)=>(<option key={p.id} value={p.id}>{p.code} — {p.name}</option>))}
+                    <option value="">{isActivities ? "Todas las parcelas" : "Selecciona parcela..."}</option>
+                    {(isActivities?(parcels||[]):parcelsWithPolygon).map((p:any)=>(<option key={p.id} value={p.id}>{p.code} — {p.name}</option>))}
                   </select>
                   <ChevronDown className="absolute right-3 top-3 h-4 w-4 text-green-400 pointer-events-none"/>
                 </div>
@@ -1022,13 +891,13 @@ ${html}
           <div className="mt-5 flex justify-center">
             <button onClick={generatePDF} disabled={!dataReady||generating||loading}
               className={`flex items-center gap-2.5 rounded-2xl px-8 py-3.5 text-sm font-semibold transition-all duration-300 ${dataReady&&!generating?"bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-xl shadow-green-500/30 hover:shadow-2xl hover:shadow-green-500/40 hover:scale-105 active:scale-95":"bg-gray-200 text-gray-400 cursor-not-allowed"}`}>
-              {generating?<><Loader2 className="h-4 w-4 animate-spin"/>Generando...</>:loading?<><Loader2 className="h-4 w-4 animate-spin"/>Cargando datos...</>:<><Download className="h-4 w-4"/>Generar Reporte PDF ({totalPages} {totalPages===1?"pág":"págs"})</>}
+              {generating?<><Loader2 className="h-4 w-4 animate-spin"/>Generando...</>:loading?<><Loader2 className="h-4 w-4 animate-spin"/>Cargando datos...</>:<><Download className="h-4 w-4"/>{isActivities?"Generar Reporte de Actividades":`Generar Reporte PDF (${totalPages} ${totalPages===1?"pág":"págs"})`}</>}
             </button>
           </div>
         </GlassCard>
 
         {/* Preview */}
-        {dataReady && (
+        {dataReady && !isActivities && (
           <div className="space-y-5">
             {/* KPI Cards */}
             <div className="grid gap-3 md:gap-4 grid-cols-2 lg:grid-cols-4">
@@ -1339,11 +1208,131 @@ ${html}
           </div>
         )}
 
+        {isActivities && activityData && (
+          <div className="space-y-5">
+            <div className="grid gap-3 md:gap-4 grid-cols-2 lg:grid-cols-4">
+              {[
+                { label: "Labores", value: activityData.summary.total, sub: "en el periodo", icon: ClipboardList },
+                { label: "Completadas", value: activityData.summary.completed, sub: `${activityData.summary.inProgress + activityData.summary.planned} sin cerrar`, icon: CheckCircle },
+                { label: "Horas", value: activityData.summary.hours, sub: `${activityData.summary.workDays} jornadas`, icon: Calendar },
+                { label: "Parcelas", value: activityData.summary.parcelsWorked, sub: "atendidas", icon: Leaf },
+              ].map((k) => (
+                <GlassCard key={k.label} className="p-4" hover={false}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-green-600">{k.label}</p>
+                      <p className="text-xl md:text-2xl font-bold text-green-900">{k.value}</p>
+                      <p className="text-[11px] text-green-500">{k.sub}</p>
+                    </div>
+                    <k.icon className="h-8 w-8 text-green-300" />
+                  </div>
+                </GlassCard>
+              ))}
+            </div>
+
+            {activityData.ai ? (
+              <GlassCard className="p-4 md:p-6" hover={false}>
+                <div className="mb-2 flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-green-600" />
+                  <h3 className="text-sm font-semibold text-green-800">Resumen redactado con IA</h3>
+                </div>
+                <p className="text-sm leading-relaxed text-green-900">{activityData.ai.resumen}</p>
+                {activityData.ai.recomendaciones.length > 0 && (
+                  <ul className="mt-3 space-y-1.5">
+                    {activityData.ai.recomendaciones.map((r: string, i: number) => (
+                      <li key={i} className="flex gap-2 text-xs text-green-700">
+                        <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-green-500" />
+                        {r}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </GlassCard>
+            ) : (
+              <GlassCard className="p-4" hover={false}>
+                <p className="text-sm text-amber-700">
+                  El reporte se genera sin resumen de IA. Configura la clave de DeepSeek en Ajustes para incluirlo.
+                </p>
+              </GlassCard>
+            )}
+
+            {/* Envío por correo */}
+            <GlassCard className="p-4 md:p-6" hover={false}>
+              <div className="mb-3 flex items-center gap-2">
+                <Mail className="h-4 w-4 text-green-600" />
+                <h3 className="text-sm font-semibold text-green-800">Enviar por correo</h3>
+              </div>
+              {!smtpConfig ? (
+                <p className="text-sm text-amber-700">
+                  Falta configurar el servidor de correo. Ve a <strong>Ajustes → Correo (SMTP)</strong>.
+                </p>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    value={emailTo}
+                    onChange={(e) => setEmailTo(e.target.value)}
+                    placeholder={smtpConfig.defaultRecipients || "correo@ejemplo.com, otro@ejemplo.com"}
+                    className="w-full rounded-xl border border-green-200/60 bg-white/70 px-4 py-2.5 text-sm text-green-900 focus:border-green-500 focus:outline-none"
+                  />
+                  <p className="mt-1.5 text-[11px] text-green-500">
+                    {emailTo.trim()
+                      ? "Se enviará a los correos escritos arriba."
+                      : smtpConfig.defaultRecipients
+                        ? `Sin escribir nada se envía a los destinatarios de Ajustes: ${smtpConfig.defaultRecipients}`
+                        : "Escribe al menos un correo o define los predeterminados en Ajustes."}
+                  </p>
+                  <button
+                    onClick={enviarPorCorreo}
+                    disabled={sendingEmail || (!emailTo.trim() && !smtpConfig.defaultRecipients)}
+                    className={`mt-3 flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition-all ${
+                      sendingEmail || (!emailTo.trim() && !smtpConfig.defaultRecipients)
+                        ? "bg-gray-200 text-gray-400 cursor-not-allowed"
+                        : "bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg shadow-green-500/25 hover:shadow-xl"
+                    }`}
+                  >
+                    {sendingEmail ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    {sendingEmail ? "Enviando..." : "Enviar reporte"}
+                  </button>
+                </>
+              )}
+            </GlassCard>
+
+            {/* Listado rápido de labores */}
+            <GlassCard className="p-4 md:p-6" hover={false}>
+              <h3 className="mb-3 text-sm font-semibold text-green-800">
+                Labores del periodo ({activityData.activities.length})
+              </h3>
+              {activityData.activities.length === 0 ? (
+                <p className="text-sm text-green-600">No se registraron actividades en este periodo.</p>
+              ) : (
+                <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
+                  {activityData.activities.map((a: any) => (
+                    <div key={a.id} className="rounded-xl border border-green-100 bg-white/60 px-3 py-2">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-sm font-semibold text-green-900">
+                          {a.typeLabel}
+                          {a.subtype ? <span className="ml-1 text-xs font-normal text-green-500">{a.subtype}</span> : null}
+                        </span>
+                        <span className="whitespace-nowrap text-xs text-green-500">{fmtDateShort(a.date)}</span>
+                      </div>
+                      <p className="text-xs text-green-600">
+                        {a.parcelNames.length ? a.parcelNames.join(", ") : "General"} · {a.performedBy || "sin responsable"}
+                        {a.hours ? ` · ${a.hours} h` : ""} · {a.statusLabel}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </GlassCard>
+          </div>
+        )}
+
         {!dataReady && !loading && (
           <GlassCard className="p-8 md:p-12 text-center" hover={false}>
             <FileText className="mx-auto mb-4 h-12 w-12 md:h-16 md:w-16 text-green-300" />
-            <h3 className="text-base md:text-xl font-semibold text-green-800 mb-1">{isGeneral?"Listo para generar":"Selecciona una parcela"}</h3>
-            <p className="text-green-600 text-xs md:text-sm">{isGeneral?"Haz click en Generar para el reporte general":"Solo se muestran parcelas con polígono definido"}</p>
+            <h3 className="text-base md:text-xl font-semibold text-green-800 mb-1">{isActivities?"Reuniendo las labores del periodo":isGeneral?"Listo para generar":"Selecciona una parcela"}</h3>
+            <p className="text-green-600 text-xs md:text-sm">{isActivities?"El resumen lo redacta la IA con el registro de la libreta de campo; puede tardar unos segundos":isGeneral?"Haz click en Generar para el reporte general":"Solo se muestran parcelas con polígono definido"}</p>
           </GlassCard>
         )}
       </div>

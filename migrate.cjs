@@ -410,6 +410,37 @@ async function migrate() {
     // eso es un escaneo completo de la tabla en cada ronda.
     await ensureIndex('boxes', 'idx_boxes_photo_pending',
       "ALTER TABLE boxes ADD INDEX idx_boxes_photo_pending (photoLocalPath(16), photoDownloadAttempts, submissionTime)");
+
+    // ── Correo saliente y bitácora de envíos (0025) ───────────
+    await conn.query(`CREATE TABLE IF NOT EXISTS smtpConfig (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      host VARCHAR(255) NOT NULL,
+      port INT NOT NULL DEFAULT 587,
+      secure BOOLEAN NOT NULL DEFAULT FALSE,
+      username VARCHAR(255) NULL,
+      password VARCHAR(1024) NULL,
+      fromName VARCHAR(128) NULL DEFAULT 'Agra Tec-Ti',
+      fromEmail VARCHAR(255) NOT NULL,
+      defaultRecipients TEXT NULL,
+      enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      lastTestAt TIMESTAMP NULL,
+      lastTestOk BOOLEAN NULL,
+      lastTestError VARCHAR(512) NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+    await conn.query(`CREATE TABLE IF NOT EXISTS sentEmails (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      subject VARCHAR(512) NOT NULL,
+      recipients TEXT NOT NULL,
+      kind VARCHAR(64) NOT NULL DEFAULT 'reporte',
+      ok BOOLEAN NOT NULL DEFAULT FALSE,
+      error VARCHAR(512) NULL,
+      sentByUserId INT NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_sentEmails_fecha (createdAt)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
   } catch (err) {
     console.error('[Migration] Error:', err.message);
   } finally {
