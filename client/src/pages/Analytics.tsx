@@ -112,24 +112,49 @@ function AnalyticsContent() {
     });
   };
 
+  const aFecha = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  /**
+   * Los atajos de rango aplican el filtro de una vez.
+   *
+   * Antes solo llenaban las cajas de fecha: uno tocaba "Último Mes", no pasaba
+   * nada, y había que encontrar el botón Aplicar —que además estaba en la fila
+   * de ARRIBA—. En el teléfono eso se traducía en que el filtro por mes
+   * simplemente no funcionaba.
+   */
+  const aplicarRango = (start: Date, end: Date) => {
+    const startStr = aFecha(start);
+    const endStr = aFecha(end);
+    setStartDate(startStr);
+    setEndDate(endStr);
+    setFilterDates({ startDate: startStr, endDate: endStr });
+  };
+
   const handleLast15Days = () => {
     const end = new Date();
     const start = new Date();
     start.setDate(start.getDate() - 15);
-    const startStr = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
-    const endStr = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
-    setStartDate(startStr);
-    setEndDate(endStr);
+    aplicarRango(start, end);
   };
-  
+
   const handleLastMonth = () => {
     const end = new Date();
     const start = new Date();
     start.setMonth(start.getMonth() - 1);
-    const startStr = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
-    const endStr = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
-    setStartDate(startStr);
-    setEndDate(endStr);
+    aplicarRango(start, end);
+  };
+
+  const handleThisMonth = () => {
+    const now = new Date();
+    aplicarRango(new Date(now.getFullYear(), now.getMonth(), 1), now);
+  };
+
+  const handleLast3Months = () => {
+    const end = new Date();
+    const start = new Date();
+    start.setMonth(start.getMonth() - 3);
+    aplicarRango(start, end);
   };
 
   const handleClearFilter = () => {
@@ -157,7 +182,21 @@ function AnalyticsContent() {
             <h2 className="text-lg md:text-2xl font-semibold text-green-900">Filtros de Fecha</h2>
           </div>
 
-          <div className="grid gap-3 md:gap-4 grid-cols-2 md:grid-cols-2 lg:grid-cols-4">
+          {/* Atajos primero: es lo que la mayoría usa, y aplican de inmediato */}
+          <div className="mb-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+            {[
+              { label: "Este mes", onClick: handleThisMonth },
+              { label: "Últimos 15 días", onClick: handleLast15Days },
+              { label: "Último mes", onClick: handleLastMonth },
+              { label: "Últimos 3 meses", onClick: handleLast3Months },
+            ].map((r) => (
+              <Button key={r.label} onClick={r.onClick} variant="secondary" size="sm" className="text-xs md:text-sm">
+                {r.label}
+              </Button>
+            ))}
+          </div>
+
+          <div className="grid gap-3 md:gap-4 grid-cols-2 lg:grid-cols-4">
             <div>
               <Label htmlFor="startDate" className="text-xs md:text-sm">Fecha Inicio</Label>
               <Input
@@ -185,26 +224,28 @@ function AnalyticsContent() {
               />
             </div>
 
-            <div className="flex items-end">
-              <Button onClick={handleApplyFilter} className="w-full text-sm">
+            {/* En el teléfono Aplicar ocupa el ancho completo debajo de las
+                fechas: antes quedaba encogido en una esquina y se pasaba por alto */}
+            <div className="col-span-2 flex items-end gap-2 lg:col-span-2">
+              <Button onClick={handleApplyFilter} className="flex-1 text-sm">
                 Aplicar
               </Button>
-            </div>
-
-            <div className="flex items-end">
-              <Button onClick={handleClearFilter} variant="outline" className="w-full text-sm">
+              <Button onClick={handleClearFilter} variant="outline" className="flex-1 text-sm">
                 Limpiar
               </Button>
             </div>
           </div>
 
-          <div className="mt-3 md:mt-4 flex gap-2">
-            <Button onClick={handleLast15Days} variant="secondary" size="sm" className="text-xs md:text-sm">
-              15 Días
-            </Button>
-            <Button onClick={handleLastMonth} variant="secondary" size="sm" className="text-xs md:text-sm">
-              Último Mes
-            </Button>
+          {/* Que se vea qué rango está mirando uno */}
+          <div className="mt-3 text-xs md:text-sm text-green-700">
+            {filterDates.startDate || filterDates.endDate ? (
+              <>
+                Mostrando del <strong>{filterDates.startDate || "inicio"}</strong> al{" "}
+                <strong>{filterDates.endDate || "final"}</strong>
+              </>
+            ) : (
+              <>Mostrando <strong>todo el histórico</strong>. Elige un rango arriba para acotarlo.</>
+            )}
           </div>
         </GlassCard>
 

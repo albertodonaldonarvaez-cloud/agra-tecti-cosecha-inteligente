@@ -6,6 +6,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import { FloatingNav } from "./components/FloatingNav";
 import { useAuth } from "./_core/hooks/useAuth";
 import { useActivityTracker } from "./hooks/useActivityTracker";
+import { useDocumentTitle } from "./hooks/useDocumentTitle";
 import { Suspense, lazy } from "react";
 
 // ====== CODE SPLITTING: Carga diferida de páginas ======
@@ -53,6 +54,9 @@ function Router() {
   
   // Registrar actividad del usuario automáticamente
   useActivityTracker();
+
+  // La pestaña del navegador dice en qué pantalla se está
+  useDocumentTitle();
 
   if (loading) {
     return <PageLoader />;

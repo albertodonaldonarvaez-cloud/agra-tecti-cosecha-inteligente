@@ -2396,6 +2396,9 @@ export const appRouter = router({
 
             // Curva alineada: semana 0 = primera semana de cosecha del ciclo
             let curve: { week: number; boxes: number; kg: number; firstQualityKg: number }[] = [];
+            // Misma idea que la curva semanal, pero por mes de cosecha: es la
+            // unidad en la que el productor piensa la temporada
+            let monthCurve: { month: number; boxes: number; kg: number; firstQualityKg: number }[] = [];
             let byParcel: { parcelCode: string; boxes: number; kg: number }[] = [];
             if (harvestStart) {
               const rows: any = await drizzle.execute(sql`
@@ -2415,6 +2418,34 @@ export const appRouter = router({
                 .filter((r) => Number(r.week) >= 0)
                 .map((r) => ({
                   week: Number(r.week),
+                  boxes: Number(r.boxes),
+                  kg: Math.round(Number(r.grams || 0) / 1000 * 10) / 10,
+                  firstQualityKg: Math.round(Number(r.firstGrams || 0) / 1000 * 10) / 10,
+                }));
+
+              // PERIOD_DIFF compara meses DE CALENDARIO: el mes 0 es aquel en que
+              // arrancó la cosecha y el 1 el siguiente. Así cuadra con las
+              // tarjetas mensuales, que también son meses de calendario;
+              // TIMESTAMPDIFF contaría meses cumplidos desde el día exacto de
+              // arranque y las ventanas no coincidirían.
+              const monthRows: any = await drizzle.execute(sql`
+                SELECT PERIOD_DIFF(DATE_FORMAT(DATE(submissionTime), '%Y%m'),
+                                   DATE_FORMAT(${harvestStart}, '%Y%m')) AS month,
+                       COUNT(*) AS boxes,
+                       SUM(weight) AS grams,
+                       SUM(CASE WHEN harvesterId NOT IN (98, 99) THEN weight ELSE 0 END) AS firstGrams
+                  FROM boxes
+                 WHERE archived = 0
+                   AND DATE(submissionTime) >= ${harvestStart}
+                   AND DATE(submissionTime) <= ${rangeEnd}
+                 GROUP BY month
+                 ORDER BY month
+              `);
+              const mList = ((monthRows as any)?.[0] ?? (monthRows as any)?.rows ?? []) as any[];
+              monthCurve = mList
+                .filter((r) => Number(r.month) >= 0)
+                .map((r) => ({
+                  month: Number(r.month),
                   boxes: Number(r.boxes),
                   kg: Math.round(Number(r.grams || 0) / 1000 * 10) / 10,
                   firstQualityKg: Math.round(Number(r.firstGrams || 0) / 1000 * 10) / 10,
@@ -2475,6 +2506,7 @@ export const appRouter = router({
                 ? Math.round(stats.totalWeight / stats.total * 100) / 100
                 : 0,
               curve,
+              monthCurve,
               byParcel,
               activities,
             };

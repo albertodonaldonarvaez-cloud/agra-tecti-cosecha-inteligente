@@ -49,7 +49,11 @@ export function getReportCss(): string {
       --text-muted: ${REPORT_COLORS.gris};
     }
 
-    @page { size: letter; margin: 0; }
+    /* Medida explícita en pulgadas: la palabra "letter" la ignoran algunos
+       motores y entonces la hoja se maqueta en A4, que es 6 mm más angosta.
+       Con 8.5in de contenido sobre A4 el navegador reescala o parte la página,
+       que es de donde salen los brincos raros. */
+    @page { size: 8.5in 11in portrait; margin: 0; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
@@ -421,15 +425,62 @@ export function getReportCss(): string {
     }
 
     @media print {
-      body { background: #ffffff; }
-      .page { box-shadow: none; margin: 0; }
+      html, body { background: #ffffff; margin: 0; padding: 0; width: 8.5in; }
       .no-print { display: none !important; }
+
+      /* Un pelo menos que la hoja. Si la caja mide 11in exactos, cualquier
+         redondeo a píxeles la pasa de largo y el navegador mete una hoja en
+         blanco detrás de cada página: eso son los brincos. No se recorta el
+         contenido a propósito: si una página se pasa, es preferible que se vea
+         mal a que se pierda una labor del reporte. */
+      .page {
+        width: 8.5in;
+        min-height: calc(11in - 2px);
+        height: auto;
+        margin: 0;
+        box-shadow: none;
+        page-break-after: always;
+        break-after: page;
+      }
+      .page:last-child {
+        page-break-after: auto;
+        break-after: auto;
+      }
     }
     @media screen {
       body { padding: 24px 0; }
       .page { box-shadow: 0 2px 16px rgba(15,81,50,0.10); margin-bottom: 22px; }
+
+      /* Recordatorio de cómo imprimir; nunca sale en el papel */
+      .print-hint {
+        max-width: 8.5in; margin: 0 auto 16px auto; padding: 12px 18px;
+        border: 1px solid var(--borde); border-left: 3px solid var(--verde-medio);
+        border-radius: 4px; background: #ffffff;
+        font-size: 12px; line-height: 1.6; color: var(--tinta);
+      }
+      .print-hint strong { color: var(--verde); }
+      .print-hint kbd {
+        background: var(--fondo-suave); border: 1px solid var(--borde);
+        border-radius: 3px; padding: 1px 5px; font-family: inherit; font-size: 11px;
+      }
     }
   `;
+}
+
+/**
+ * Aviso que solo se ve en pantalla, nunca en el papel.
+ *
+ * Por bien que esté el CSS, el diálogo de impresión manda: si el navegador
+ * viene con A4 y márgenes por omisión, un documento de 8.5 pulgadas no cabe y
+ * la maquetación se desarma. Esto le dice al usuario qué escoger.
+ */
+export function printHintHtml(): string {
+  return `<div class="print-hint no-print">
+    <strong>Para guardar en PDF:</strong> usa <kbd>Ctrl</kbd> + <kbd>P</kbd> y verifica que el diálogo tenga
+    <strong>Tamaño de papel: Carta (Letter)</strong>, <strong>Márgenes: Ninguno</strong>,
+    <strong>Escala: 100%</strong> y la casilla <strong>Gráficos de fondo</strong> activada.
+    Con papel A4 o márgenes por omisión las páginas se recorren y salen hojas en blanco.
+  </div>`;
 }
 
 /** Escapa texto para meterlo en el HTML del reporte, conservando acentos */

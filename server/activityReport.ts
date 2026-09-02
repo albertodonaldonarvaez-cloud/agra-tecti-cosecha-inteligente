@@ -363,18 +363,40 @@ function extractJson(text: string): any | null {
   }
 }
 
-async function getDeepSeekKey(): Promise<string | null> {
+/**
+ * Clave de DeepSeek guardada en Ajustes.
+ *
+ * Devuelve también el motivo cuando no se puede usar. Antes cualquier tropiezo
+ * terminaba en "null" y la pantalla decía que faltaba configurar la clave,
+ * aunque la clave estuviera guardada y el problema fuera otro: por ejemplo que
+ * se cifró con un JWT_SECRET distinto al actual y ya no se puede descifrar.
+ */
+async function getDeepSeekKey(): Promise<{ key: string | null; motivo?: string }> {
+  let guardada: string | null = null;
   try {
     const { getGlobalSetting } = await import("./globalSettings");
-    let apiKey = await getGlobalSetting("deepseekApiKey");
-    if (!apiKey) return null;
-    try {
-      const { decryptSecret, isEncrypted } = await import("./encryption");
-      if (isEncrypted(apiKey)) apiKey = decryptSecret(apiKey);
-    } catch { /* la clave estaba en claro */ }
-    return apiKey;
-  } catch {
-    return null;
+    guardada = await getGlobalSetting("deepseekApiKey");
+  } catch (error: any) {
+    return { key: null, motivo: `No se pudo leer la configuración: ${error?.message || error}` };
+  }
+
+  if (!guardada || guardada.trim() === "") {
+    return { key: null, motivo: "No hay clave de DeepSeek guardada en Ajustes" };
+  }
+
+  try {
+    const { decryptSecret, isEncrypted } = await import("./encryption");
+    if (isEncrypted(guardada)) {
+      // Si esto truena, mandar el texto cifrado como clave solo produce un 401
+      // incomprensible: es mejor decirlo aquí.
+      return { key: decryptSecret(guardada) };
+    }
+    return { key: guardada };
+  } catch (error: any) {
+    return {
+      key: null,
+      motivo: "La clave guardada no se pudo descifrar (¿cambió JWT_SECRET?). Vuelve a guardarla en Ajustes.",
+    };
   }
 }
 
@@ -383,24 +405,35 @@ async function getDeepSeekKey(): Promise<string | null> {
 const aiCache = new Map<string, { at: number; value: ActivityAiSummary }>();
 const AI_CACHE_TTL_MS = 30 * 60 * 1000;
 
+export type AiStatus = "ok" | "sin_actividades" | "sin_clave" | "error";
+
+export interface AiResultado {
+  summary: ActivityAiSummary | null;
+  status: AiStatus;
+  /** Qué salió mal, en palabras que se puedan mostrar en pantalla */
+  detalle?: string;
+}
+
 export async function buildAiSummary(
   activities: ActivityLine[],
   summary: ActivitySummary,
   period: { from: string; to: string },
   options?: { force?: boolean; cacheKey?: string }
-): Promise<ActivityAiSummary | null> {
-  if (activities.length === 0) return null;
+): Promise<AiResultado> {
+  if (activities.length === 0) {
+    return { summary: null, status: "sin_actividades", detalle: "No hubo labores que resumir en el periodo" };
+  }
 
   const cacheKey = options?.cacheKey || `${period.from}|${period.to}|${activities.length}`;
   if (!options?.force) {
     const hit = aiCache.get(cacheKey);
-    if (hit && Date.now() - hit.at < AI_CACHE_TTL_MS) return hit.value;
+    if (hit && Date.now() - hit.at < AI_CACHE_TTL_MS) return { summary: hit.value, status: "ok" };
   }
 
-  const apiKey = await getDeepSeekKey();
+  const { key: apiKey, motivo } = await getDeepSeekKey();
   if (!apiKey) {
-    console.log("[ReporteActividades] Sin clave de DeepSeek: se omite el resumen con IA");
-    return null;
+    console.log(`[ReporteActividades] Sin resumen con IA: ${motivo}`);
+    return { summary: null, status: "sin_clave", detalle: motivo };
   }
 
   // Se manda el detalle completo, no solo los totales: la IA tiene que poder
@@ -475,15 +508,30 @@ Escribe en español de México, con tono de ingeniero agrónomo: directo, sin ad
     });
 
     if (!response.ok) {
-      console.error(`[ReporteActividades] DeepSeek respondió ${response.status}`);
-      return null;
+      // El cuerpo dice si es la clave, el modelo o el saldo; sin él, cualquier
+      // fallo se ve igual desde la pantalla
+      let detalle = "";
+      try { detalle = (await response.text()).replace(/\s+/g, " ").trim().slice(0, 200); } catch { /* respuesta ilegible */ }
+      console.error(`[ReporteActividades] DeepSeek respondió ${response.status}: ${detalle}`);
+      return {
+        summary: null,
+        status: "error",
+        detalle: response.status === 401
+          ? "DeepSeek rechazó la clave (401). Vuelve a guardarla en Ajustes."
+          : `DeepSeek respondió ${response.status}. ${detalle}`,
+      };
     }
 
     const result = await response.json();
     const text = result.choices?.[0]?.message?.content?.trim();
     if (!text) {
-      console.error("[ReporteActividades] DeepSeek devolvió texto vacío:", result.choices?.[0]?.finish_reason);
-      return null;
+      const razon = result.choices?.[0]?.finish_reason;
+      console.error("[ReporteActividades] DeepSeek devolvió texto vacío:", razon);
+      return {
+        summary: null,
+        status: "error",
+        detalle: `DeepSeek no devolvió texto (${razon || "sin motivo"}). Suele ser presupuesto de tokens agotado.`,
+      };
     }
 
     const parsed = extractJson(text);
@@ -504,13 +552,18 @@ Escribe en español de México, con tono de ingeniero agrónomo: directo, sin ad
       : // Si no vino JSON, al menos se aprovecha el texto tal cual
         { resumen: text, porLabor: [], insumos: null, pendientes: null, recomendaciones: [] };
 
-    if (!value.resumen) return null;
+    if (!value.resumen) {
+      return { summary: null, status: "error", detalle: "DeepSeek respondió sin un resumen utilizable" };
+    }
 
     aiCache.set(cacheKey, { at: Date.now(), value });
-    return value;
+    return { summary: value, status: "ok" };
   } catch (error: any) {
-    console.error("[ReporteActividades] Error al generar el resumen con IA:", error?.message || error);
-    return null;
+    const detalle = error?.name === "TimeoutError"
+      ? "DeepSeek tardó demasiado en responder"
+      : String(error?.message || error).slice(0, 200);
+    console.error("[ReporteActividades] Error al generar el resumen con IA:", detalle);
+    return { summary: null, status: "error", detalle };
   }
 }
 
@@ -526,11 +579,17 @@ export async function buildActivityReport(input: {
   const summary = summarizeActivities(activities);
 
   let ai: ActivityAiSummary | null = null;
+  let aiStatus: AiStatus = "sin_actividades";
+  let aiDetalle: string | undefined;
+
   if (input.withAi !== false) {
-    ai = await buildAiSummary(activities, summary, { from: input.fromDate, to: input.toDate }, {
+    const resultado = await buildAiSummary(activities, summary, { from: input.fromDate, to: input.toDate }, {
       force: input.forceAi,
       cacheKey: `${input.fromDate}|${input.toDate}|${input.parcelId ?? "todas"}|${activities.length}`,
     });
+    ai = resultado.summary;
+    aiStatus = resultado.status;
+    aiDetalle = resultado.detalle;
   }
 
   return {
@@ -538,5 +597,8 @@ export async function buildActivityReport(input: {
     summary,
     activities,
     ai,
+    // Para que la pantalla diga qué pasó en vez de culpar siempre a la clave
+    aiStatus,
+    aiDetalle: aiDetalle ?? null,
   };
 }

@@ -315,6 +315,19 @@ export const ADMIN_ONLY_PAGES = [
 /**
  * Obtener páginas para la navegación
  */
+/**
+ * Nombre legible de una pantalla a partir de su ruta.
+ * Lo usan la bitácora de actividad y el título de la pestaña del navegador.
+ */
+export function getPageName(path: string): string {
+  const page = PAGES_CONFIG.find(p => p.path === path);
+  if (page) return page.fullName;
+  const adminPage = ADMIN_ONLY_PAGES.find(p => p.path === path);
+  if (adminPage) return adminPage.fullName;
+  if (path === "/profile") return "Mi Perfil";
+  return path;
+}
+
 export function getNavPages() {
   return PAGES_CONFIG
     .filter(p => p.showInNav)

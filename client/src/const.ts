@@ -1,6 +1,8 @@
 export { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 
-export const APP_TITLE = import.meta.env.VITE_APP_TITLE || "App";
+// El build de Docker no recibe VITE_APP_TITLE, asi que el respaldo es lo que
+// se ve en la practica: tiene que ser el nombre real, no "App".
+export const APP_TITLE = import.meta.env.VITE_APP_TITLE || "Agra Tec-Ti";
 
 export const APP_LOGO = "/logo-agra-tecti.svg";
 

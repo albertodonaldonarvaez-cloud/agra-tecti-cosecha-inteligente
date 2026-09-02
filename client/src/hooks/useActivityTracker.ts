@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { PAGES_CONFIG, ADMIN_ONLY_PAGES } from "@/config/pages";
+import { getPageName } from "@/config/pages";
 
 /**
  * Hook que registra automáticamente la actividad del usuario:
@@ -10,15 +10,6 @@ import { PAGES_CONFIG, ADMIN_ONLY_PAGES } from "@/config/pages";
  * - page_leave con duración cuando sale de una página
  * - login cuando inicia sesión
  */
-
-function getPageName(path: string): string {
-  const page = PAGES_CONFIG.find(p => p.path === path);
-  if (page) return page.fullName;
-  const adminPage = ADMIN_ONLY_PAGES.find(p => p.path === path);
-  if (adminPage) return adminPage.fullName;
-  if (path === "/profile") return "Mi Perfil";
-  return path;
-}
 
 // Generar un sessionId único por sesión del navegador
 function getSessionId(): string {

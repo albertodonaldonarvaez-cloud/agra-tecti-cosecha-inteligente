@@ -9,7 +9,7 @@ import {
   BarChart3, Globe, Filter, Satellite, AlertTriangle,
   CheckCircle, Leaf, Droplets, Thermometer, Box, Layers, BookOpen, Mail, Send, Sparkles
 } from "lucide-react";
-import { getReportCss } from "@/lib/reportTheme";
+import { getReportCss, printHintHtml } from "@/lib/reportTheme";
 import { buildActivityReportHtml } from "@/lib/activityReportDoc";
 
 
@@ -740,6 +740,7 @@ export default function Reports() {
   <style>${getReportCss()}</style>
 </head>
 <body>
+${printHintHtml()}
 ${html}
 </body>
 </html>`;
@@ -1251,7 +1252,11 @@ ${html}
             ) : (
               <GlassCard className="p-4" hover={false}>
                 <p className="text-sm text-amber-700">
-                  El reporte se genera sin resumen de IA. Configura la clave de DeepSeek en Ajustes para incluirlo.
+                  {activityData.aiStatus === "sin_actividades"
+                    ? "No hay labores en este periodo, así que no hay nada que resumir."
+                    : activityData.aiStatus === "sin_clave"
+                      ? `El reporte se genera sin resumen de IA. ${activityData.aiDetalle || "Configura la clave de DeepSeek en Ajustes."}`
+                      : `No se pudo generar el resumen con IA: ${activityData.aiDetalle || "error desconocido"}. El reporte se genera igual con los datos.`}
                 </p>
               </GlassCard>
             )}

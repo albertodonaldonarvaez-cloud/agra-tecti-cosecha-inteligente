@@ -1,4 +1,4 @@
-import { esc, getReportCss } from "./reportTheme";
+import { esc, getReportCss, printHintHtml } from "./reportTheme";
 
 /**
  * Documento del reporte de actividades de campo.
@@ -206,7 +206,9 @@ export function buildActivityReportHtml(data: ActivityReportData, opts: Activity
   const periodo = `${fechaLarga(data.period.from)} — ${fechaLarga(data.period.to)}`;
 
   // ── Reparto de las labores por página ──
-  const PESO_MAX = 26; // caben ~26 renglones de tarjeta por página
+  // Estimación deliberadamente conservadora: es preferible que sobre espacio
+  // en la hoja a que una labor se derrame y empuje la maquetación
+  const PESO_MAX = 22;
   const paginasDetalle: ActivityLine[][] = [];
   let actual: ActivityLine[] = [];
   let peso = 0;
@@ -431,6 +433,7 @@ export function buildActivityReportHtml(data: ActivityReportData, opts: Activity
   <style>${getReportCss()}</style>
 </head>
 <body>
+${printHintHtml()}
 ${html}
 </body>
 </html>`;
