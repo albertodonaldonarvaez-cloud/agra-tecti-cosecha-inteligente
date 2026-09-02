@@ -129,7 +129,6 @@ clear-db.ts
 /screenshots/
 
 # Docker
-.dockerignore
 
 # ===== Android App =====
 android-app/.gradle/

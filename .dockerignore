@@ -1,0 +1,47 @@
+# Qué NO se manda al demonio de Docker al construir la imagen.
+#
+# Sin este archivo el contexto de build eran 6.2 GB (node_modules, el proyecto
+# de Android, el historial de git y las fotos descargadas), que se transfieren
+# enteros en cada `docker compose build` antes de ejecutar un solo paso.
+
+# Dependencias y compilados: la imagen los reinstala y reconstruye
+node_modules
+dist
+.pnpm-store
+
+# Historial y metadatos del repositorio
+.git
+.gitignore
+.github
+
+# App de Android: no interviene en la construcción del servidor ni del cliente
+android-app
+*.apk
+*.aab
+
+# Datos que viven en volúmenes, no en la imagen
+photos
+data
+init-db
+
+# Volcados y fixtures de desarrollo
+output.json
+test-data.json
+*.log
+
+# Configuración local y secretos
+.env
+.env.*
+!.env.example
+
+# Herramientas del entorno de trabajo
+.vscode
+.idea
+.manus
+.claude
+
+# OJO: patches/ SÍ debe viajar — pnpm aplica patches/wouter@3.7.1.patch
+!patches
+
+# Vistas previas y temporales
+.preview-*.html

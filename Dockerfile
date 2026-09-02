@@ -13,8 +13,13 @@ COPY package.json pnpm-lock.yaml ./
 # Copiar patches necesarios para pnpm
 COPY patches ./patches
 
-# Instalar pnpm globalmente
-RUN npm install -g pnpm
+# Instalar pnpm globalmente, FIJANDO la version que declara packageManager.
+# Sin fijarla, cada build tomaba la ultima publicada: la 11 ya no lee
+# pnpm.patchedDependencies ni pnpm.overrides de package.json (el parche de
+# wouter dejaba de aplicarse) y rechaza el lockfile por la verificacion de
+# binarios nativos. No se notaba porque la capa quedaba en cache hasta que
+# cambiara pnpm-lock.yaml.
+RUN npm install -g pnpm@10.4.1
 
 # ===== Etapa de dependencias =====
 FROM base AS deps
