@@ -32,6 +32,13 @@ export const users = mysqlTable("users", {
   canViewLabels: boolean("canViewLabels").default(false).notNull(),
   canViewCycles: boolean("canViewCycles").default(true).notNull(),
   canViewReports: boolean("canViewReports").default(true).notNull(),
+  // Pesar cajas desde el kiosco de báscula (0027). Para imprimir se reutiliza
+  // canViewLabels, que ya existe.
+  canWeighBoxes: boolean("canWeighBoxes").default(false).notNull(),
+  // Apagar una báscula perdida sin borrar al usuario ni arrastrar el rastro de
+  // lo que capturó. Los tokens duran 30 días (365 el de refresco), así que sin
+  // esto no habría forma de cortarle la sesión a un aparato.
+  isActive: boolean("isActive").default(true).notNull(),
   // Campos de personalización de perfil
   avatarColor: varchar("avatarColor", { length: 32 }).default("#16a34a"),
   avatarEmoji: varchar("avatarEmoji", { length: 16 }).default("🌿"),
@@ -156,6 +163,34 @@ export const boxes = mysqlTable("boxes", {
   originalBoxCode: varchar("originalBoxCode", { length: 64 }), // Código original antes de editar (para rastreo)
   archived: boolean("archived").default(false).notNull(), // Cajas archivadas no aparecen en dashboard
   archivedAt: timestamp("archivedAt"), // Fecha de archivado
+
+  // ── Pesaje desde la báscula (0027) ──────────────────────────────
+  // Todas nulas: lo ya capturado se sigue leyendo exactamente igual y la
+  // sincronización de Kobo ni se entera de que existen.
+
+  // A qué ciclo pertenece la caja. Se deduce de la fecha (ver server/ciclos.ts).
+  // Nulo = la fecha no cae en ningún ciclo registrado; es información útil, no
+  // un error que haya que tapar.
+  cycleId: int("cycleId"),
+
+  // El peso que marcó la báscula y la caja vacía, en gramos.
+  // OJO: `weight` de arriba NO cambia de significado — siempre ha sido el peso
+  // NETO (lo que se captura en Kobo ya viene sin tara) y lo sigue siendo:
+  // weight = grossWeight - tareWeight. Estas dos columnas son el detalle que
+  // permite auditar y detectar una báscula descalibrada.
+  grossWeight: int("grossWeight"),
+  tareWeight: int("tareWeight"),
+  boxTypeId: int("boxTypeId"), // → boxTypes.id, de dónde salió la tara
+
+  labelId: int("labelId"), // → labels.id, la etiqueta que regresó con esta caja
+  weighedByUserId: int("weighedByUserId"), // cada báscula tiene su cuenta
+  deviceId: varchar("deviceId", { length: 64 }), // para notar dos aparatos en la misma cuenta
+  clientUuid: varchar("clientUuid", { length: 64 }).unique(), // idempotencia del envío offline
+  // Nulo en lo ya capturado: no se registró el origen y no vale la pena
+  // suponerlo (hay cajas de Kobo y cajas cargadas por Excel mezcladas).
+  origin: mysqlEnum("origin", ["kobo", "app", "excel", "manual"]),
+  weighedAt: timestamp("weighedAt"), // cuándo se pesó, según la báscula
+
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -902,6 +937,17 @@ export const labelPrintHistory = mysqlTable("labelPrintHistory", {
   quantity: int("quantity").notNull(),
   printedAt: timestamp("printedAt").defaultNow().notNull(),
   printedBy: int("printedBy"),
+
+  // ── Cabecera del lote de impresión (0027) ──────────────────────
+  // Esta tabla pasa a ser la cabecera; el detalle por etiqueta vive en `labels`.
+  // Lo ya impreso se conserva tal cual y se marca como 'impreso' en la migración.
+  cycleId: int("cycleId"),
+  deviceId: varchar("deviceId", { length: 64 }),
+  clientUuid: varchar("clientUuid", { length: 64 }).unique(),
+  // pendiente → los folios están apartados, la impresora todavía no confirma
+  // impreso   → salieron bien
+  // cancelado → se atoró; los folios quedan quemados y no se reutilizan
+  status: mysqlEnum("status", ["pendiente", "impreso", "cancelado"]),
 });
 export type LabelPrintHistory = typeof labelPrintHistory.$inferSelect;
 export type InsertLabelPrintHistory = typeof labelPrintHistory.$inferInsert;
@@ -957,3 +1003,80 @@ export const apiKeyUsage = mysqlTable("apiKeyUsage", {
 });
 
 export type ApiKeyUsage = typeof apiKeyUsage.$inferSelect;
+
+// ══════════════════════════════════════
+// BÁSCULA: TIPOS DE CAJA, FOLIOS Y ETIQUETAS (0027)
+// ══════════════════════════════════════
+// Cimientos del módulo de pesaje desde el kiosco. En esta fase las tablas se
+// crean y se quedan vacías: nada las lee ni las escribe todavía.
+
+// Los tipos de caja con su tara estándar. Sin esto, el pesador teclearía la
+// tara cientos de veces al día y se equivocaría en alguna.
+export const boxTypes = mysqlTable("boxTypes", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 128 }).notNull(),
+  tareGrams: int("tareGrams").notNull(), // gramos, igual que boxes.weight
+  isDefault: boolean("isDefault").default(false).notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  notes: varchar("notes", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type BoxType = typeof boxTypes.$inferSelect;
+export type InsertBoxType = typeof boxTypes.$inferInsert;
+
+// El repartidor de folios: una fila por ciclo con el último número entregado.
+//
+// Hoy el folio lo calcula el navegador (lee el último, le suma uno) y se lo
+// avisa al servidor. Dos básculas que impriman a la vez leen el mismo número y
+// sacan etiquetas físicas repetidas. Con esta tabla el reparto lo hace el
+// servidor en una sola instrucción que suma y devuelve al mismo tiempo, así que
+// nadie puede leer un valor viejo: no hay lectura separada que quede atrás.
+//
+// Se llena sola en la fase 2: la primera vez que un ciclo pide folios, el
+// contador arranca desde el último folio ya impreso, para que la cosecha en
+// curso no repita números a media temporada. El reinicio en cero llega con el
+// ciclo siguiente.
+export const labelFolioCounters = mysqlTable("labelFolioCounters", {
+  id: int("id").autoincrement().primaryKey(),
+  cycleId: int("cycleId").notNull().unique(),
+  lastFolio: int("lastFolio").default(0).notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type LabelFolioCounter = typeof labelFolioCounters.$inferSelect;
+
+// Una fila por etiqueta, no por rango.
+//
+// labelPrintHistory guarda "se imprimieron 200, de la 1200 a la 1399", y con eso
+// es imposible contestar qué pasó con la 1247. Aquí vive el estado de cada una,
+// que es lo que convierte "imprimimos de más" en un número por cortadora y día.
+export const LABEL_STATUSES = ["asignada", "impresa", "usada", "cancelada", "reimpresa"] as const;
+
+export const labels = mysqlTable("labels", {
+  id: int("id").autoincrement().primaryKey(),
+  cycleId: int("cycleId").notNull(),
+  harvesterNumber: int("harvesterNumber").notNull(),
+  folio: int("folio").notNull(),
+  code: varchar("code", { length: 64 }).notNull(), // el "CC-FFFFFF" impreso
+  batchId: int("batchId").notNull(), // → labelPrintHistory.id
+  // asignada  → folio apartado, la impresora todavía no confirma
+  // impresa   → anda en el campo y debe regresar
+  // usada     → volvió con una caja (boxId)
+  // cancelada → se arrugó o se atoró; el folio NO se reutiliza
+  // reimpresa → se emitió otra en su lugar (replacedByLabelId)
+  status: mysqlEnum("status", LABEL_STATUSES).default("asignada").notNull(),
+  boxId: int("boxId"),
+  replacedByLabelId: int("replacedByLabelId"),
+  printedByUserId: int("printedByUserId"),
+  deviceId: varchar("deviceId", { length: 64 }),
+  printedAt: timestamp("printedAt"),
+  usedAt: timestamp("usedAt"),
+  canceledAt: timestamp("canceledAt"),
+  canceledReason: varchar("canceledReason", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type Label = typeof labels.$inferSelect;
+export type InsertLabel = typeof labels.$inferInsert;

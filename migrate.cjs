@@ -52,6 +52,10 @@ async function migrate() {
       { col: 'canViewLabels', sql: "ALTER TABLE users ADD COLUMN canViewLabels BOOLEAN NOT NULL DEFAULT FALSE" },
       { col: 'canViewCycles', sql: "ALTER TABLE users ADD COLUMN canViewCycles BOOLEAN NOT NULL DEFAULT TRUE" },
       { col: 'canViewReports', sql: "ALTER TABLE users ADD COLUMN canViewReports BOOLEAN NOT NULL DEFAULT TRUE" },
+      // Bascula (0027). Pesar se apaga por omision; para imprimir se reutiliza canViewLabels.
+      { col: 'canWeighBoxes', sql: "ALTER TABLE users ADD COLUMN canWeighBoxes BOOLEAN NOT NULL DEFAULT FALSE" },
+      // Apagar una bascula perdida sin borrar al usuario ni perder su rastro.
+      { col: 'isActive', sql: "ALTER TABLE users ADD COLUMN isActive BOOLEAN NOT NULL DEFAULT TRUE" },
       { col: 'avatarColor', sql: "ALTER TABLE users ADD COLUMN avatarColor VARCHAR(32) DEFAULT '#16a34a'" },
       { col: 'avatarEmoji', sql: "ALTER TABLE users ADD COLUMN avatarEmoji VARCHAR(16) DEFAULT '🌿'" },
       { col: 'bio', sql: "ALTER TABLE users ADD COLUMN bio VARCHAR(255) DEFAULT NULL" },
@@ -483,6 +487,187 @@ async function migrate() {
     // el filtro por rango de un agente es un escaneo completo de la tabla.
     await ensureIndex('boxes', 'idx_boxes_submission',
       "ALTER TABLE boxes ADD INDEX idx_boxes_submission (submissionTime)");
+
+    // ══ Bascula: cimientos del pesaje desde el kiosco (0027) ══════
+    //
+    // Esta migracion NO cambia ningun comportamiento. Crea tablas que nadie
+    // lee todavia y agrega columnas nulas. Lo unico que toca datos existentes
+    // es el relleno de cycleId, que es un valor deducido de la fecha: no
+    // inventa nada y no pisa nada.
+
+    // Tipos de caja con su tara estandar, en gramos (igual que boxes.weight).
+    await conn.query(`CREATE TABLE IF NOT EXISTS boxTypes (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(128) NOT NULL,
+      tareGrams INT NOT NULL,
+      isDefault BOOLEAN NOT NULL DEFAULT FALSE,
+      isActive BOOLEAN NOT NULL DEFAULT TRUE,
+      notes VARCHAR(255) NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+    // El repartidor de folios: una fila por ciclo. Se llena sola en la fase 2,
+    // la primera vez que un ciclo pide folios. Nace vacia a proposito: si se
+    // sembrara aqui y la fase 2 tardara semanas en salir, el contador llegaria
+    // atrasado respecto a lo que se siguio imprimiendo por el camino viejo.
+    await conn.query(`CREATE TABLE IF NOT EXISTS labelFolioCounters (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      cycleId INT NOT NULL,
+      lastFolio INT NOT NULL DEFAULT 0,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY labelFolioCounters_cycle (cycleId)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+    // Una fila por etiqueta. Aqui SI va el indice unico, porque la tabla nace
+    // vacia: no hay dato viejo que pueda impedir crearlo. Ponerselo a
+    // boxes.boxCode tumbaria el despliegue, porque esa columna ya trae codigos
+    // repetidos y MySQL rechaza el indice con la aplicacion a medio arrancar.
+    await conn.query(`CREATE TABLE IF NOT EXISTS labels (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      cycleId INT NOT NULL,
+      harvesterNumber INT NOT NULL,
+      folio INT NOT NULL,
+      code VARCHAR(64) NOT NULL,
+      batchId INT NOT NULL,
+      status ENUM('asignada','impresa','usada','cancelada','reimpresa') NOT NULL DEFAULT 'asignada',
+      boxId INT NULL,
+      replacedByLabelId INT NULL,
+      printedByUserId INT NULL,
+      deviceId VARCHAR(64) NULL,
+      printedAt TIMESTAMP NULL,
+      usedAt TIMESTAMP NULL,
+      canceledAt TIMESTAMP NULL,
+      canceledReason VARCHAR(255) NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY labels_ciclo_folio (cycleId, harvesterNumber, folio),
+      UNIQUE KEY labels_ciclo_codigo (cycleId, code),
+      KEY idx_labels_pendientes (cycleId, status),
+      KEY idx_labels_box (boxId),
+      KEY idx_labels_lote (batchId)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+    // ── Columnas nuevas en boxes ────────────────────────────────
+    // OJO: `weight` no se toca. Siempre ha sido el peso NETO (lo que se captura
+    // en Kobo ya viene sin tara) y lo sigue siendo. Las dos columnas de abajo
+    // son el detalle: weight = grossWeight - tareWeight.
+    await ensureColumn('boxes', 'cycleId',
+      "ALTER TABLE boxes ADD COLUMN cycleId INT NULL");
+    await ensureColumn('boxes', 'grossWeight',
+      "ALTER TABLE boxes ADD COLUMN grossWeight INT NULL");
+    await ensureColumn('boxes', 'tareWeight',
+      "ALTER TABLE boxes ADD COLUMN tareWeight INT NULL");
+    await ensureColumn('boxes', 'boxTypeId',
+      "ALTER TABLE boxes ADD COLUMN boxTypeId INT NULL");
+    await ensureColumn('boxes', 'labelId',
+      "ALTER TABLE boxes ADD COLUMN labelId INT NULL");
+    await ensureColumn('boxes', 'weighedByUserId',
+      "ALTER TABLE boxes ADD COLUMN weighedByUserId INT NULL");
+    await ensureColumn('boxes', 'deviceId',
+      "ALTER TABLE boxes ADD COLUMN deviceId VARCHAR(64) NULL");
+    await ensureColumn('boxes', 'clientUuid',
+      "ALTER TABLE boxes ADD COLUMN clientUuid VARCHAR(64) NULL");
+    // Sin DEFAULT a proposito: MySQL rellenaria las 28 mil filas viejas con el
+    // valor por omision, y ahi hay cajas de Kobo mezcladas con cajas cargadas
+    // por Excel. Nulo = no se registro el origen, que es la verdad.
+    await ensureColumn('boxes', 'origin',
+      "ALTER TABLE boxes ADD COLUMN origin ENUM('kobo','app','excel','manual') NULL DEFAULT NULL");
+    await ensureColumn('boxes', 'weighedAt',
+      "ALTER TABLE boxes ADD COLUMN weighedAt TIMESTAMP NULL DEFAULT NULL");
+
+    // Varios NULL conviven en un indice unico de MySQL, asi que esto no estorba
+    // a lo ya capturado y hace idempotente el envio de la bascula.
+    await ensureIndex('boxes', 'boxes_clientUuid_unique',
+      "ALTER TABLE boxes ADD UNIQUE INDEX boxes_clientUuid_unique (clientUuid)");
+    // La deteccion de duplicados tiene que agrupar por (ciclo, codigo) en cuanto
+    // el folio se reinicie; sin este indice seria un escaneo completo.
+    await ensureIndex('boxes', 'idx_boxes_ciclo_codigo',
+      "ALTER TABLE boxes ADD INDEX idx_boxes_ciclo_codigo (cycleId, boxCode)");
+
+    // ── Columnas nuevas en labelPrintHistory ────────────────────
+    await ensureColumn('labelPrintHistory', 'cycleId',
+      "ALTER TABLE labelPrintHistory ADD COLUMN cycleId INT NULL");
+    await ensureColumn('labelPrintHistory', 'deviceId',
+      "ALTER TABLE labelPrintHistory ADD COLUMN deviceId VARCHAR(64) NULL");
+    await ensureColumn('labelPrintHistory', 'clientUuid',
+      "ALTER TABLE labelPrintHistory ADD COLUMN clientUuid VARCHAR(64) NULL");
+    await ensureColumn('labelPrintHistory', 'status',
+      "ALTER TABLE labelPrintHistory ADD COLUMN status ENUM('pendiente','impreso','cancelado') NULL DEFAULT NULL");
+    await ensureIndex('labelPrintHistory', 'labelPrintHistory_clientUuid_unique',
+      "ALTER TABLE labelPrintHistory ADD UNIQUE INDEX labelPrintHistory_clientUuid_unique (clientUuid)");
+
+    // Lo que ya esta en el historial se imprimio: marcarlo asi es un hecho, no
+    // una suposicion. Solo toca las filas en nulo, asi que un lote 'pendiente'
+    // de la fase 2 no se ve afectado si esta migracion vuelve a correr.
+    const [lotesViejos] = await conn.query(
+      "UPDATE labelPrintHistory SET status = 'impreso' WHERE status IS NULL"
+    );
+    if (lotesViejos.affectedRows > 0) {
+      console.log(`[Migration] labelPrintHistory: ${lotesViejos.affectedRows} lote(s) marcados como impresos`);
+    }
+
+    // ── Relleno del ciclo en lo ya capturado ────────────────────
+    //
+    // El ciclo se deduce de la fecha. Esta consulta es la misma regla que
+    // server/ciclos.ts (probada en ciclos.test.ts): entre el arranque del ciclo
+    // y su cierre —o hasta hoy si sigue abierto—, y si dos se traslaparan gana
+    // el de arranque mas reciente, para que la respuesta no dependa del orden
+    // en que MySQL devuelva las filas.
+    //
+    // Solo rellena lo que esta en nulo: si alguien corrige un ciclo a mano,
+    // volver a correr la migracion no le pisa la correccion.
+    //
+    // "Hoy" se calcula en hora de Mexico y no con CURDATE(), que usa la zona
+    // horaria de MySQL — si el contenedor esta en UTC, a partir de las 6 de la
+    // tarde ya seria "mañana" y las cajas del dia quedarian fuera del ciclo.
+    const hoyMx = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+
+    const [ciclosHay] = await conn.query("SELECT COUNT(*) AS n FROM productionCycles");
+    if (ciclosHay[0].n === 0) {
+      console.log('[Migration] Sin ciclos registrados: no hay de donde deducir cycleId, se deja en nulo');
+    } else {
+      const [rellenoCajas] = await conn.query(`
+        UPDATE boxes b
+        SET b.cycleId = (
+          SELECT c.id FROM productionCycles c
+          WHERE DATE(b.submissionTime) >= c.startDate
+            AND DATE(b.submissionTime) <= COALESCE(c.endDate, ?)
+          ORDER BY c.startDate DESC, c.id DESC
+          LIMIT 1
+        )
+        WHERE b.cycleId IS NULL
+      `, [hoyMx]);
+      console.log(`[Migration] boxes.cycleId: ${rellenoCajas.affectedRows} caja(s) revisadas`);
+
+      await conn.query(`
+        UPDATE labelPrintHistory h
+        SET h.cycleId = (
+          SELECT c.id FROM productionCycles c
+          WHERE DATE(h.printedAt) >= c.startDate
+            AND DATE(h.printedAt) <= COALESCE(c.endDate, ?)
+          ORDER BY c.startDate DESC, c.id DESC
+          LIMIT 1
+        )
+        WHERE h.cycleId IS NULL
+      `, [hoyMx]);
+
+      // El recuento es la verificacion: si un ciclo sale con cero cajas o el
+      // "sin ciclo" sale enorme, es que las fechas de los ciclos estan mal
+      // capturadas — y conviene enterarse ahora, no en el primer reporte.
+      const [reparto] = await conn.query(`
+        SELECT COALESCE(c.name, 'SIN CICLO') AS ciclo, COUNT(*) AS cajas
+        FROM boxes b
+        LEFT JOIN productionCycles c ON c.id = b.cycleId
+        GROUP BY b.cycleId, c.name
+        ORDER BY cajas DESC
+      `);
+      console.log('[Migration] Reparto de cajas por ciclo:');
+      for (const fila of reparto) {
+        console.log(`  - ${fila.ciclo}: ${fila.cajas} cajas`);
+      }
+    }
+
+    console.log('[Migration] 0027 (cimientos de bascula) OK');
   } catch (err) {
     console.error('[Migration] Error:', err.message);
   } finally {
