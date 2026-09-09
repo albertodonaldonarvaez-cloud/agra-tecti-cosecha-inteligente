@@ -742,6 +742,12 @@ async function startServer() {
   const { crearApiV1 } = await import("../api/index");
   app.use("/api/v1", crearApiV1());
 
+  // API del kiosco de báscula (escribe, con el token de la app de campo).
+  // Separada de /api/v1 a propósito: distinto público, distinta autenticación,
+  // y así "nada de /api/v1 escribe en la base" sigue siendo cierto.
+  const { crearApiCampo } = await import("../kiosco/index");
+  app.use("/api/campo/v1", crearApiCampo());
+
   // tRPC API
   app.use(
     "/api/trpc",

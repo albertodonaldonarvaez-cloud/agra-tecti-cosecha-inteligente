@@ -20,7 +20,14 @@ export default function LabelPrinter() {
   const harvestersQ = trpc.harvesters.list.useQuery();
   const lastFolioQ = trpc.getLastFolio.useQuery();
   const historyQ = trpc.labelHistory.useQuery();
-  const printMut = trpc.printLabels.useMutation();
+  // El folio ya no se calcula aquí. Antes esta pantalla preguntaba cuál fue el
+  // último, le sumaba uno e imprimía: dos personas con un minuto de diferencia
+  // leían el mismo número y salían dos juegos de etiquetas físicas iguales.
+  // Ahora se le piden N folios al servidor y él contesta cuáles tocaron.
+  const apartarMut = trpc.apartarFolios.useMutation();
+  const confirmarMut = trpc.confirmarLote.useMutation();
+  const cancelarMut = trpc.cancelarLote.useMutation();
+  const ocupado = apartarMut.isPending || confirmarMut.isPending;
 
   const [harvesterNum, setHarvesterNum] = useState<string>("");
   const [labelText, setLabelText] = useState("Cosecha SR 30");
@@ -52,6 +59,12 @@ export default function LabelPrinter() {
   }, []);
 
   const lastFolio = lastFolioQ.data?.lastFolio || 0;
+  const cicloAbierto = lastFolioQ.data?.cicloId != null;
+  const cicloNombre = lastFolioQ.data?.cicloNombre ?? null;
+
+  // Rango APROXIMADO, solo para la vista previa. El definitivo lo reparte el
+  // servidor al apartar, y puede no ser este si alguien más imprimió mientras
+  // tanto — que es justo el caso que antes producía etiquetas repetidas.
   const folioStart = lastFolio + 1;
   const folioEnd = folioStart + quantity - 1;
 
@@ -93,8 +106,27 @@ export default function LabelPrinter() {
     if (!harvesterNum) { toast.error("Selecciona una cortadora"); return; }
     if (quantity < 1) { toast.error("Cantidad debe ser al menos 1"); return; }
 
+    // Apartar ANTES de imprimir: el rango que se imprime es el que el servidor
+    // entregó, no uno calculado aquí.
+    let lote;
+    try {
+      lote = await apartarMut.mutateAsync({
+        harvesterNumber: parseInt(harvesterNum), labelText, quantity,
+      });
+    } catch (e: any) {
+      toast.error(e?.message || "No se pudieron apartar los folios");
+      return;
+    }
+
     const printWindow = window.open("", "_blank", "width=400,height=600");
-    if (!printWindow) { toast.error("No se pudo abrir la ventana de impresión"); return; }
+    if (!printWindow) {
+      // Sin ventana no se imprimió nada, así que los folios se queman en vez de
+      // quedarse apartados en el limbo.
+      await cancelarMut.mutateAsync({ loteId: lote.loteId, motivo: "No se abrió la ventana de impresión" }).catch(() => {});
+      lastFolioQ.refetch();
+      toast.error("No se pudo abrir la ventana de impresión. Permite las ventanas emergentes.");
+      return;
+    }
 
     let labelsHtml = "";
     for (let i = 0; i < quantity; i++) {
@@ -115,7 +147,7 @@ body { font-family: Arial, Helvetica, sans-serif; -webkit-print-color-adjust: ex
 </style></head><body>${labelsHtml}
 <script>
 document.querySelectorAll('.barcode').forEach((svg, i) => {
-  const folio = ${folioStart} + i;
+  const folio = ${lote.folioStart} + i;
   const folioStr = String(folio).padStart(6, '0');
   const hn = "${harvesterNum}".padStart(2, '0');
   JsBarcode(svg, hn + "-" + folioStr, { format: "CODE128", width: 1.5, height: 25, fontSize: 11, margin: 0, marginTop: 0, marginBottom: 0, displayValue: true, textMargin: 2, font: "Arial", fontOptions: "bold" });
@@ -127,11 +159,15 @@ setTimeout(() => { window.print(); }, 300);
     printWindow.document.close();
 
     try {
-      await printMut.mutateAsync({ harvesterNumber: parseInt(harvesterNum), labelText, folioStart, folioEnd, quantity });
+      await confirmarMut.mutateAsync({ loteId: lote.loteId });
+      toast.success(`${quantity} etiqueta(s): ${pad6(lote.folioStart)} a ${pad6(lote.folioEnd)}`);
+    } catch {
+      // El lote existe y los folios están apartados; solo no quedó confirmado.
+      toast.error(`Se imprimió el rango ${pad6(lote.folioStart)}–${pad6(lote.folioEnd)}, pero no se pudo marcar como impreso. Revísalo en el historial.`);
+    } finally {
       lastFolioQ.refetch();
       historyQ.refetch();
-      toast.success(`${quantity} etiqueta(s) enviadas a impresión`);
-    } catch { toast.error("Error guardando historial"); }
+    }
   };
 
   // ── Impresión DIRECTA via agente TSPL ──
@@ -140,6 +176,17 @@ setTimeout(() => { window.print(); }, 300);
     if (quantity < 1) { toast.error("Cantidad debe ser al menos 1"); return; }
 
     setDirectPrinting(true);
+    let lote;
+    try {
+      lote = await apartarMut.mutateAsync({
+        harvesterNumber: parseInt(harvesterNum), labelText, quantity,
+      });
+    } catch (e: any) {
+      setDirectPrinting(false);
+      toast.error(e?.message || "No se pudieron apartar los folios");
+      return;
+    }
+
     try {
       const res = await fetch("http://127.0.0.1:9199/print", {
         method: "POST",
@@ -148,23 +195,27 @@ setTimeout(() => { window.print(); }, 300);
           mode: "cosecha",
           text: labelText,
           harvesterNum: harvesterNum,
-          folioStart: folioStart,
+          folioStart: lote.folioStart,
           quantity: quantity,
         }),
       });
       const data = await res.json();
       if (data.success) {
-        await printMut.mutateAsync({ harvesterNumber: parseInt(harvesterNum), labelText, folioStart, folioEnd, quantity });
-        lastFolioQ.refetch();
-        historyQ.refetch();
-        toast.success(`✅ ${quantity} etiqueta(s) enviadas directo a la impresora`);
+        await confirmarMut.mutateAsync({ loteId: lote.loteId });
+        toast.success(`✅ ${quantity} etiqueta(s) impresas: ${pad6(lote.folioStart)} a ${pad6(lote.folioEnd)}`);
       } else {
-        toast.error(`Error: ${data.error || "Fallo de impresión"}`);
+        // La impresora avisó que falló: esos folios se queman y el siguiente
+        // lote sigue de largo. Reutilizarlos es como salen etiquetas repetidas.
+        await cancelarMut.mutateAsync({ loteId: lote.loteId, motivo: data.error || "Fallo de impresión" }).catch(() => {});
+        toast.error(`Error: ${data.error || "Fallo de impresión"}. Los folios ${pad6(lote.folioStart)}–${pad6(lote.folioEnd)} quedaron cancelados.`);
       }
     } catch (err) {
-      toast.error("No se pudo conectar al agente de impresión. ¿Está corriendo?");
+      await cancelarMut.mutateAsync({ loteId: lote.loteId, motivo: "No respondió el agente de impresión" }).catch(() => {});
+      toast.error("No se pudo conectar al agente de impresión. ¿Está corriendo? Los folios apartados se cancelaron.");
     } finally {
       setDirectPrinting(false);
+      lastFolioQ.refetch();
+      historyQ.refetch();
     }
   };
 
@@ -223,7 +274,7 @@ setTimeout(() => { window.print(); }, 300);
         <GlassCard className="p-3 text-center">
           <Hash className="h-4 w-4 mx-auto text-emerald-500 mb-1" />
           <p className="text-xl font-bold text-emerald-600 font-mono">{pad6(lastFolio)}</p>
-          <p className="text-xs text-gray-500">Último Folio</p>
+          <p className="text-xs text-gray-500">{cicloNombre ? `Último — ${cicloNombre}` : "Último Folio"}</p>
         </GlassCard>
         <GlassCard className="p-3 text-center">
           <ArrowRight className="h-4 w-4 mx-auto text-blue-500 mb-1" />
@@ -285,7 +336,7 @@ setTimeout(() => { window.print(); }, 300);
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Rango de Folios</label>
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider" title="El rango definitivo lo asigna el servidor al imprimir, para que dos personas no reciban el mismo">Rango de Folios (aprox.)</label>
               <div className="flex items-center gap-2 h-9 px-3 rounded-md border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/30 text-sm">
                 <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">{pad6(folioStart)}</span>
                 <ArrowRight className="h-3 w-3 text-gray-400" />
@@ -296,10 +347,20 @@ setTimeout(() => { window.print(); }, 300);
           </div>
 
           <div className="mt-5 space-y-2">
+            {/* Sin ciclo abierto no se pueden repartir folios: más vale decirlo
+                aquí que dejar que el operador le dé a Imprimir y reciba un
+                error que no sabe cómo arreglar. */}
+            {!lastFolioQ.isLoading && !cicloAbierto && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-900 dark:text-amber-200">
+                <strong>No hay ciclo abierto hoy.</strong> El folio se reparte por ciclo, así que
+                no se puede imprimir hasta que se abra uno en Ciclos de producción.
+              </div>
+            )}
+
             {/* Botón impresión directa TSPL */}
             <Button
               onClick={handleDirectPrint}
-              disabled={!harvesterNum || !agentOnline || directPrinting || printMut.isPending}
+              disabled={!harvesterNum || !agentOnline || !cicloAbierto || directPrinting || ocupado}
               className="w-full bg-gradient-to-r from-green-600 to-emerald-700 hover:from-green-700 hover:to-emerald-800 text-white gap-2 h-11 text-base font-semibold shadow-lg shadow-green-500/25"
             >
               <Zap className="h-5 w-5" />
@@ -322,11 +383,11 @@ setTimeout(() => { window.print(); }, 300);
             <Button
               variant="outline"
               onClick={handlePrint}
-              disabled={!harvesterNum || printMut.isPending}
+              disabled={!harvesterNum || !cicloAbierto || ocupado}
               className="w-full gap-2 h-9 text-sm border-gray-300 text-gray-600"
             >
               <Printer className="h-4 w-4" />
-              {printMut.isPending ? "Guardando..." : "Imprimir via Chrome (navegador)"}
+              {ocupado ? "Apartando folios..." : "Imprimir via Chrome (navegador)"}
             </Button>
           </div>
         </GlassCard>

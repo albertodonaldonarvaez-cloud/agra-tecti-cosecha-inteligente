@@ -383,15 +383,22 @@ export async function getDuplicateBoxCodes() {
   
   const { sql } = await import("drizzle-orm");
   
+  // El folio se reinicia en cada ciclo, así que el mismo código existe A
+  // PROPÓSITO en cosechas distintas: la 01-000123 del ciclo pasado y la del
+  // nuevo son etiquetas diferentes. Agrupar solo por código marcaría como
+  // duplicada media cosecha. Un duplicado de verdad es el mismo código dentro
+  // del mismo ciclo.
   const result = await db.execute(sql`
-    SELECT boxCode, COUNT(*) as count 
-    FROM boxes 
+    SELECT boxCode
+    FROM boxes
     WHERE archived = 0
-    GROUP BY boxCode 
+    GROUP BY cycleId, boxCode
     HAVING COUNT(*) > 1
   `);
-  
-  return (result[0] as any[]).map(r => r.boxCode);
+
+  // Un código puede salir repetido en dos ciclos distintos; al editor le basta
+  // con saber que hay que revisarlo.
+  return Array.from(new Set((result[0] as any[]).map(r => r.boxCode)));
 }
 
 // Obtener parcelas sin polígono definido
@@ -879,26 +886,39 @@ export async function autoResolveDuplicates() {
   const archived: { id: number; code: string; reason: string }[] = [];
   
   // 1. Obtener todos los códigos duplicados (no archivados)
+  //
+  // OJO CON EL CICLO. Esta rutina la llama koboSync sola después de cada
+  // sincronización, y la rama de abajo RENOMBRA cajas. Como el folio se
+  // reinicia en cada ciclo, el mismo código existe a propósito en la cosecha
+  // pasada y en la nueva, en días distintos — que es justo el caso que dispara
+  // el renombrado. Sin agrupar por ciclo, la primera sincronización del ciclo
+  // entrante le cambiaría el código a miles de cajas legítimas y el dato de la
+  // base dejaría de coincidir con la etiqueta pegada en la caja física.
   const duplicateResult = await db.execute(sql`
-    SELECT boxCode, COUNT(*) as cnt 
-    FROM boxes 
+    SELECT boxCode, cycleId, COUNT(*) as cnt
+    FROM boxes
     WHERE archived = 0
-    GROUP BY boxCode 
+    GROUP BY cycleId, boxCode
     HAVING COUNT(*) > 1
   `);
-  
-  const duplicateCodes = (duplicateResult[0] as unknown as any[]).map(r => r.boxCode);
-  
-  if (duplicateCodes.length === 0) {
+
+  const duplicates = (duplicateResult[0] as unknown as any[]).map(r => ({
+    code: r.boxCode as string,
+    cycleId: (r.cycleId ?? null) as number | null,
+  }));
+
+  if (duplicates.length === 0) {
     return { renamed, archived, message: "No se encontraron duplicados para resolver." };
   }
-  
-  // 2. Para cada código duplicado, obtener todas las cajas con ese código
-  for (const code of duplicateCodes) {
+
+  // 2. Para cada código duplicado, obtener todas las cajas de ESE ciclo con ese
+  //    código. `<=>` es la igualdad que también empareja NULL con NULL, para
+  //    que las cajas sin ciclo se comparen entre ellas y no con todo lo demás.
+  for (const { code, cycleId } of duplicates) {
     const boxesResult = await db.execute(sql`
       SELECT id, boxCode, weight, submissionTime, manuallyEdited
-      FROM boxes 
-      WHERE boxCode = ${code} AND archived = 0
+      FROM boxes
+      WHERE boxCode = ${code} AND cycleId <=> ${cycleId} AND archived = 0
       ORDER BY submissionTime ASC
     `);
     
@@ -930,7 +950,8 @@ export async function autoResolveDuplicates() {
           
           // Verificar que el nuevo código no exista ya
           const existsResult = await db.execute(sql`
-            SELECT COUNT(*) as cnt FROM boxes WHERE boxCode = ${newCode} AND archived = 0
+            SELECT COUNT(*) as cnt FROM boxes
+            WHERE boxCode = ${newCode} AND cycleId <=> ${cycleId} AND archived = 0
           `);
           const exists = (existsResult[0] as unknown as any[])[0]?.cnt > 0;
           if (exists) {
@@ -939,7 +960,8 @@ export async function autoResolveDuplicates() {
             while (true) {
               newCode = box.boxCode + String(suffix);
               const checkResult = await db.execute(sql`
-                SELECT COUNT(*) as cnt FROM boxes WHERE boxCode = ${newCode} AND archived = 0
+                SELECT COUNT(*) as cnt FROM boxes
+                WHERE boxCode = ${newCode} AND cycleId <=> ${cycleId} AND archived = 0
               `);
               if ((checkResult[0] as unknown as any[])[0]?.cnt === 0) break;
               suffix++;

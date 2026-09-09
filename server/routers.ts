@@ -5958,35 +5958,112 @@ Da un análisis ejecutivo de 6-8 líneas máximo: estado general de la operació
       }),
   }),
 
-  // ══════ LABELS ══════
+  // ══════ ETIQUETAS ══════
+  //
+  // El folio ya NO lo calcula el navegador. Antes preguntaba cuál fue el
+  // último, le sumaba uno e imprimía: dos personas en esa ventana recibían el
+  // mismo rango y salían etiquetas físicas repetidas. Ahora se piden N folios y
+  // el servidor contesta cuáles tocaron; la respuesta ES el apartado.
+  //
+  // La lógica vive en server/etiquetas.ts porque el kiosco de báscula llama a
+  // las mismas funciones por REST. Si cada uno tuviera su copia, tarde o
+  // temprano uno repartiría un folio que el otro ya dio.
+
+  /** Informativo: por dónde va el contador del ciclo abierto. */
   getLastFolio: protectedProcedure
     .query(async () => {
+      const { cicloDeHoy } = await import("./etiquetas");
       const drizzle = await getDb();
-      if (!drizzle) return { lastFolio: 0 };
-      const [last] = await drizzle.select({ folioEnd: labelPrintHistory.folioEnd }).from(labelPrintHistory).orderBy(desc(labelPrintHistory.folioEnd)).limit(1);
-      return { lastFolio: last?.folioEnd || 0 };
+      if (!drizzle) return { lastFolio: 0, cicloId: null, cicloNombre: null };
+
+      const ciclo = await cicloDeHoy();
+      if (!ciclo) return { lastFolio: 0, cicloId: null, cicloNombre: null };
+
+      const filas = await drizzle.execute(
+        sql`SELECT lastFolio FROM labelFolioCounters WHERE cycleId = ${ciclo.id}`
+      );
+      const fila = Array.isArray(filas) && Array.isArray(filas[0]) ? (filas[0] as any[])[0] : (filas as any)[0];
+      return {
+        lastFolio: Number(fila?.lastFolio ?? 0),
+        cicloId: ciclo.id,
+        cicloNombre: ciclo.name,
+      };
     }),
 
-  printLabels: protectedProcedure
+  /**
+   * Aparta folios. Devuelve el rango que TOCÓ, no el que se pidió.
+   * El lote queda "pendiente" hasta que se confirme o se cancele.
+   */
+  apartarFolios: protectedProcedure
     .input(z.object({
-      harvesterNumber: z.number(),
-      labelText: z.string(),
-      folioStart: z.number(),
-      folioEnd: z.number(),
-      quantity: z.number(),
+      harvesterNumber: z.number().int().min(1).max(99),
+      labelText: z.string().min(1).max(255),
+      quantity: z.number().int().min(1).max(5000),
     }))
     .mutation(async ({ input, ctx }) => {
-      const drizzle = await getDb();
-      if (!drizzle) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available" });
-      await drizzle.insert(labelPrintHistory).values({
-        harvesterNumber: input.harvesterNumber,
-        labelText: input.labelText,
-        folioStart: input.folioStart,
-        folioEnd: input.folioEnd,
-        quantity: input.quantity,
-        printedBy: (ctx as any).user?.id || null,
-      });
-      return { success: true };
+      const { apartarFolios, ErrorEtiqueta } = await import("./etiquetas");
+      try {
+        return await apartarFolios({
+          cortadora: input.harvesterNumber,
+          cantidad: input.quantity,
+          texto: input.labelText,
+          usuarioId: (ctx as any).user?.id ?? null,
+        });
+      } catch (e) {
+        if (e instanceof ErrorEtiqueta) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: e.ayuda ? `${e.message}. ${e.ayuda}` : e.message,
+          });
+        }
+        throw e;
+      }
+    }),
+
+  /** La impresora terminó bien: las etiquetas salen al campo. */
+  confirmarLote: protectedProcedure
+    .input(z.object({ loteId: z.number().int() }))
+    .mutation(async ({ input }) => {
+      const { confirmarLote, ErrorEtiqueta } = await import("./etiquetas");
+      try {
+        return await confirmarLote(input.loteId);
+      } catch (e) {
+        if (e instanceof ErrorEtiqueta) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: e.message });
+        }
+        throw e;
+      }
+    }),
+
+  /** Se atoró: los folios quedan quemados y NO se reutilizan. */
+  cancelarLote: protectedProcedure
+    .input(z.object({ loteId: z.number().int(), motivo: z.string().max(255).optional() }))
+    .mutation(async ({ input }) => {
+      const { cancelarLote, ErrorEtiqueta } = await import("./etiquetas");
+      try {
+        return await cancelarLote(input.loteId, input.motivo);
+      } catch (e) {
+        if (e instanceof ErrorEtiqueta) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: e.message });
+        }
+        throw e;
+      }
+    }),
+
+  /** Las impresas que nunca volvieron, por cortadora. */
+  etiquetasPendientes: protectedProcedure
+    .input(z.object({ cicloId: z.number().int().optional() }).optional())
+    .query(async ({ input }) => {
+      const { etiquetasPendientes } = await import("./etiquetas");
+      return await etiquetasPendientes({ cicloId: input?.cicloId });
+    }),
+
+  /** Cuántas impresas, usadas y canceladas lleva el ciclo. */
+  resumenEtiquetas: protectedProcedure
+    .input(z.object({ cicloId: z.number().int().optional() }).optional())
+    .query(async ({ input }) => {
+      const { resumenEtiquetas } = await import("./etiquetas");
+      return await resumenEtiquetas(input?.cicloId);
     }),
 
   labelHistory: protectedProcedure

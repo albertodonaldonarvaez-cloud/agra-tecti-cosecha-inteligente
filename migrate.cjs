@@ -668,6 +668,51 @@ async function migrate() {
     }
 
     console.log('[Migration] 0027 (cimientos de bascula) OK');
+
+    // ══ Siembra del contador de folios (0028) ═════════════════════
+    //
+    // A partir de aqui el folio lo reparte el servidor y se reinicia en cada
+    // ciclo. El ciclo que YA viene corriendo no puede empezar en cero: sus
+    // etiquetas se imprimieron con folios globales y volver a uno repetiria
+    // codigos a media cosecha. Por eso su contador arranca en el folio mas
+    // alto que se haya impreso jamas — nunca por debajo de nada ya emitido.
+    //
+    // Es una decision de transicion y va aqui, una sola vez. Los ciclos que se
+    // abran despues no pasan por este camino: nacen en cero, que es el
+    // reinicio que se pidio.
+    //
+    // Va junto con el codigo que la usa, no antes: si se hubiera sembrado en
+    // la 0027 y la fase 2 tardara semanas, se habria seguido imprimiendo por
+    // el camino viejo y el contador habria quedado atrasado.
+    const [ciclosAbiertos] = await conn.query(`
+      SELECT id, name FROM productionCycles
+      WHERE startDate <= ? AND COALESCE(endDate, ?) >= ?
+      ORDER BY startDate DESC, id DESC LIMIT 1
+    `, [hoyMx, hoyMx, hoyMx]);
+
+    if (ciclosAbiertos.length === 0) {
+      console.log('[Migration] Sin ciclo abierto hoy: el contador de folios se sembrara al abrir uno');
+    } else {
+      const ciclo = ciclosAbiertos[0];
+      // INSERT IGNORE: si el contador ya existe, no se pisa. Volver a correr la
+      // migracion no puede echar la cuenta para atras.
+      const [siembra] = await conn.query(`
+        INSERT IGNORE INTO labelFolioCounters (cycleId, lastFolio)
+        SELECT ?, COALESCE(MAX(folioEnd), 0) FROM labelPrintHistory
+      `, [ciclo.id]);
+
+      const [contador] = await conn.query(
+        "SELECT lastFolio FROM labelFolioCounters WHERE cycleId = ?", [ciclo.id]
+      );
+      const desde = contador[0] ? contador[0].lastFolio : 0;
+      if (siembra.affectedRows > 0) {
+        console.log(`[Migration] Contador de folios sembrado para "${ciclo.name}": sigue en ${desde + 1}`);
+      } else {
+        console.log(`[Migration] Contador de folios de "${ciclo.name}" ya existia: va en ${desde}`);
+      }
+    }
+
+    console.log('[Migration] 0028 (reparto de folios) OK');
   } catch (err) {
     console.error('[Migration] Error:', err.message);
   } finally {
