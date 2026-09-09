@@ -2,6 +2,7 @@ import { Loading } from "@/components/Loading";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { ProtectedPage } from "@/components/ProtectedPage";
 import { GlassCard } from "@/components/GlassCard";
+import { CicloChip, SelectorDeCiclo, diaEnPalabras, type CicloParaFiltrar } from "@/components/Ciclos";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getBoxPhotoUrl } from "@/lib/imageProxy";
@@ -35,55 +36,10 @@ interface Box {
   photoUrl: string | null;
   photoLocalPath?: string | null; // Copia guardada en el servidor
   submissionTime: Date;
-  // El ciclo lo deduce el servidor de la fecha de la caja (server/ciclos.ts).
+  // El ciclo lo deduce el servidor de la fecha de la caja (shared/ciclos.ts).
   // No se lee de boxes.cycleId: lo que entra por Kobo deja esa columna en nulo.
   cycleId?: number | null;
   cycleName?: string | null;
-}
-
-interface CicloOpcion {
-  id: number;
-  name: string;
-  desde: string;
-  hasta: string;
-  esElDeHoy: boolean;
-  cajas: number;
-}
-
-// Un día suelto "YYYY-MM-DD" en palabras, sin que la zona horaria lo recorra
-const diaEnPalabras = (fecha: string, opts?: Intl.DateTimeFormatOptions) =>
-  new Date(fecha + "T12:00:00").toLocaleDateString("es-MX", opts ?? { day: "numeric", month: "short", year: "numeric" });
-
-/**
- * A qué cosecha pertenece un renglón.
- *
- * "Sin ciclo" no es un hueco que haya que rellenar con el ciclo actual: es una
- * fecha que no cae en ninguno de los ciclos capturados, casi siempre por un
- * error de captura. Marcarla en ámbar es la única forma de que se note.
- */
-function CicloChip({ nombre, actual, className = "" }: { nombre?: string | null; actual?: boolean; className?: string }) {
-  if (!nombre) {
-    return (
-      <span
-        title="La fecha de esta caja no cae dentro de ningún ciclo registrado"
-        className={`inline-flex items-center gap-1 rounded-full bg-amber-100/80 px-2 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-inset ring-amber-300/60 ${className}`}
-      >
-        Sin ciclo
-      </span>
-    );
-  }
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${
-        actual
-          ? "bg-emerald-100/80 text-emerald-800 ring-emerald-300/60"
-          : "bg-slate-100/80 text-slate-600 ring-slate-300/60"
-      } ${className}`}
-    >
-      {actual && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
-      {nombre}
-    </span>
-  );
 }
 
 export default function Boxes() {
@@ -111,45 +67,6 @@ function TableSkeleton() {
         ))}
       </div>
     </div>
-  );
-}
-
-/**
- * Un ciclo como botón: nombre arriba, cuántas cajas y qué rango de fechas
- * abajo. El rango va escrito porque es lo que de verdad define al ciclo — la
- * caja no dice a cuál pertenece, se sabe por su fecha.
- */
-function CicloBoton({
-  activo,
-  onClick,
-  titulo,
-  detalle,
-  actual,
-  aviso,
-}: {
-  activo: boolean;
-  onClick: () => void;
-  titulo: string;
-  detalle: string;
-  actual?: boolean;
-  aviso?: boolean;
-}) {
-  const base = "rounded-2xl border px-4 py-2.5 text-left transition-all duration-200 backdrop-blur-sm";
-  const estado = activo
-    ? aviso
-      ? "border-amber-400 bg-amber-50 shadow-md ring-1 ring-amber-300"
-      : "border-green-500 bg-green-50 shadow-md ring-1 ring-green-400"
-    : "border-green-200/70 bg-white/50 hover:border-green-400 hover:bg-white/80";
-
-  return (
-    <button type="button" onClick={onClick} className={`${base} ${estado}`}>
-      <div className="flex items-center gap-2">
-        {actual && <span className="h-2 w-2 flex-shrink-0 rounded-full bg-emerald-500" />}
-        <span className={`text-sm font-semibold ${aviso ? "text-amber-900" : "text-green-900"}`}>{titulo}</span>
-        {actual && <span className="text-[10px] font-medium uppercase tracking-wide text-emerald-600">en curso</span>}
-      </div>
-      <div className={`mt-0.5 text-[11px] ${aviso ? "text-amber-700" : "text-green-600"}`}>{detalle}</div>
-    </button>
   );
 }
 
@@ -266,7 +183,7 @@ function BoxesContent() {
   const total = paginatedData?.total || 0;
   const totalPages = paginatedData?.totalPages || 0;
 
-  const ciclos: CicloOpcion[] = filterOptions?.cycles ?? [];
+  const ciclos: CicloParaFiltrar[] = filterOptions?.cycles ?? [];
   const sinCiclo = filterOptions?.sinCiclo ?? 0;
   const cicloDeHoy = ciclos.find((c) => c.esElDeHoy) ?? null;
 
@@ -331,40 +248,16 @@ function BoxesContent() {
 
           {/* Ciclos: la cosecha se parte por rango de fechas, que es el único
               dato que traen todas las cajas vengan de Kobo, de Excel o de la
-              báscula. Van como botones y no como lista desplegable para que el
-              reparto de cajas entre cosechas se vea sin abrir nada. */}
-          {ciclos.length > 0 && (
-            <div className="mb-4 md:mb-6">
-              <label className="mb-2 block text-sm font-medium text-green-900">Ciclo de producción</label>
-              <div className="flex flex-wrap gap-2">
-                <CicloBoton
-                  activo={filterCycle === "all"}
-                  onClick={() => cambiarCiclo("all")}
-                  titulo="Todos los ciclos"
-                  detalle={`${(filterOptions?.dates.length ?? 0).toLocaleString()} días con cosecha`}
-                />
-                {ciclos.map((c) => (
-                  <CicloBoton
-                    key={c.id}
-                    activo={filterCycle === String(c.id)}
-                    onClick={() => cambiarCiclo(String(c.id))}
-                    titulo={c.name}
-                    detalle={`${c.cajas.toLocaleString()} cajas · ${diaEnPalabras(c.desde, { day: "numeric", month: "short" })} a ${diaEnPalabras(c.hasta, { day: "numeric", month: "short", year: "numeric" })}`}
-                    actual={c.esElDeHoy}
-                  />
-                ))}
-                {sinCiclo > 0 && (
-                  <CicloBoton
-                    activo={filterCycle === "sin"}
-                    onClick={() => cambiarCiclo("sin")}
-                    titulo="Sin ciclo"
-                    detalle={`${sinCiclo.toLocaleString()} cajas con fecha fuera de todo ciclo`}
-                    aviso
-                  />
-                )}
-              </div>
-            </div>
-          )}
+              báscula. */}
+          <div className="mb-4 md:mb-6">
+            <SelectorDeCiclo
+              ciclos={ciclos}
+              sinCiclo={sinCiclo}
+              valor={filterCycle}
+              onChange={cambiarCiclo}
+              detalleDeTodos={`${(filterOptions?.dates.length ?? 0).toLocaleString()} días con cosecha`}
+            />
+          </div>
 
           <div className="mb-4 flex items-center gap-2">
             <Filter className="h-5 w-5 text-green-600" />

@@ -7,6 +7,8 @@ import { trpc } from "@/lib/trpc";
 import { Calendar, TrendingUp, Package, BarChart3, CalendarRange, Layers } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { compararConCicloAnterior, type CicloComparable, type ComparativoDeMes } from "@shared/cycleMonths";
+import { cicloDeFecha, type RangoCiclo } from "@shared/ciclos";
+import { CicloChip, SelectorDeCiclo, type CicloParaFiltrar } from "@/components/Ciclos";
 
 export default function DailyAnalysis() {
   return (
@@ -34,6 +36,11 @@ interface Periodo {
   parcels: Set<string>;
   cutters: Set<number>;
   dias: Set<string>;
+  /**
+   * De qué ciclos vienen las cajas del grupo. Casi siempre es uno solo; un mes
+   * partido entre dos cosechas trae dos, y eso hay que verlo y no promediarlo.
+   */
+  cicloIds: Set<number | null>;
   /** Año y mes (0-11) del grupo; solo en la vista mensual */
   anio?: number;
   mes?: number;
@@ -46,16 +53,17 @@ function nuevoPeriodo(key: string, titulo: string, orden: number): Periodo {
     firstQuality: 0, firstQualityWeight: 0,
     secondQuality: 0, secondQualityWeight: 0,
     waste: 0, wasteWeight: 0,
-    parcels: new Set(), cutters: new Set(), dias: new Set(),
+    parcels: new Set(), cutters: new Set(), dias: new Set(), cicloIds: new Set(),
   };
 }
 
 /** Suma una caja al grupo, con las mismas reglas de calidad de siempre */
-function acumular(entry: Periodo, box: any, diaStr: string) {
+function acumular(entry: Periodo, box: any, diaStr: string, cicloId: number | null) {
   entry.totalBoxes++;
   entry.totalWeight += box.weight;
   entry.parcels.add(box.parcelCode);
   entry.dias.add(diaStr);
+  entry.cicloIds.add(cicloId);
 
   // Las cortadoras 97/98/99 son categorías, no personas
   if (box.harvesterId !== 97 && box.harvesterId !== 98 && box.harvesterId !== 99) {
@@ -214,10 +222,24 @@ function ComparativoDelMes({ dato }: { dato: ComparativoDeMes }) {
 function DailyAnalysisContent() {
   const { user, loading } = useAuth();
   const [vista, setVista] = useState<"dia" | "mes">("dia");
+  // "all" = toda la historia junta, como se veía antes de que hubiera ciclos
+  const [ciclo, setCiclo] = useState<string>("all");
 
   const { data: boxes } = trpc.boxes.list.useQuery(undefined, {
     enabled: !!user,
   });
+
+  // Solo los rangos de fecha de cada ciclo. Es la consulta más barata que hay:
+  // no toca la tabla de cajas, y con ella el navegador puede decir a qué
+  // cosecha pertenece cada día usando el mismo criterio que el servidor.
+  const { data: rangosCiclo } = trpc.cycles.rangos.useQuery(undefined, {
+    enabled: !!user,
+    staleTime: 10 * 60 * 1000,
+  });
+  // Memorizado a propósito: `?? []` fabrica un arreglo nuevo en cada render, y
+  // con eso el useMemo de abajo volvería a recorrer todas las cajas cada vez
+  // que la pantalla se redibuja.
+  const rangos = useMemo<RangoCiclo[]>(() => rangosCiclo ?? [], [rangosCiclo]);
 
   // Los ciclos solo hacen falta en la vista mensual
   const { data: cyclesData } = trpc.cycles.comparison.useQuery(
@@ -232,19 +254,51 @@ function DailyAnalysisContent() {
     }
   }, [user, loading]);
 
-  /** Agrupa las cajas por día o por mes según la vista elegida */
-  const periodos = useMemo<Periodo[]>(() => {
+  /**
+   * Cada caja con su día y su ciclo ya resueltos.
+   *
+   * Se calcula una vez y no dentro del agrupado: cambiar de vista o de ciclo no
+   * tiene por qué volver a recorrer todas las cajas resolviendo fechas.
+   */
+  const cajasConCiclo = useMemo(() => {
     if (!boxes || boxes.length === 0) return [];
-
-    const mapa = new Map<string, Periodo>();
-
-    boxes.forEach((box: any) => {
+    return boxes.map((box: any) => {
       // Fecha local, no UTC: en UTC la cosecha de la tarde se pasa al día siguiente
       const fecha = new Date(box.submissionTime);
       const anio = fecha.getFullYear();
       const mes = fecha.getMonth();
-      const dia = String(fecha.getDate()).padStart(2, "0");
-      const diaStr = `${anio}-${String(mes + 1).padStart(2, "0")}-${dia}`;
+      const diaStr = `${anio}-${String(mes + 1).padStart(2, "0")}-${String(fecha.getDate()).padStart(2, "0")}`;
+      return { box, fecha, anio, mes, diaStr, cicloId: cicloDeFecha(diaStr, rangos) };
+    });
+  }, [boxes, rangos]);
+
+  // Cuántas cajas le tocan a cada ciclo, para que los botones digan el reparto
+  const ciclosParaFiltrar = useMemo<CicloParaFiltrar[]>(() => {
+    const conteo = new Map<number | null, number>();
+    for (const c of cajasConCiclo) conteo.set(c.cicloId, (conteo.get(c.cicloId) ?? 0) + 1);
+    return (rangosCiclo ?? []).map((r) => ({ ...r, cajas: conteo.get(r.id) ?? 0 }));
+  }, [cajasConCiclo, rangosCiclo]);
+
+  const sinCiclo = useMemo(
+    () => cajasConCiclo.filter((c) => c.cicloId === null).length,
+    [cajasConCiclo],
+  );
+
+  const nombreDeCiclo = useMemo(
+    () => new Map((rangosCiclo ?? []).map((r) => [r.id, r.name])),
+    [rangosCiclo],
+  );
+  const cicloDeHoy = (rangosCiclo ?? []).find((r) => r.esElDeHoy) ?? null;
+
+  /** Agrupa las cajas por día o por mes según la vista elegida */
+  const periodos = useMemo<Periodo[]>(() => {
+    if (cajasConCiclo.length === 0) return [];
+
+    const mapa = new Map<string, Periodo>();
+
+    cajasConCiclo.forEach(({ box, fecha, anio, mes, diaStr, cicloId }) => {
+      if (ciclo === "sin" && cicloId !== null) return;
+      if (ciclo !== "all" && ciclo !== "sin" && String(cicloId) !== ciclo) return;
 
       const key = vista === "dia" ? diaStr : `${anio}-${String(mes + 1).padStart(2, "0")}`;
 
@@ -263,7 +317,7 @@ function DailyAnalysisContent() {
         mapa.set(key, p);
       }
 
-      acumular(mapa.get(key)!, box, diaStr);
+      acumular(mapa.get(key)!, box, diaStr, cicloId);
     });
 
     const lista = Array.from(mapa.values()).sort((a, b) => b.orden - a.orden);
@@ -274,7 +328,7 @@ function DailyAnalysisContent() {
           : `${p.dias.size} días de corte · ${p.parcels.size} parcelas · ${p.cutters.size} cortadoras`;
     }
     return lista;
-  }, [boxes, vista]);
+  }, [cajasConCiclo, vista, ciclo]);
 
   if (loading || !user) {
     return <Loading />;
@@ -294,6 +348,11 @@ function DailyAnalysisContent() {
               {vista === "dia"
                 ? "Datos exactos de cada día de cosecha"
                 : "La temporada mes a mes, comparada contra el ciclo anterior"}
+              {ciclo === "sin"
+                ? <span className="text-amber-700"> · solo días fuera de todo ciclo</span>
+                : ciclo !== "all" && (
+                    <span className="text-green-600"> · {nombreDeCiclo.get(Number(ciclo))}</span>
+                  )}
             </p>
           </div>
         </div>
@@ -319,6 +378,19 @@ function DailyAnalysisContent() {
           ))}
         </div>
 
+        {/* Separación por cosecha. El día y el mes no dicen de qué ciclo son:
+            juntar dos cosechas en una sola lista hace que se comparen números
+            que no se pueden comparar. */}
+        <div className="mb-5">
+          <SelectorDeCiclo
+            ciclos={ciclosParaFiltrar}
+            sinCiclo={sinCiclo}
+            valor={ciclo}
+            onChange={setCiclo}
+            detalleDeTodos={`${cajasConCiclo.length.toLocaleString()} cajas en total`}
+          />
+        </div>
+
         {periodos.length > 0 ? (
           <div className="space-y-6">
             {periodos.map((p) => {
@@ -339,6 +411,17 @@ function DailyAnalysisContent() {
                           {p.titulo}
                         </h2>
                         <p className="text-xs md:text-sm text-green-600">{p.subtitulo}</p>
+                        {/* Un mes partido entre dos cosechas enseña las dos: es
+                            justo el mes que no se puede leer como si fuera uno. */}
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {Array.from(p.cicloIds).map((id) => (
+                            <CicloChip
+                              key={String(id)}
+                              nombre={id === null ? null : nombreDeCiclo.get(id) ?? null}
+                              actual={id !== null && id === cicloDeHoy?.id}
+                            />
+                          ))}
+                        </div>
                       </div>
                     </div>
                     <div className="text-right flex-shrink-0 ml-2">
@@ -358,7 +441,11 @@ function DailyAnalysisContent() {
         ) : (
           <GlassCard className="p-8 md:p-12 text-center">
             <Calendar className="mx-auto mb-4 h-12 w-12 md:h-16 md:w-16 text-green-300" />
-            <p className="text-base md:text-xl text-green-600">No hay datos de cosecha disponibles</p>
+            <p className="text-base md:text-xl text-green-600">
+              {ciclo === "all"
+                ? "No hay datos de cosecha disponibles"
+                : "Este ciclo todavía no tiene cajas registradas"}
+            </p>
           </GlassCard>
         )}
       </div>

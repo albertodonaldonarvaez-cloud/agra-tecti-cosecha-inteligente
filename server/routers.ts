@@ -2349,6 +2349,18 @@ export const appRouter = router({
   // después de la cosecha. La pertenencia de cajas/actividades se resuelve por
   // rango de fechas (sin FKs en boxes), así los datos históricos no se tocan.
   cycles: router({
+    /**
+     * Los ciclos con el pedazo de calendario que le toca a cada uno.
+     *
+     * Es lo más barato que hay aquí: no toca la tabla de cajas. Existe para las
+     * pantallas que agrupan cajas en el navegador y necesitan saber a qué
+     * cosecha pertenece cada fecha — `overview` haría el trabajo, pero corre
+     * las estadísticas completas de cada ciclo para devolver cuatro fechas.
+     */
+    rangos: protectedProcedure.query(async () => {
+      return await db.getCiclosDeCajas();
+    }),
+
     // Vista integral: todos los ciclos con sus estadísticas de cosecha,
     // el ciclo activo, si su cosecha ya inició y la última poda registrada
     overview: protectedProcedure.query(async () => {

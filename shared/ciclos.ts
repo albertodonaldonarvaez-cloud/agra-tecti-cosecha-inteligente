@@ -5,11 +5,15 @@
  * termina la cosecha. Como el ciclo se define por fechas, la pertenencia de una
  * caja se deduce sola — no hace falta que nadie la capture.
  *
- * Esta regla se usa en dos lados y tiene que ser LA MISMA en los dos:
+ * Esta regla la aplican varios lados y tiene que ser LA MISMA en todos:
  *   · la migración 0027, que rellena boxes.cycleId en lo ya capturado;
- *   · el alta de cajas desde la báscula, que resuelve el ciclo al vuelo.
+ *   · el alta de cajas desde la báscula, que resuelve el ciclo al vuelo;
+ *   · el listado de cajas y el análisis diario, que separan por cosecha.
  * Si se separaran, una caja vieja y una nueva del mismo día podrían acabar en
  * ciclos distintos.
+ *
+ * Vive en shared/ y no en server/ por eso mismo: la pantalla agrupa cajas en el
+ * navegador y tiene que decir exactamente lo mismo que el servidor.
  *
  * Todas las fechas son días de calendario "YYYY-MM-DD" en hora de México, que
  * es como ya se guardan startDate y endDate. Se comparan como texto a propósito:

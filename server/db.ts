@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users, apiConfig, harvesters, boxes, InsertBox, userActivityLogs, productionCycles } from "../drizzle/schema";
-import { rangosDeCiclo, cicloDeFecha, type RangoCiclo } from "./ciclos";
+import { rangosDeCiclo, cicloDeFecha, type RangoCiclo } from "../shared/ciclos";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;

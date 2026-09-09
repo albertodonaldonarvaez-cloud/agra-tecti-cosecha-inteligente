@@ -38,7 +38,7 @@ import {
   productionCycles,
 } from "../drizzle/schema";
 import { getDb } from "./db";
-import { resolverCiclo, type CicloRango } from "./ciclos";
+import { resolverCiclo, type CicloRango } from "../shared/ciclos";
 
 // ─────────────────────────── topes y formato ───────────────────────────
 

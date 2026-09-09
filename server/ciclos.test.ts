@@ -7,7 +7,7 @@
  * otro, y eso no se nota hasta que alguien compara dos cosechas.
  */
 import { describe, it, expect } from "vitest";
-import { resolverCiclo, finDeCiclo, rangosDeCiclo, cicloDeFecha, type CicloRango } from "./ciclos";
+import { resolverCiclo, finDeCiclo, rangosDeCiclo, cicloDeFecha, type CicloRango } from "../shared/ciclos";
 
 const HOY = "2026-09-08";
 
