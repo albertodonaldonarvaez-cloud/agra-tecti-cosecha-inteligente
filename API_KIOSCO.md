@@ -55,6 +55,26 @@ Y **el folio se reinicia en cada ciclo**. Eso quiere decir que el mismo
 `01-000123` existe a propósito en la cosecha pasada y en la nueva. Por eso todo
 lo que busca por código lleva ciclo; si no se dice cuál, se asume el abierto.
 
+### Imprimir para otro ciclo
+
+Por omisión se aparta para el ciclo en curso, y esa es casi siempre la respuesta
+correcta. Pero en el cambio de ciclo puede haber cortadoras terminando la cosecha
+vieja mientras el nuevo ya está abierto, y sus etiquetas tienen que llevar la
+numeración del ciclo al que van a pertenecer las cajas.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" https://TU-SERVIDOR/api/campo/v1/ciclos
+```
+
+Devuelve cada ciclo con `esElDeHoy` y su `ultimoFolio`. Manda `"ciclo": <id>` en
+el cuerpo solo cuando de verdad quieras otro: **la caja se busca por (ciclo,
+código), así que una etiqueta apartada en el ciclo equivocado no encuentra su
+caja.**
+
+Cada ciclo lleva su propia cuenta. Un ciclo recién abierto empieza en el folio 1;
+uno que ya imprimió sigue desde donde se quedó, así que escoger un ciclo viejo
+nunca repite un código dentro de él.
+
 ---
 
 ## 3. El flujo de impresión
@@ -82,6 +102,7 @@ curl -X POST https://TU-SERVIDOR/api/campo/v1/etiquetas/lotes \
   -H "X-Dispositivo: bascula-1" \
   -H "Content-Type: application/json" \
   -d '{"cortadora": 7, "cantidad": 200, "texto": "Cosecha SR 30", "clientUuid": "..."}'
+#     "ciclo": 3   ← opcional. Sin esto, el ciclo en curso.
 ```
 
 ```json
@@ -128,6 +149,7 @@ exigir un APK nuevo** ni bajar a las básculas del campo.
 |---|---|---|
 | `GET` | `/` | Portada. **No pide sesión**: es lo que se lee para saber cómo entrar |
 | `GET` | `/ciclos/actual` | Qué ciclo está abierto y por dónde va el conteo de etiquetas |
+| `GET` | `/ciclos` | Los ciclos entre los que se puede escoger, con su último folio |
 | `GET` | `/impresion/plantilla` | El TSPL con marcadores |
 | `POST` | `/etiquetas/lotes` | **Aparta N folios** |
 | `POST` | `/etiquetas/lotes/{id}/confirmar` | Salió bien |
@@ -156,7 +178,8 @@ El campo `ayuda` dice qué hacer. Y el **código HTTP dice si tiene caso reinten
 | `403 cuenta_desactivada` | Apagaron esta báscula | No reintentar. Avisa |
 | `403 sin_permiso` | La cuenta no puede imprimir | Que le activen “Etiquetas” |
 | `404` | Esa etiqueta o ese lote no existe | Revisa el código y el ciclo |
-| `409 sin_ciclo_abierto` | Hoy no cae en ningún ciclo | **No reintentar en bucle.** Hay que abrir el ciclo |
+| `400 ciclo_desconocido` | El `ciclo` que mandaste no existe | Consulta `GET /ciclos` y manda uno de esos |
+| `409 sin_ciclo_abierto` | Hoy no cae en ningún ciclo | **No reintentar en bucle.** Abre el ciclo, o di explícitamente para cuál imprimes |
 | `409 folio_agotado` | El ciclo llegó a 999999 | No reintentar. Hay que cerrar el ciclo |
 | `409 estado_no_permite` | Esa etiqueta ya se usó o se canceló | No reintentar |
 | `503` | La base no responde | Reintentar más tarde, con espera creciente |

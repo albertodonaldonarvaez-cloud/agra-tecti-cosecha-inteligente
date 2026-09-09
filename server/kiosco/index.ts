@@ -28,6 +28,7 @@ import {
   apartarFolios,
   cancelarLote,
   cicloDeHoy,
+  ciclosParaImprimir,
   confirmarLote,
   etiquetasPendientes,
   expedienteEtiqueta,
@@ -157,6 +158,19 @@ function campoEntero(req: Peticion, nombre: string, min: number, max: number): n
   return n;
 }
 
+/** Un entero del cuerpo que puede no venir. Sin valor por omisión: quien no lo
+ *  manda está diciendo "el ciclo de hoy", que no es lo mismo que "el ciclo 0". */
+function campoEnteroOpcional(req: Peticion, nombre: string): number | undefined {
+  const valor = (req.body ?? {})[nombre];
+  if (valor === undefined || valor === null || valor === "") return undefined;
+  const n = Number(valor);
+  if (!Number.isInteger(n) || n < 1) {
+    throw new ApiError(400, `${nombre}_invalido`, `"${nombre}" debe ser el id de un ciclo`,
+      "Consulta GET /api/campo/v1/ciclos para ver los ids.");
+  }
+  return n;
+}
+
 function campoTexto(req: Peticion, nombre: string, maxLargo: number, obligatorio = false): string | undefined {
   const valor = (req.body ?? {})[nombre];
   if (valor === undefined || valor === null || valor === "") {
@@ -196,6 +210,11 @@ export function crearApiCampo(): Router {
     return { abierto: true, ciclo, etiquetas: resumen };
   }));
 
+  api.get("/ciclos", atender(async () => ({
+    ciclos: await ciclosParaImprimir(),
+    nota: "Por omisión se aparta para el ciclo marcado con esElDeHoy. Manda \"ciclo\" solo si de verdad quieres otro: la caja se busca por (ciclo, código), así que una etiqueta del ciclo equivocado no encuentra su caja.",
+  })));
+
   api.get("/impresion/plantilla", atender(async () => plantillaImpresion()));
 
   // ── Etiquetas ────────────────────────────────────────────────
@@ -209,6 +228,7 @@ export function crearApiCampo(): Router {
       cortadora: campoEntero(req, "cortadora", 1, 99),
       cantidad: campoEntero(req, "cantidad", 1, 5000),
       texto: campoTexto(req, "texto", 255, true)!,
+      cicloId: campoEnteroOpcional(req, "ciclo"),
       usuarioId: req.usuario!.id,
       deviceId: req.dispositivo,
       clientUuid: campoTexto(req, "clientUuid", 64),
@@ -241,6 +261,7 @@ export function crearApiCampo(): Router {
     return await reimprimirEtiqueta({
       codigo: campoTexto(req, "codigo", 64, true)!,
       motivo: campoTexto(req, "motivo", 255),
+      cicloId: campoEnteroOpcional(req, "ciclo"),
       usuarioId: req.usuario!.id,
       deviceId: req.dispositivo,
       clientUuid: campoTexto(req, "clientUuid", 64),

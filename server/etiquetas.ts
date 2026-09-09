@@ -187,17 +187,114 @@ export async function cicloDeHoy(): Promise<CicloActivo | null> {
   return id === null ? null : (todos.find((c) => c.id === id) as CicloActivo);
 }
 
-/** El ciclo abierto, o un rechazo que dice qué hacer. */
-async function exigirCiclo(): Promise<CicloActivo> {
+/** Un ciclo concreto, por id. */
+async function cicloPorId(id: number): Promise<CicloActivo | null> {
+  const db = await baseDeDatos();
+  const [c] = await db
+    .select({
+      id: productionCycles.id,
+      name: productionCycles.name,
+      startDate: productionCycles.startDate,
+      endDate: productionCycles.endDate,
+    })
+    .from(productionCycles)
+    .where(eq(productionCycles.id, id))
+    .limit(1);
+  return (c as CicloActivo) ?? null;
+}
+
+/**
+ * El ciclo para el que se va a imprimir.
+ *
+ * Por omisión es el de hoy. Se puede pedir otro a propósito: en el cambio de
+ * ciclo puede haber cortadoras terminando la cosecha vieja mientras el ciclo
+ * nuevo ya está abierto, y sus etiquetas tienen que llevar la numeración del
+ * ciclo al que van a pertenecer las cajas, no la del calendario.
+ *
+ * Que sea explícito importa: la caja se va a buscar por (ciclo, código), así
+ * que una etiqueta apartada en el ciclo equivocado no encuentra su caja.
+ */
+async function exigirCiclo(cicloId?: number | null): Promise<CicloActivo> {
+  if (cicloId !== undefined && cicloId !== null) {
+    const elegido = await cicloPorId(cicloId);
+    if (!elegido) {
+      throw new ErrorEtiqueta(
+        "ciclo_desconocido",
+        `No existe el ciclo ${cicloId}`,
+        "Consulta los ciclos disponibles antes de apartar folios.",
+      );
+    }
+    return elegido;
+  }
+
   const ciclo = await cicloDeHoy();
   if (!ciclo) {
     throw new ErrorEtiqueta(
       "sin_ciclo_abierto",
       "Hoy no cae dentro de ningún ciclo de producción",
-      "Abre el ciclo en Ciclos de producción antes de imprimir. Un folio sin ciclo no se puede repartir sin riesgo de repetirlo.",
+      "Abre el ciclo en Ciclos de producción, o di explícitamente para qué ciclo quieres imprimir. Un folio sin ciclo no se puede repartir sin riesgo de repetirlo.",
     );
   }
   return ciclo;
+}
+
+export interface CicloParaImprimir extends CicloActivo {
+  /** true si hoy cae dentro de este ciclo */
+  esElDeHoy: boolean;
+  /** Último folio repartido. El siguiente lote empieza en este + 1 */
+  ultimoFolio: number;
+  impresas: number;
+  pendientes: number;
+}
+
+/**
+ * Los ciclos entre los que se puede escoger al imprimir, con su contador.
+ *
+ * Se listan del más reciente al más viejo. El de hoy va marcado para que la
+ * pantalla lo escoja sola: imprimir para otro ciclo tiene que ser una decisión,
+ * no un descuido.
+ */
+export async function ciclosParaImprimir(limite = 6): Promise<CicloParaImprimir[]> {
+  const db = await baseDeDatos();
+  const hoy = hoyMx();
+
+  const todos = await db
+    .select({
+      id: productionCycles.id,
+      name: productionCycles.name,
+      startDate: productionCycles.startDate,
+      endDate: productionCycles.endDate,
+    })
+    .from(productionCycles)
+    .orderBy(desc(productionCycles.startDate), desc(productionCycles.id))
+    .limit(limite);
+
+  const idDeHoy = resolverCiclo(hoy, todos as CicloRango[], hoy);
+
+  const cuentas = filas<{ cycleId: number; ultimoFolio: number; impresas: number; pendientes: number }>(
+    await db.execute(sql`
+      SELECT c.id AS cycleId,
+             COALESCE(f.lastFolio, (
+               SELECT COALESCE(MAX(h.folioEnd), 0) FROM labelPrintHistory h WHERE h.cycleId = c.id
+             )) AS ultimoFolio,
+             (SELECT COUNT(*) FROM labels l WHERE l.cycleId = c.id AND l.status IN ('impresa','usada')) AS impresas,
+             (SELECT COUNT(*) FROM labels l WHERE l.cycleId = c.id AND l.status = 'impresa') AS pendientes
+      FROM productionCycles c
+      LEFT JOIN labelFolioCounters f ON f.cycleId = c.id
+    `),
+  );
+  const porCiclo = new Map(cuentas.map((c) => [Number(c.cycleId), c]));
+
+  return todos.map((c) => {
+    const cuenta = porCiclo.get(c.id);
+    return {
+      ...(c as CicloActivo),
+      esElDeHoy: c.id === idDeHoy,
+      ultimoFolio: Number(cuenta?.ultimoFolio ?? 0),
+      impresas: Number(cuenta?.impresas ?? 0),
+      pendientes: Number(cuenta?.pendientes ?? 0),
+    };
+  });
 }
 
 // ─────────────────────────── reparto de folios ───────────────────────────
@@ -237,12 +334,14 @@ export async function apartarFolios(params: {
   cortadora: number;
   cantidad: number;
   texto: string;
+  /** Para qué ciclo. Por omisión, el de hoy. */
+  cicloId?: number | null;
   usuarioId?: number | null;
   deviceId?: string | null;
   clientUuid?: string | null;
 }): Promise<ResultadoLote> {
   const db = await baseDeDatos();
-  const ciclo = await exigirCiclo();
+  const ciclo = await exigirCiclo(params.cicloId);
 
   // Un reintento no vuelve a apartar: se contesta lo que ya se dio.
   if (params.clientUuid) {
@@ -274,13 +373,20 @@ export async function apartarFolios(params: {
   }
 
   return await db.transaction(async (tx) => {
-    // El contador del ciclo tiene que existir para poder bloquearlo. Nace en
-    // cero: el reinicio por ciclo es justamente eso. (La migración 0028 siembra
-    // aparte el ciclo que ya venía corriendo con folios globales, para que la
-    // cosecha en curso no repita números a media temporada.)
-    await tx.execute(
-      sql`INSERT IGNORE INTO labelFolioCounters (cycleId, lastFolio) VALUES (${ciclo.id}, 0)`,
-    );
+    // El contador del ciclo tiene que existir para poder bloquearlo, y arranca
+    // donde ese ciclo se haya quedado:
+    //
+    //   · un ciclo recién abierto no tiene historial → empieza en cero, que es
+    //     el reinicio del folio;
+    //   · un ciclo que ya imprimió sigue desde su propio máximo, así que poder
+    //     escoger un ciclo viejo nunca repite un código dentro de él.
+    //
+    // INSERT IGNORE: si el contador ya existe, esto no lo toca.
+    await tx.execute(sql`
+      INSERT IGNORE INTO labelFolioCounters (cycleId, lastFolio)
+      SELECT ${ciclo.id}, COALESCE(MAX(folioEnd), 0)
+      FROM labelPrintHistory WHERE cycleId = ${ciclo.id}
+    `);
 
     // FOR UPDATE bloquea el renglón hasta que esta transacción termine. Es lo
     // único que impide que dos básculas lean el mismo último folio.
@@ -439,12 +545,13 @@ export async function cancelarLote(
 export async function reimprimirEtiqueta(params: {
   codigo: string;
   motivo?: string;
+  cicloId?: number | null;
   usuarioId?: number | null;
   deviceId?: string | null;
   clientUuid?: string | null;
 }): Promise<ResultadoLote & { reemplaza: string }> {
   const db = await baseDeDatos();
-  const ciclo = await exigirCiclo();
+  const ciclo = await exigirCiclo(params.cicloId);
 
   const [vieja] = await db
     .select()
@@ -472,7 +579,8 @@ export async function reimprimirEtiqueta(params: {
   const nuevo = await apartarFolios({
     cortadora: vieja.harvesterNumber,
     cantidad: 1,
-    texto: params.motivo ? `Reimpresión de ${params.codigo}` : `Reimpresión de ${params.codigo}`,
+    texto: `Reimpresión de ${params.codigo}`,
+    cicloId: ciclo.id,
     usuarioId: params.usuarioId,
     deviceId: params.deviceId,
     clientUuid: params.clientUuid,

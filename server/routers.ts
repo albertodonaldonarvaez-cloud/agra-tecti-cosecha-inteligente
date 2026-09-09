@@ -5999,6 +5999,8 @@ Da un análisis ejecutivo de 6-8 líneas máximo: estado general de la operació
       harvesterNumber: z.number().int().min(1).max(99),
       labelText: z.string().min(1).max(255),
       quantity: z.number().int().min(1).max(5000),
+      /** Para qué ciclo. Sin esto, el de hoy. */
+      cicloId: z.number().int().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const { apartarFolios, ErrorEtiqueta } = await import("./etiquetas");
@@ -6007,6 +6009,7 @@ Da un análisis ejecutivo de 6-8 líneas máximo: estado general de la operació
           cortadora: input.harvesterNumber,
           cantidad: input.quantity,
           texto: input.labelText,
+          cicloId: input.cicloId,
           usuarioId: (ctx as any).user?.id ?? null,
         });
       } catch (e) {
@@ -6048,6 +6051,21 @@ Da un análisis ejecutivo de 6-8 líneas máximo: estado general de la operació
         }
         throw e;
       }
+    }),
+
+  /**
+   * Los ciclos entre los que se puede escoger al imprimir, con su contador.
+   *
+   * En el cambio de ciclo puede haber cortadoras terminando la cosecha vieja
+   * mientras el ciclo nuevo ya está abierto: sus etiquetas tienen que llevar la
+   * numeración del ciclo al que van a pertenecer las cajas.
+   */
+  ciclosParaImprimir: protectedProcedure
+    .query(async () => {
+      const { ciclosParaImprimir } = await import("./etiquetas");
+      const drizzle = await getDb();
+      if (!drizzle) return [];
+      return await ciclosParaImprimir();
     }),
 
   /** Las impresas que nunca volvieron, por cortadora. */

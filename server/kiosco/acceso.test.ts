@@ -61,6 +61,12 @@ vi.mock("../etiquetas", async (original) => {
       }
       return estado.lote;
     }),
+    ciclosParaImprimir: vi.fn(async () => ([
+      { id: 4, name: "ciclo 2026-2027", startDate: "2026-08-01", endDate: null,
+        esElDeHoy: true, ultimoFolio: 0, impresas: 0, pendientes: 0 },
+      { id: 3, name: "ciclo 2025-2026", startDate: "2025-01-20", endDate: "2026-07-31",
+        esElDeHoy: false, ultimoFolio: 30450, impresas: 30450, pendientes: 12 },
+    ])),
     confirmarLote: vi.fn(async () => ({ confirmadas: 200 })),
     cancelarLote: vi.fn(async () => ({ canceladas: 200 })),
     reimprimirEtiqueta: vi.fn(async () => ({ ...estado.lote, reemplaza: "07-000123" })),
@@ -294,5 +300,78 @@ describe("rechazos que el kiosco tiene que saber leer", () => {
     expect(r.estado).toBe(404);
     expect(r.cuerpo.error.codigo).toBe("ruta_desconocida");
     expect(r.cuerpo.error.ayuda).toContain("/api/campo/v1/");
+  });
+});
+
+describe("escoger el ciclo al imprimir", () => {
+  it("lista los ciclos y marca cuál es el de hoy", async () => {
+    const r = await pedir("/ciclos");
+
+    expect(r.estado).toBe(200);
+    expect(r.cuerpo.datos.ciclos).toHaveLength(2);
+    const deHoy = r.cuerpo.datos.ciclos.filter((c: any) => c.esElDeHoy);
+    expect(deHoy).toHaveLength(1);
+    expect(deHoy[0].name).toBe("ciclo 2026-2027");
+    // Un ciclo recién abierto empieza en cero; el viejo sigue donde se quedó
+    expect(deHoy[0].ultimoFolio).toBe(0);
+    expect(r.cuerpo.datos.ciclos[1].ultimoFolio).toBe(30450);
+  });
+
+  it("avisa que mandar otro ciclo tiene consecuencias", async () => {
+    const r = await pedir("/ciclos");
+    expect(r.cuerpo.datos.nota).toMatch(/no encuentra su caja/);
+  });
+
+  it("sin decir ciclo, se aparta para el de hoy", async () => {
+    const { apartarFolios } = (await import("../etiquetas")) as any;
+    apartarFolios.mockClear();
+
+    await pedir("/etiquetas/lotes", {
+      method: "POST",
+      body: JSON.stringify({ cortadora: 7, cantidad: 200, texto: "x" }),
+    });
+
+    // undefined y no un número: quien no manda ciclo está diciendo "el de hoy",
+    // que lo resuelve el servidor, no el kiosco
+    expect(apartarFolios.mock.calls[0][0].cicloId).toBeUndefined();
+  });
+
+  it("se puede apartar para un ciclo anterior a propósito", async () => {
+    const { apartarFolios } = (await import("../etiquetas")) as any;
+    apartarFolios.mockClear();
+
+    const r = await pedir("/etiquetas/lotes", {
+      method: "POST",
+      body: JSON.stringify({ cortadora: 7, cantidad: 200, texto: "x", ciclo: 3 }),
+    });
+
+    expect(r.estado).toBe(200);
+    expect(apartarFolios.mock.calls[0][0].cicloId).toBe(3);
+  });
+
+  it("un ciclo que no es un id se rechaza diciendo dónde ver los buenos", async () => {
+    const r = await pedir("/etiquetas/lotes", {
+      method: "POST",
+      body: JSON.stringify({ cortadora: 7, cantidad: 200, texto: "x", ciclo: "el pasado" }),
+    });
+
+    expect(r.estado).toBe(400);
+    expect(r.cuerpo.error.codigo).toBe("ciclo_invalido");
+    expect(r.cuerpo.error.ayuda).toContain("/ciclos");
+  });
+
+  it("un ciclo inexistente es 400, no 409: el kiosco lo puede corregir", async () => {
+    estado.errorAlApartar = {
+      codigo: "ciclo_desconocido",
+      mensaje: "No existe el ciclo 999",
+      ayuda: "Consulta los ciclos disponibles antes de apartar folios.",
+    };
+    const r = await pedir("/etiquetas/lotes", {
+      method: "POST",
+      body: JSON.stringify({ cortadora: 7, cantidad: 200, texto: "x", ciclo: 999 }),
+    });
+
+    expect(r.estado).toBe(400);
+    expect(r.cuerpo.error.codigo).toBe("ciclo_desconocido");
   });
 });

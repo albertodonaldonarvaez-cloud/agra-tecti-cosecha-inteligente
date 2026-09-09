@@ -18,7 +18,7 @@ const CustomLabelDesigner = lazy(() => import("./CustomLabelDesigner"));
 
 export default function LabelPrinter() {
   const harvestersQ = trpc.harvesters.list.useQuery();
-  const lastFolioQ = trpc.getLastFolio.useQuery();
+  const ciclosQ = trpc.ciclosParaImprimir.useQuery();
   const historyQ = trpc.labelHistory.useQuery();
   // El folio ya no se calcula aquí. Antes esta pantalla preguntaba cuál fue el
   // último, le sumaba uno e imprimía: dos personas con un minuto de diferencia
@@ -29,6 +29,7 @@ export default function LabelPrinter() {
   const cancelarMut = trpc.cancelarLote.useMutation();
   const ocupado = apartarMut.isPending || confirmarMut.isPending;
 
+  const [cicloElegido, setCicloElegido] = useState<number | null>(null);
   const [harvesterNum, setHarvesterNum] = useState<string>("");
   const [labelText, setLabelText] = useState("Cosecha SR 30");
   const [quantity, setQuantity] = useState(200);
@@ -58,9 +59,17 @@ export default function LabelPrinter() {
     return () => clearInterval(interval);
   }, []);
 
-  const lastFolio = lastFolioQ.data?.lastFolio || 0;
-  const cicloAbierto = lastFolioQ.data?.cicloId != null;
-  const cicloNombre = lastFolioQ.data?.cicloNombre ?? null;
+  // Se puede imprimir para un ciclo distinto al de hoy: en el cambio de ciclo
+  // hay cortadoras terminando la cosecha vieja mientras el nuevo ya esta
+  // abierto, y sus etiquetas tienen que llevar la numeracion del ciclo al que
+  // van a pertenecer las cajas. Por omision manda el de hoy.
+  const ciclos: any[] = ciclosQ.data ?? [];
+  const cicloHoy = ciclos.find((c) => c.esElDeHoy) ?? null;
+  const cicloSel = ciclos.find((c) => c.id === cicloElegido) ?? cicloHoy;
+  const cicloAbierto = !!cicloSel;
+  const cicloNombre = cicloSel?.name ?? null;
+  const esOtroCiclo = !!cicloSel && !cicloSel.esElDeHoy;
+  const lastFolio = cicloSel?.ultimoFolio ?? 0;
 
   // Rango APROXIMADO, solo para la vista previa. El definitivo lo reparte el
   // servidor al apartar, y puede no ser este si alguien más imprimió mientras
@@ -112,6 +121,7 @@ export default function LabelPrinter() {
     try {
       lote = await apartarMut.mutateAsync({
         harvesterNumber: parseInt(harvesterNum), labelText, quantity,
+        cicloId: cicloSel?.id,
       });
     } catch (e: any) {
       toast.error(e?.message || "No se pudieron apartar los folios");
@@ -123,7 +133,7 @@ export default function LabelPrinter() {
       // Sin ventana no se imprimió nada, así que los folios se queman en vez de
       // quedarse apartados en el limbo.
       await cancelarMut.mutateAsync({ loteId: lote.loteId, motivo: "No se abrió la ventana de impresión" }).catch(() => {});
-      lastFolioQ.refetch();
+      ciclosQ.refetch();
       toast.error("No se pudo abrir la ventana de impresión. Permite las ventanas emergentes.");
       return;
     }
@@ -165,7 +175,7 @@ setTimeout(() => { window.print(); }, 300);
       // El lote existe y los folios están apartados; solo no quedó confirmado.
       toast.error(`Se imprimió el rango ${pad6(lote.folioStart)}–${pad6(lote.folioEnd)}, pero no se pudo marcar como impreso. Revísalo en el historial.`);
     } finally {
-      lastFolioQ.refetch();
+      ciclosQ.refetch();
       historyQ.refetch();
     }
   };
@@ -180,6 +190,7 @@ setTimeout(() => { window.print(); }, 300);
     try {
       lote = await apartarMut.mutateAsync({
         harvesterNumber: parseInt(harvesterNum), labelText, quantity,
+        cicloId: cicloSel?.id,
       });
     } catch (e: any) {
       setDirectPrinting(false);
@@ -214,7 +225,7 @@ setTimeout(() => { window.print(); }, 300);
       toast.error("No se pudo conectar al agente de impresión. ¿Está corriendo? Los folios apartados se cancelaron.");
     } finally {
       setDirectPrinting(false);
-      lastFolioQ.refetch();
+      ciclosQ.refetch();
       historyQ.refetch();
     }
   };
@@ -301,6 +312,34 @@ setTimeout(() => { window.print(); }, 300);
             Configuración
           </h2>
 
+          {/* El ciclo manda sobre todo lo demás: el folio se reinicia con cada
+              uno, así que el mismo código existe a propósito en cosechas
+              distintas. Por eso va arriba y no escondido entre los campos. */}
+          <div className="space-y-1.5 mb-4">
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Ciclo</label>
+            <Select
+              value={cicloSel ? String(cicloSel.id) : ""}
+              onValueChange={(v) => setCicloElegido(Number(v))}
+            >
+              <SelectTrigger><SelectValue placeholder={ciclosQ.isLoading ? "Cargando..." : "Sin ciclos registrados"} /></SelectTrigger>
+              <SelectContent>
+                {ciclos.map((c) => (
+                  <SelectItem key={c.id} value={String(c.id)}>
+                    {c.name}{c.esElDeHoy ? " · en curso" : ""} — va en {pad6(c.ultimoFolio)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {esOtroCiclo && (
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                Estas etiquetas van a quedar en <strong>{cicloSel!.name}</strong>, que no es el ciclo
+                en curso. Úsalo solo si las cajas de estas etiquetas pertenecen a esa cosecha: la
+                caja se busca por ciclo y código, y una etiqueta del ciclo equivocado no encuentra
+                su caja.
+              </p>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Cortadora / Tipo</label>
@@ -350,10 +389,10 @@ setTimeout(() => { window.print(); }, 300);
             {/* Sin ciclo abierto no se pueden repartir folios: más vale decirlo
                 aquí que dejar que el operador le dé a Imprimir y reciba un
                 error que no sabe cómo arreglar. */}
-            {!lastFolioQ.isLoading && !cicloAbierto && (
+            {!ciclosQ.isLoading && !cicloAbierto && (
               <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-900 dark:text-amber-200">
-                <strong>No hay ciclo abierto hoy.</strong> El folio se reparte por ciclo, así que
-                no se puede imprimir hasta que se abra uno en Ciclos de producción.
+                <strong>No hay ningún ciclo registrado.</strong> El folio se reparte por ciclo, así
+                que no se puede imprimir hasta que se cree uno en Ciclos de producción.
               </div>
             )}
 
