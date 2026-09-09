@@ -40,6 +40,48 @@ function VerdictChip({ nivel, texto }: { nivel: keyof typeof NIVELES; texto?: st
 }
 
 /**
+ * El semáforo: qué tanto dejó rendir el clima a esa labor, de 0 a 100.
+ *
+ * El número lo calcula el servidor junto con el veredicto, así que el color y
+ * el porcentaje nunca se pueden contradecir. Aquí solo se pinta.
+ */
+function Semaforo({ nivel, valor, ancho = "w-16" }: { nivel: keyof typeof NIVELES; valor: number | null; ancho?: string }) {
+  if (valor == null) {
+    return <span className="text-[11px] text-gray-300" title="No hay clima registrado de ese día">sin dato</span>;
+  }
+  const cfg = NIVELES[nivel] ?? NIVELES.cuidado;
+  return (
+    <div className="inline-flex items-center gap-1.5" title={`${valor}% — ${cfg.label}`}>
+      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cfg.dot}`} />
+      <div className={`${ancho} h-1.5 bg-gray-200 rounded-full overflow-hidden`}>
+        <div className={`h-full rounded-full ${cfg.dot}`} style={{ width: `${valor}%` }} />
+      </div>
+      <span className="text-[11px] font-semibold text-gray-700 tabular-nums w-8 text-right">{valor}%</span>
+    </div>
+  );
+}
+
+/**
+ * Promedio de efectividad de un grupo de labores.
+ *
+ * Las que no tienen clima se dejan FUERA en vez de contarlas como cero: si no
+ * se sabe qué clima hubo, meterlas al promedio ensucia el único número que se
+ * mira de reojo. Por eso se devuelve también cuántas entraron.
+ */
+function promedioEfectividad(labores: any[]): { valor: number | null; contadas: number } {
+  const vals = labores
+    .map((l) => l.veredicto?.efectividad)
+    .filter((v: any): v is number => typeof v === "number");
+  if (vals.length === 0) return { valor: null, contadas: 0 };
+  return { valor: Math.round(vals.reduce((a, b) => a + b, 0) / vals.length), contadas: vals.length };
+}
+
+/** El color del promedio sale de las mismas franjas que usa el servidor */
+function nivelDe(valor: number): keyof typeof NIVELES {
+  return valor >= 80 ? "bueno" : valor >= 45 ? "cuidado" : "malo";
+}
+
+/**
  * Motivos que vale la pena mostrar. Se quita el relleno de "condiciones
  * normales", pero SÍ se muestran los motivos buenos: saber por qué un día es
  * bueno ("la lluvia moderada ayuda a incorporar el granulado") es tan útil
@@ -328,6 +370,7 @@ function Pasadas({ data }: { data: any }) {
   const [abierto, setAbierto] = useState(false);
   const labores = data.pasadas as any[];
   const conProblema = useMemo(() => labores.filter((l) => l.veredicto.nivel !== "bueno"), [labores]);
+  const promedio = useMemo(() => promedioEfectividad(labores), [labores]);
   const visibles = abierto ? labores : labores.slice(0, 6);
 
   return (
@@ -335,7 +378,7 @@ function Pasadas({ data }: { data: any }) {
       <div className="flex flex-wrap items-center gap-2 mb-1">
         <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
           <CheckCircle2 className="w-5 h-5 text-green-500" />
-          Clima que hubo en cada labor
+          Historial meteorológico y labores aplicadas
         </h2>
         {conProblema.length > 0 && (
           <span className="text-[11px] font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
@@ -343,9 +386,27 @@ function Pasadas({ data }: { data: any }) {
           </span>
         )}
       </div>
-      <p className="text-xs text-gray-500 mb-4">
+      <p className="text-xs text-gray-500 mb-3">
         Sirve para explicar resultados: una aplicación que se lavó o una poda con humedad se ven aquí.
       </p>
+
+      {promedio.valor != null && (
+        <div className="mb-4 rounded-xl border border-gray-200/70 bg-white/60 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold text-gray-700">Efectividad del periodo</p>
+              <p className="text-[11px] text-gray-500">
+                Qué tanto dejó rendir el clima a las {promedio.contadas} labores que ya se hicieron.
+                No mide el trabajo, mide el día que les tocó.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-3xl font-bold text-gray-800 tabular-nums">{promedio.valor}%</span>
+              <Semaforo nivel={nivelDe(promedio.valor)} valor={promedio.valor} ancho="w-24" />
+            </div>
+          </div>
+        </div>
+      )}
 
       {labores.length === 0 ? (
         <p className="text-sm text-gray-500 text-center py-6">
@@ -364,6 +425,7 @@ function Pasadas({ data }: { data: any }) {
                   <th className="py-2 pr-3 text-right">Temp.</th>
                   <th className="py-2 pr-3 text-right">Lluvia</th>
                   <th className="py-2 pr-3 text-right">Viento</th>
+                  <th className="py-2 pr-3">Efectividad</th>
                   <th className="py-2">Lectura</th>
                 </tr>
               </thead>
@@ -395,6 +457,9 @@ function Pasadas({ data }: { data: any }) {
                     </td>
                     <td className="py-2 pr-3 text-right text-gray-500">
                       {l.clima ? `${l.clima.windSpeed.toFixed(0)}` : "—"}
+                    </td>
+                    <td className="py-2 pr-3 whitespace-nowrap">
+                      <Semaforo nivel={l.veredicto.nivel} valor={l.veredicto.efectividad} />
                     </td>
                     <td className="py-2">
                       <VerdictChip nivel={l.veredicto.nivel} texto={l.veredicto.nivel === "bueno" ? "Sin problema" : undefined} />

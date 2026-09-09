@@ -1,12 +1,32 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+export type CondicionClima = "sunny" | "cloudy" | "rainy" | "stormy" | "clear";
 
 interface WeatherBackgroundProps {
-  weatherCondition: "sunny" | "cloudy" | "rainy" | "stormy" | "clear";
+  weatherCondition: CondicionClima;
+  /** Temperatura actual en °C. Arriba de 34° el fondo se calienta a la vista. */
   temperature?: number;
 }
 
+/**
+ * Las gotas, las nubes y las estrellas se sortean UNA vez por condición y se
+ * guardan. Antes se sorteaban dentro del render, así que cualquier cosa que
+ * volviera a dibujar la pantalla —ordenar la tabla, un refetch del clima,
+ * abrir el análisis de cosecha— reubicaba las 80 gotas y reiniciaba sus
+ * animaciones de golpe. Ese era el tirón que se veía.
+ */
+function sortear<T>(cuantos: number, hacer: (i: number) => T): T[] {
+  return Array.from({ length: cuantos }, (_, i) => hacer(i));
+}
+
 export function WeatherBackground({ weatherCondition, temperature }: WeatherBackgroundProps) {
-  const [timeOfDay, setTimeOfDay] = useState<"morning" | "afternoon" | "evening" | "night">("morning");
+  const [timeOfDay, setTimeOfDay] = useState<"morning" | "afternoon" | "evening" | "night">(() => {
+    const hour = new Date().getHours();
+    if (hour >= 6 && hour < 12) return "morning";
+    if (hour >= 12 && hour < 17) return "afternoon";
+    if (hour >= 17 && hour < 20) return "evening";
+    return "night";
+  });
 
   useEffect(() => {
     const updateTimeOfDay = () => {
@@ -27,6 +47,14 @@ export function WeatherBackground({ weatherCondition, temperature }: WeatherBack
     return () => clearInterval(interval);
   }, []);
 
+  const llueve = weatherCondition === "rainy" || weatherCondition === "stormy";
+  const hayNubes = weatherCondition !== "sunny" && weatherCondition !== "clear";
+  const esNoche = timeOfDay === "night";
+  // 34 °C es el mismo umbral con el que la planeación empieza a decir "trabajar
+  // temprano". Que el fondo se ponga cálido justo ahí no es decoración: es el
+  // aviso visto de reojo.
+  const haceCalor = typeof temperature === "number" && temperature >= 34;
+
   // Gradientes según hora del día
   const getBackgroundGradient = () => {
     const gradients = {
@@ -38,20 +66,18 @@ export function WeatherBackground({ weatherCondition, temperature }: WeatherBack
     return gradients[timeOfDay];
   };
 
-  // Generar gotas de lluvia
-  const renderRaindrops = () => {
-    if (weatherCondition !== "rainy" && weatherCondition !== "stormy") return null;
-    
-    const drops = [];
+  // Gotas de lluvia
+  const raindrops = useMemo(() => {
+    if (!llueve) return null;
     const dropCount = weatherCondition === "stormy" ? 150 : 80;
-    
-    for (let i = 0; i < dropCount; i++) {
+
+    return sortear(dropCount, (i) => {
       const left = Math.random() * 100;
       const delay = Math.random() * 2;
       const duration = 0.5 + Math.random() * 0.5;
       const opacity = 0.3 + Math.random() * 0.4;
-      
-      drops.push(
+
+      return (
         <div
           key={`drop-${i}`}
           className="absolute w-0.5 bg-blue-300 rounded-full animate-rain"
@@ -65,70 +91,96 @@ export function WeatherBackground({ weatherCondition, temperature }: WeatherBack
           }}
         />
       );
-    }
-    return drops;
-  };
+    });
+  }, [llueve, weatherCondition]);
 
-  // Generar nubes
-  const renderClouds = () => {
-    if (weatherCondition === "sunny" || weatherCondition === "clear") return null;
-    
+  // Nubes
+  const clouds = useMemo(() => {
+    if (!hayNubes) return null;
     const cloudCount = weatherCondition === "stormy" ? 8 : weatherCondition === "rainy" ? 6 : 4;
-    const clouds = [];
-    
-    for (let i = 0; i < cloudCount; i++) {
+
+    return sortear(cloudCount, (i) => {
       const top = 5 + Math.random() * 25;
       const scale = 0.8 + Math.random() * 0.8;
       const duration = 30 + Math.random() * 40;
       const delay = Math.random() * 20;
       const opacity = weatherCondition === "stormy" ? 0.9 : weatherCondition === "rainy" ? 0.7 : 0.5;
-      
-      clouds.push(
+
+      // Dos capas a propósito: la de afuera se mueve y la de adentro escala.
+      // En una sola, el `transform: translateX` de la animación pisaba al
+      // `transform: scale` del estilo, y todas las nubes salían del mismo
+      // tamaño por más que se sortearan.
+      return (
         <div
           key={`cloud-${i}`}
           className="absolute animate-cloud"
           style={{
             top: `${top}%`,
             left: "-200px",
-            transform: `scale(${scale})`,
             animationDuration: `${duration}s`,
             animationDelay: `${delay}s`,
             opacity,
           }}
         >
-          <div className={`relative ${weatherCondition === "stormy" ? "text-gray-600" : "text-white"}`}>
-            <div className="absolute w-16 h-16 bg-current rounded-full blur-sm" style={{ left: 0, top: 10 }} />
-            <div className="absolute w-20 h-20 bg-current rounded-full blur-sm" style={{ left: 15, top: 0 }} />
-            <div className="absolute w-24 h-20 bg-current rounded-full blur-sm" style={{ left: 35, top: 5 }} />
-            <div className="absolute w-16 h-16 bg-current rounded-full blur-sm" style={{ left: 55, top: 12 }} />
+          <div style={{ transform: `scale(${scale})` }}>
+            <div className={`relative ${weatherCondition === "stormy" ? "text-gray-600" : "text-white"}`}>
+              <div className="absolute w-16 h-16 bg-current rounded-full blur-sm" style={{ left: 0, top: 10 }} />
+              <div className="absolute w-20 h-20 bg-current rounded-full blur-sm" style={{ left: 15, top: 0 }} />
+              <div className="absolute w-24 h-20 bg-current rounded-full blur-sm" style={{ left: 35, top: 5 }} />
+              <div className="absolute w-16 h-16 bg-current rounded-full blur-sm" style={{ left: 55, top: 12 }} />
+            </div>
           </div>
         </div>
       );
-    }
-    return clouds;
-  };
+    });
+  }, [hayNubes, weatherCondition]);
 
-  // Renderizar sol
+  // Estrellas: se sortean una sola vez y solo se pintan de noche
+  const stars = useMemo(
+    () =>
+      sortear(50, (i) => (
+        <div
+          key={`star-${i}`}
+          className="absolute w-1 h-1 bg-white rounded-full animate-twinkle"
+          style={{
+            left: `${Math.random() * 100}%`,
+            top: `${Math.random() * 60}%`,
+            animationDelay: `${Math.random() * 3}s`,
+            opacity: 0.5 + Math.random() * 0.5,
+          }}
+        />
+      )),
+    [],
+  );
+
+  // Sol
   const renderSun = () => {
-    if (timeOfDay === "night" || weatherCondition === "rainy" || weatherCondition === "stormy") return null;
-    
+    if (esNoche || llueve) return null;
+
     const sunPosition = timeOfDay === "morning" ? "left-1/4" : timeOfDay === "afternoon" ? "left-1/2" : "left-3/4";
-    const sunColor = timeOfDay === "evening" ? "bg-orange-400" : "bg-yellow-300";
-    const glowColor = timeOfDay === "evening" ? "shadow-orange-400/50" : "shadow-yellow-300/50";
-    
+    const sunColor = timeOfDay === "evening" ? "bg-orange-400" : haceCalor ? "bg-amber-300" : "bg-yellow-300";
+    // El resplandor se pinta con un color propio. Con `currentColor` heredaba
+    // el gris del texto de la página y el sol latía con un halo oscuro.
+    const glow = timeOfDay === "evening" ? "251, 146, 60" : "253, 224, 71";
+
     return (
       <div className={`absolute ${sunPosition} top-16 transform -translate-x-1/2`}>
-        <div className={`relative w-24 h-24 ${sunColor} rounded-full shadow-2xl ${glowColor} animate-pulse-slow`}>
-          {/* Rayos del sol */}
+        <div
+          className={`relative w-24 h-24 ${sunColor} rounded-full animate-pulse-slow`}
+          style={{ ["--glow" as any]: glow }}
+        >
+          {/* Rayos: giran alrededor del CENTRO del sol. El pivote estaba en el
+              borde de arriba, así que se abrían en abanico desde un solo punto
+              en vez de repartirse alrededor. */}
           {[...Array(12)].map((_, i) => (
             <div
               key={`ray-${i}`}
-              className={`absolute w-1 h-8 ${sunColor} rounded-full origin-bottom`}
+              className={`absolute w-1 h-8 ${sunColor} rounded-full`}
               style={{
                 left: "50%",
-                top: "-32px",
+                top: "-40px",
                 transform: `translateX(-50%) rotate(${i * 30}deg)`,
-                transformOrigin: "bottom center",
+                transformOrigin: "center 88px",
               }}
             />
           ))}
@@ -137,26 +189,13 @@ export function WeatherBackground({ weatherCondition, temperature }: WeatherBack
     );
   };
 
-  // Renderizar luna y estrellas
+  // Luna y estrellas
   const renderMoon = () => {
-    if (timeOfDay !== "night") return null;
-    
+    if (!esNoche) return null;
+
     return (
       <>
-        {/* Estrellas */}
-        {[...Array(50)].map((_, i) => (
-          <div
-            key={`star-${i}`}
-            className="absolute w-1 h-1 bg-white rounded-full animate-twinkle"
-            style={{
-              left: `${Math.random() * 100}%`,
-              top: `${Math.random() * 60}%`,
-              animationDelay: `${Math.random() * 3}s`,
-              opacity: 0.5 + Math.random() * 0.5,
-            }}
-          />
-        ))}
-        {/* Luna */}
+        {stars}
         <div className="absolute right-1/4 top-16">
           <div className="relative w-20 h-20 bg-yellow-100 rounded-full shadow-2xl shadow-yellow-100/30">
             {/* Cráteres de la luna */}
@@ -169,10 +208,10 @@ export function WeatherBackground({ weatherCondition, temperature }: WeatherBack
     );
   };
 
-  // Renderizar relámpagos
+  // Relámpagos
   const renderLightning = () => {
     if (weatherCondition !== "stormy") return null;
-    
+
     return (
       <div className="absolute inset-0 pointer-events-none">
         <div className="animate-lightning opacity-0">
@@ -203,19 +242,29 @@ export function WeatherBackground({ weatherCondition, temperature }: WeatherBack
   };
 
   return (
-    <div className={`fixed inset-0 overflow-hidden bg-gradient-to-b ${getBackgroundGradient()} transition-all duration-1000`}>
+    <div
+      className={`fixed inset-0 overflow-hidden bg-gradient-to-b ${getBackgroundGradient()} transition-colors duration-1000`}
+      aria-hidden="true"
+    >
       {/* Capa de oscurecimiento para nubes/tormenta */}
-      {(weatherCondition === "cloudy" || weatherCondition === "rainy" || weatherCondition === "stormy") && (
-        <div className={`absolute inset-0 ${weatherCondition === "stormy" ? "bg-gray-900/40" : "bg-gray-500/20"} transition-all duration-500`} />
+      {hayNubes && (
+        <div
+          className={`absolute inset-0 ${weatherCondition === "stormy" ? "bg-gray-900/40" : "bg-gray-500/20"} transition-colors duration-500`}
+        />
       )}
-      
+
+      {/* Calor: solo cuando de verdad hace, y sin tapar la pantalla */}
+      {haceCalor && !esNoche && (
+        <div className="absolute inset-0 bg-gradient-to-b from-orange-300/25 to-transparent" />
+      )}
+
       {/* Elementos del clima */}
       {renderSun()}
       {renderMoon()}
-      {renderClouds()}
-      {renderRaindrops()}
+      {clouds}
+      {raindrops}
       {renderLightning()}
-      
+
       {/* Estilos de animación */}
       <style>{`
         @keyframes rain {
@@ -231,7 +280,7 @@ export function WeatherBackground({ weatherCondition, temperature }: WeatherBack
             opacity: 0.3;
           }
         }
-        
+
         @keyframes cloud {
           0% {
             transform: translateX(0);
@@ -240,7 +289,7 @@ export function WeatherBackground({ weatherCondition, temperature }: WeatherBack
             transform: translateX(calc(100vw + 200px));
           }
         }
-        
+
         @keyframes twinkle {
           0%, 100% {
             opacity: 0.3;
@@ -251,18 +300,18 @@ export function WeatherBackground({ weatherCondition, temperature }: WeatherBack
             transform: scale(1.2);
           }
         }
-        
+
         @keyframes pulse-slow {
           0%, 100% {
             transform: scale(1);
-            box-shadow: 0 0 60px currentColor;
+            box-shadow: 0 0 60px rgba(var(--glow), 0.55);
           }
           50% {
             transform: scale(1.05);
-            box-shadow: 0 0 80px currentColor;
+            box-shadow: 0 0 80px rgba(var(--glow), 0.75);
           }
         }
-        
+
         @keyframes lightning {
           0%, 90%, 100% {
             opacity: 0;
@@ -274,25 +323,42 @@ export function WeatherBackground({ weatherCondition, temperature }: WeatherBack
             opacity: 0;
           }
         }
-        
+
         .animate-rain {
           animation: rain linear infinite;
+          will-change: transform;
         }
-        
+
         .animate-cloud {
           animation: cloud linear infinite;
+          will-change: transform;
         }
-        
+
         .animate-twinkle {
           animation: twinkle 3s ease-in-out infinite;
         }
-        
+
         .animate-pulse-slow {
           animation: pulse-slow 4s ease-in-out infinite;
         }
-        
+
         .animate-lightning {
           animation: lightning 8s ease-in-out infinite;
+        }
+
+        /* Quien pidió menos movimiento se queda con el fondo y el color, sin
+           lluvia cayendo ni relámpagos. La pantalla sigue diciendo lo mismo. */
+        @media (prefers-reduced-motion: reduce) {
+          .animate-rain,
+          .animate-cloud,
+          .animate-twinkle,
+          .animate-pulse-slow,
+          .animate-lightning {
+            animation: none;
+          }
+          .animate-lightning {
+            opacity: 0;
+          }
         }
       `}</style>
     </div>

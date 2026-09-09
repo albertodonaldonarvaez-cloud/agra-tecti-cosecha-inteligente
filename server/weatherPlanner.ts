@@ -77,6 +77,15 @@ export interface Veredicto {
    * un motivo leve — que fue justo lo que se vio en la agenda.
    */
   motivos: string[];
+  /**
+   * De 0 a 100: cuánto ayudó el clima a que la labor sirviera de algo. NO es
+   * qué tan bien se hizo el trabajo, es qué tanto lo dejó rendir el día.
+   *
+   * `null` cuando no hay clima de ese día. Es a propósito: un porcentaje
+   * inventado se ve igual de convincente que uno medido, y aquí se usa para
+   * decidir si vale la pena repetir una aplicación.
+   */
+  efectividad: number | null;
 }
 
 /** Etiquetas de los tipos de labor, para no repetirlas en cada pantalla */
@@ -135,6 +144,34 @@ const peor = (a: Nivel, b: Nivel): Nivel =>
 const GRAVEDAD: Record<Nivel, number> = { malo: 0, cuidado: 1, bueno: 2 };
 
 /**
+ * Cuánto le cuesta al día cada cosa que se le anota. Los motivos buenos suman
+ * poco a propósito: que la lluvia ayude a incorporar el granulado no compensa
+ * un viento que se llevó la aspersión a otro lado.
+ */
+const COSTO: Record<Nivel, number> = { malo: -45, cuidado: -18, bueno: 6 };
+
+/**
+ * Cada veredicto tiene su franja de porcentaje, y el número se recorta para
+ * caer dentro de ella.
+ *
+ * Es lo que impide la contradicción que haría inútil al semáforo: un día
+ * marcado "Mal día" no puede salir con 85%, ni uno "Buen día" con 40%, por
+ * mucho que se acumulen motivos leves. El color manda y el número matiza.
+ */
+const FRANJA: Record<Nivel, [number, number]> = {
+  malo: [0, 44],
+  cuidado: [45, 79],
+  bueno: [80, 100],
+};
+
+function calcularEfectividad(nivel: Nivel, notas: { nivel: Nivel }[]): number {
+  let puntos = 100;
+  for (const n of notas) puntos += COSTO[n.nivel];
+  const [min, max] = FRANJA[nivel];
+  return Math.round(Math.min(max, Math.max(min, puntos)));
+}
+
+/**
  * Acumula los motivos con su gravedad y al final los devuelve del peor al
  * menor, junto con el nivel del conjunto. Así la frase que se muestra cuando
  * solo cabe una es siempre la que explica el veredicto.
@@ -148,13 +185,14 @@ function nuevasNotas() {
       nivel = peor(nivel, n);
     },
     resultado(siNoHayNada: string): Veredicto {
-      if (notas.length === 0) return { nivel, motivos: [siNoHayNada] };
+      const efectividad = calcularEfectividad(nivel, notas);
+      if (notas.length === 0) return { nivel, motivos: [siNoHayNada], efectividad };
       // sort es estable: dentro de la misma gravedad se respeta el orden de las reglas
       const motivos = notas
         .slice()
         .sort((a, b) => GRAVEDAD[a.nivel] - GRAVEDAD[b.nivel])
         .map((x) => x.texto);
-      return { nivel, motivos };
+      return { nivel, motivos, efectividad };
     },
   };
 }
@@ -174,7 +212,7 @@ export function evaluarLabor(
   clima: ClimaDia | null,
   lluviaDespues: number | null,
 ): Veredicto {
-  if (!clima) return { nivel: "cuidado", motivos: ["Sin datos de clima para ese día"] };
+  if (!clima) return { nivel: "cuidado", motivos: ["Sin datos de clima para ese día"], efectividad: null };
 
   const notas = nuevasNotas();
   const lluvia = clima.precipitation ?? 0;
@@ -273,7 +311,7 @@ export function evaluarLabor(
 
 /** Veredicto pensado para el corte de fruta */
 export function evaluarCosecha(clima: ClimaDia | null): Veredicto {
-  if (!clima) return { nivel: "cuidado", motivos: ["Sin datos de clima para ese día"] };
+  if (!clima) return { nivel: "cuidado", motivos: ["Sin datos de clima para ese día"], efectividad: null };
   const notas = nuevasNotas();
   const lluvia = clima.precipitation ?? 0;
   const prob = clima.precipitationProbability ?? 0;

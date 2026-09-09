@@ -362,3 +362,76 @@ describe("getWeatherPlanner", () => {
     expect(r.ciclo).toBeNull();
   });
 });
+
+describe("efectividad: el porcentaje que acompaña al semáforo", () => {
+  it("un día sin nada que anotar rinde al 100%", () => {
+    const v = evaluarLabor("aplicacion_fitosanitaria", "Preventiva", clima(), 0);
+    expect(v.nivel).toBe("bueno");
+    expect(v.efectividad).toBe(100);
+  });
+
+  it("nunca contradice al semáforo: mal día se queda abajo, buen día arriba", () => {
+    // Esta es la razón de ser de las franjas. Un "Mal día" con 85% haría que
+    // nadie volviera a creerle al color.
+    const casos: [string, string | null, ReturnType<typeof clima>, number][] = [
+      ["aplicacion_fitosanitaria", "Foliar", clima({ precipitation: 20 }), 0],
+      ["poda", null, clima({ precipitation: 3 }), 0],
+      ["riego", null, clima({ precipitation: 15 }), 0],
+      ["control_maleza", "Herbicida", clima({ windSpeed: 25 }), 0],
+      ["aplicacion_fitosanitaria", "Foliar", clima({ windSpeed: 14 }), 0],
+      ["fertilizacion", "Granular al suelo", clima(), 0],
+      ["control_maleza", "Mecánico (machete)", clima(), 0],
+    ];
+    for (const [tipo, sub, c, despues] of casos) {
+      const v = evaluarLabor(tipo, sub, c, despues);
+      expect(v.efectividad).not.toBeNull();
+      const e = v.efectividad!;
+      if (v.nivel === "malo") {
+        expect(e).toBeLessThanOrEqual(44);
+      } else if (v.nivel === "cuidado") {
+        expect(e).toBeGreaterThanOrEqual(45);
+        expect(e).toBeLessThanOrEqual(79);
+      } else {
+        expect(e).toBeGreaterThanOrEqual(80);
+      }
+    }
+  });
+
+  it("dos problemas rinden menos que uno solo", () => {
+    // Aspersión con lluvia que lava
+    const uno = evaluarLabor("aplicacion_fitosanitaria", "Foliar", clima({ precipitation: 20 }), 0);
+    // La misma, además con viento que se la lleva y calor que la evapora
+    const tres = evaluarLabor(
+      "aplicacion_fitosanitaria",
+      "Foliar",
+      clima({ precipitation: 20, windSpeed: 25, temperatureMax: 35 }),
+      0,
+    );
+    expect(tres.efectividad!).toBeLessThan(uno.efectividad!);
+  });
+
+  it("sin clima de ese día no inventa un porcentaje", () => {
+    // Un número inventado se ve igual de convincente que uno medido, y con
+    // este se decide si hay que repetir una aplicación
+    expect(evaluarLabor("riego", null, null, null).efectividad).toBeNull();
+    expect(evaluarCosecha(null).efectividad).toBeNull();
+  });
+
+  it("el corte también trae su porcentaje", () => {
+    expect(evaluarCosecha(clima()).efectividad).toBe(100);
+    const lluvioso = evaluarCosecha(clima({ precipitation: 15 }));
+    expect(lluvioso.nivel).toBe("malo");
+    expect(lluvioso.efectividad!).toBeLessThanOrEqual(44);
+  });
+
+  it("siempre cae entre 0 y 100, por muchos problemas que se junten", () => {
+    const v = evaluarLabor(
+      "aplicacion_fitosanitaria",
+      "Foliar",
+      clima({ precipitation: 40, windSpeed: 40, temperatureMax: 40, temperatureMin: 1 }),
+      30,
+    );
+    expect(v.efectividad!).toBeGreaterThanOrEqual(0);
+    expect(v.efectividad!).toBeLessThanOrEqual(100);
+  });
+});

@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, memo } from "react";
 import { trpc } from "@/lib/trpc";
-import { WeatherBackground } from "@/components/WeatherBackground";
+import { WeatherBackground, type CondicionClima } from "@/components/WeatherBackground";
 import { GlassCard } from "@/components/GlassCard";
 import { WeatherPlanner } from "@/components/WeatherPlanner";
 import {
@@ -69,6 +69,30 @@ function getCutoffStr(days: number): string {
 
 // Cada sección es independiente: si una falla, las demás siguen funcionando
 
+/**
+ * Una sola definición para las dos partes que miran el clima actual: la tarjeta
+ * y el fondo animado. Con las mismas opciones, TanStack comparte la entrada de
+ * caché y sigue siendo UNA sola petición al servidor.
+ */
+const OPCIONES_CLIMA_ACTUAL = {
+  refetchInterval: 5 * 60 * 1000,
+  refetchOnWindowFocus: true,
+  retry: 3,
+  retryDelay: 2000,
+  staleTime: 2 * 60 * 1000,
+} as const;
+
+/** Las condiciones que el fondo sabe dibujar; cualquier otra cae en "sunny" */
+const CONDICIONES_FONDO = ["sunny", "cloudy", "rainy", "stormy", "clear"] as const;
+
+function condicionDeFondo(condition: string | undefined, esNoche: boolean): CondicionClima {
+  if (condition && (CONDICIONES_FONDO as readonly string[]).includes(condition)) {
+    return condition as CondicionClima;
+  }
+  // Sin dato, el fondo no debe mentir con un sol a medianoche
+  return esNoche ? "clear" : "sunny";
+}
+
 const CurrentWeatherSection = memo(() => {
   const {
     data: currentWeather,
@@ -76,13 +100,7 @@ const CurrentWeatherSection = memo(() => {
     refetch,
     isError,
     error,
-  } = trpc.weather.getCurrent.useQuery(undefined, {
-    refetchInterval: 5 * 60 * 1000,
-    refetchOnWindowFocus: true,
-    retry: 3,
-    retryDelay: 2000,
-    staleTime: 2 * 60 * 1000,
-  });
+  } = trpc.weather.getCurrent.useQuery(undefined, OPCIONES_CLIMA_ACTUAL);
 
   if (isLoading) {
     return (
@@ -264,6 +282,13 @@ interface CorrelationRow {
 export default function ClimateAnalysis() {
   // Por defecto: 30 días (carga rápida). -1 = desde inicio cosecha
   const [historicalDays, setHistoricalDays] = useState(30);
+
+  // El fondo animado tiene que decir lo mismo que la tarjeta de arriba: la
+  // pantalla se llama "clima actual" y estaba pintando un sol fijo de 25°,
+  // lloviera o fuera de noche. Comparte consulta con la tarjeta, no pide más.
+  const { data: climaActual } = trpc.weather.getCurrent.useQuery(undefined, OPCIONES_CLIMA_ACTUAL);
+  const esNoche = new Date().getHours() >= 20 || new Date().getHours() < 6;
+  const condicionFondo = condicionDeFondo(climaActual?.condition, esNoche);
 
   // En qué momento del ciclo estamos. Es la MISMA consulta que hace el bloque
   // de planeación (tRPC la reusa), y sirve para decidir qué va primero:
@@ -450,7 +475,7 @@ export default function ClimateAnalysis() {
 
   return (
     <div className="relative min-h-screen">
-      <WeatherBackground weatherCondition="sunny" temperature={25} />
+      <WeatherBackground weatherCondition={condicionFondo} temperature={climaActual?.temperature} />
 
       <div className="relative z-10 px-3 md:px-8 lg:px-16 py-4 md:py-10 space-y-6 max-w-7xl mx-auto">
         {/* Header */}
