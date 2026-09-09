@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, apiConfig, harvesters, boxes, InsertBox, userActivityLogs } from "../drizzle/schema";
+import { InsertUser, users, apiConfig, harvesters, boxes, InsertBox, userActivityLogs, productionCycles } from "../drizzle/schema";
+import { rangosDeCiclo, cicloDeFecha, type RangoCiclo } from "./ciclos";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -134,6 +135,90 @@ export async function getAllBoxes() {
   }).from(boxes).where(eq(boxes.archived, false)).orderBy(desc(boxes.submissionTime));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Los ciclos, vistos desde las cajas
+//
+// Una caja NO trae escrito a qué ciclo pertenece: la columna cycleId solo la
+// llenan la migración 0027 y el pesaje desde la báscula, así que todo lo que
+// entra por Kobo la deja en nulo. Por eso el ciclo se deduce siempre de la
+// fecha, que es el dato que sí existe en todas las cajas venga de donde venga.
+// Es además lo mismo que dice server/ciclos.ts, el único lugar donde vive esta
+// regla.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Hoy en México, "YYYY-MM-DD". El negocio opera en America/Mexico_City. */
+function hoyMx(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
+}
+
+/** Día siguiente a "YYYY-MM-DD". Se usa para cerrar el rango por arriba. */
+function diaSiguiente(fecha: string): string {
+  const d = new Date(fecha + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+export interface CicloDeCajas extends RangoCiclo {
+  name: string;
+  /** Hoy cae dentro de este ciclo */
+  esElDeHoy: boolean;
+}
+
+export async function getCiclosDeCajas(): Promise<CicloDeCajas[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const { desc } = await import("drizzle-orm");
+  const filas = await db
+    .select({
+      id: productionCycles.id,
+      name: productionCycles.name,
+      startDate: productionCycles.startDate,
+      endDate: productionCycles.endDate,
+    })
+    .from(productionCycles)
+    .orderBy(desc(productionCycles.startDate), desc(productionCycles.id));
+
+  const hoy = hoyMx();
+  return rangosDeCiclo(filas, hoy).map((r) => {
+    const ciclo = filas.find((f) => f.id === r.id)!;
+    return { ...r, name: ciclo.name, esElDeHoy: hoy >= r.desde && hoy <= r.hasta };
+  });
+}
+
+/**
+ * Condiciones de SQL para quedarse con las cajas de un ciclo.
+ *
+ * Se compara contra submissionTime directo y NO contra DATE(submissionTime):
+ * envuelto en una función, MySQL ya no puede usar el índice y la tabla se lee
+ * completa. Con los límites como texto la comparación es la misma y el índice
+ * se aprovecha.
+ *
+ * `"sin"` son las cajas cuya fecha no cae en ningún ciclo. No es un caso raro
+ * que haya que esconder: casi siempre es una fecha mal capturada, y esta es la
+ * única forma de encontrarlas.
+ */
+function condicionesDeCiclo(eleccion: string, ciclos: CicloDeCajas[], sql: any): any[] {
+  const conRango = ciclos.filter((c) => c.hasta >= c.desde);
+
+  if (eleccion === "sin") {
+    return conRango.map(
+      (c) =>
+        sql`NOT (${boxes.submissionTime} >= ${c.desde + " 00:00:00"} AND ${boxes.submissionTime} < ${diaSiguiente(c.hasta) + " 00:00:00"})`,
+    );
+  }
+
+  const ciclo = conRango.find((c) => String(c.id) === eleccion);
+  // Un ciclo que no existe o que se quedó sin días no puede devolver "todas":
+  // el filtro se pediría y no haría nada. Mejor que no salga ninguna caja.
+  if (!ciclo) return [sql`1 = 0`];
+
+  return [
+    sql`${boxes.submissionTime} >= ${ciclo.desde + " 00:00:00"}`,
+    sql`${boxes.submissionTime} < ${diaSiguiente(ciclo.hasta) + " 00:00:00"}`,
+  ];
+}
+
 // Paginación optimizada para carga rápida
 export async function getBoxesPaginated(params: {
   page: number;
@@ -141,25 +226,29 @@ export async function getBoxesPaginated(params: {
   filterDate?: string;
   filterParcel?: string;
   filterHarvester?: number;
+  /** Id del ciclo como texto, o "sin" para las que no caen en ninguno */
+  filterCycle?: string;
   search?: string;
 }) {
   const db = await getDb();
   if (!db) return { boxes: [], total: 0, page: params.page, pageSize: params.pageSize, totalPages: 0 };
-  
-  const { desc, and, eq, gte, lt, count, like } = await import("drizzle-orm");
+
+  const { desc, and, eq, gte, lt, count, like, sql } = await import("drizzle-orm");
   const offset = (params.page - 1) * params.pageSize;
-  
+
+  const ciclos = await getCiclosDeCajas();
+
   // Construir condiciones de filtro
-  const conditions = [];
-  
+  const conditions: any[] = [];
+
   // Siempre excluir cajas archivadas
   conditions.push(eq(boxes.archived, false));
-  
+
   // Búsqueda por código de caja
   if (params.search && params.search.trim() !== '') {
     conditions.push(like(boxes.boxCode, `%${params.search.trim()}%`));
   }
-  
+
   if (params.filterDate) {
     // Filtrar por fecha (formato YYYY-MM-DD)
     const startDate = new Date(params.filterDate + 'T00:00:00');
@@ -167,23 +256,27 @@ export async function getBoxesPaginated(params: {
     conditions.push(gte(boxes.submissionTime, startDate));
     conditions.push(lt(boxes.submissionTime, endDate));
   }
-  
+
+  if (params.filterCycle && params.filterCycle !== 'all') {
+    conditions.push(...condicionesDeCiclo(params.filterCycle, ciclos, sql));
+  }
+
   if (params.filterParcel && params.filterParcel !== 'all') {
     conditions.push(eq(boxes.parcelCode, params.filterParcel));
   }
-  
+
   if (params.filterHarvester && params.filterHarvester > 0) {
     conditions.push(eq(boxes.harvesterId, params.filterHarvester));
   }
-  
+
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-  
+
   // Obtener total de registros
   const totalResult = await db.select({ count: count() })
     .from(boxes)
     .where(whereClause);
   const total = totalResult[0]?.count || 0;
-  
+
   // Obtener página de datos
   const data = await db.select({
     id: boxes.id,
@@ -195,15 +288,31 @@ export async function getBoxesPaginated(params: {
     photoUrl: boxes.photoUrl,
     photoLocalPath: boxes.photoLocalPath, // Copia en el servidor; si existe, se muestra esta
     submissionTime: boxes.submissionTime,
+    // El día tal como lo ve MySQL. Se pide así, y no se saca de submissionTime
+    // en JavaScript, para que la etiqueta del ciclo y el filtro de arriba
+    // partan del mismo valor aunque el contenedor no corra en hora de México.
+    dia: sql<string>`DATE_FORMAT(${boxes.submissionTime}, '%Y-%m-%d')`.as('dia'),
   })
     .from(boxes)
     .where(whereClause)
     .orderBy(desc(boxes.submissionTime))
     .limit(params.pageSize)
     .offset(offset);
-  
+
+  const rangos: RangoCiclo[] = ciclos;
+  const nombres = new Map(ciclos.map((c) => [c.id, c.name]));
+
   return {
-    boxes: data,
+    boxes: data.map(({ dia, ...caja }) => {
+      const cycleId = cicloDeFecha(dia, rangos);
+      return {
+        ...caja,
+        cycleId,
+        // Nulo a propósito cuando la fecha no cae en ningún ciclo: decir
+        // "ciclo actual" ahí escondería una fecha mal capturada.
+        cycleName: cycleId === null ? null : nombres.get(cycleId) ?? null,
+      };
+    }),
     total,
     page: params.page,
     pageSize: params.pageSize,
@@ -211,22 +320,27 @@ export async function getBoxesPaginated(params: {
   };
 }
 
-// Obtener opciones de filtro (fechas, parcelas, cortadoras únicas)
+// Obtener opciones de filtro (ciclos, fechas, parcelas, cortadoras únicas)
 export async function getBoxFilterOptions() {
   const db = await getDb();
-  if (!db) return { dates: [], parcels: [], harvesters: [] };
-  
+  if (!db) return { cycles: [], sinCiclo: 0, days: [], dates: [], parcels: [], harvesters: [] };
+
   const { sql } = await import("drizzle-orm");
-  
-  // Obtener fechas únicas (solo los últimos 60 días para rapidez)
-  // Usar nombres de columnas en camelCase - excluir archivadas
-  const datesResult = await db.execute(sql`
-    SELECT DISTINCT DATE(submissionTime) as date 
-    FROM boxes 
-    WHERE archived = 0 AND submissionTime >= DATE_SUB(NOW(), INTERVAL 60 DAY)
-    ORDER BY date DESC
+
+  // Un renglón por día con cajas, de toda la historia.
+  //
+  // Antes esto se recortaba a los últimos 60 días "por rapidez", y con eso el
+  // filtro de fecha se volvía inútil en cuanto se escogía un ciclo pasado: no
+  // había ni un día que ofrecer. Son unos cientos de renglones; el costo es el
+  // mismo recorrido que ya hacían las otras consultas de aquí.
+  const diasResult = await db.execute(sql`
+    SELECT DATE_FORMAT(submissionTime, '%Y-%m-%d') as dia, COUNT(*) as cajas
+    FROM boxes
+    WHERE archived = 0
+    GROUP BY dia
+    ORDER BY dia DESC
   `);
-  
+
   // Obtener parcelas únicas - excluir archivadas
   const parcelsResult = await db.execute(sql`
     SELECT DISTINCT parcelCode as code, parcelName as name 
@@ -234,7 +348,7 @@ export async function getBoxFilterOptions() {
     WHERE archived = 0 AND parcelCode IS NOT NULL AND parcelCode != ''
     ORDER BY parcelCode
   `);
-  
+
   // Obtener cortadoras únicas - excluir archivadas
   const harvestersResult = await db.execute(sql`
     SELECT DISTINCT harvesterId as id 
@@ -242,9 +356,35 @@ export async function getBoxFilterOptions() {
     WHERE archived = 0
     ORDER BY harvesterId
   `);
-  
+
+  const ciclos = await getCiclosDeCajas();
+  const rangos: RangoCiclo[] = ciclos;
+
+  const dias = (diasResult[0] as any[]).map((r) => ({
+    fecha: String(r.dia),
+    cajas: Number(r.cajas),
+    cycleId: cicloDeFecha(String(r.dia), rangos),
+  }));
+
+  // Cuántas cajas le tocan a cada ciclo. Es el número que hacía falta: sin él,
+  // la pantalla dice "12,400 cajas" sin decir de qué cosecha son.
+  const conteo = new Map<number | null, number>();
+  for (const d of dias) conteo.set(d.cycleId, (conteo.get(d.cycleId) ?? 0) + d.cajas);
+
   return {
-    dates: (datesResult[0] as any[]).map(r => r.date),
+    cycles: ciclos.map((c) => ({
+      id: c.id,
+      name: c.name,
+      desde: c.desde,
+      hasta: c.hasta,
+      esElDeHoy: c.esElDeHoy,
+      cajas: conteo.get(c.id) ?? 0,
+    })),
+    // Cajas cuya fecha no cae en ningún ciclo registrado
+    sinCiclo: conteo.get(null) ?? 0,
+    days: dias,
+    // Se conserva por compatibilidad: es la lista de días pelona
+    dates: dias.map((d) => d.fecha),
     parcels: (parcelsResult[0] as any[]).map(r => ({ code: r.code, name: r.name })),
     harvesters: (harvestersResult[0] as any[]).map(r => r.id),
   };

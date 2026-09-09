@@ -961,6 +961,9 @@ export const appRouter = router({
         filterDate: z.string().optional(),
         filterParcel: z.string().optional(),
         filterHarvester: z.number().optional(),
+        // Id del ciclo como texto, o "sin" para las cajas cuya fecha no cae en
+        // ningún ciclo. Va como texto porque "sin" no es un id.
+        filterCycle: z.string().optional(),
         search: z.string().optional(),
       }))
       .query(async ({ input }) => {

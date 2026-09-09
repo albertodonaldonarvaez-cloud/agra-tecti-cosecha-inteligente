@@ -7,7 +7,7 @@
  * otro, y eso no se nota hasta que alguien compara dos cosechas.
  */
 import { describe, it, expect } from "vitest";
-import { resolverCiclo, finDeCiclo, type CicloRango } from "./ciclos";
+import { resolverCiclo, finDeCiclo, rangosDeCiclo, cicloDeFecha, type CicloRango } from "./ciclos";
 
 const HOY = "2026-09-08";
 
@@ -90,5 +90,73 @@ describe("finDeCiclo", () => {
 
   it("un ciclo abierto llega hasta hoy", () => {
     expect(finDeCiclo({ id: 3, startDate: "2026-01-20", endDate: null }, HOY)).toBe(HOY);
+  });
+});
+
+describe("rangosDeCiclo", () => {
+  it("con ciclos que no se encinan, el rango es tal cual el del ciclo", () => {
+    const rangos = rangosDeCiclo(CICLOS, HOY);
+    expect(rangos).toEqual([
+      { id: 1, desde: "2024-01-15", hasta: "2024-11-30" },
+      { id: 2, desde: "2025-01-10", hasta: "2025-12-05" },
+      { id: 3, desde: "2026-01-20", hasta: HOY },
+    ]);
+  });
+
+  it("el ciclo abierto se corta en hoy, no en el futuro", () => {
+    const [abierto] = rangosDeCiclo([{ id: 3, startDate: "2026-01-20", endDate: null }], HOY);
+    expect(abierto.hasta).toBe(HOY);
+  });
+
+  it("da lo mismo que resolverCiclo, día por día", () => {
+    // Esta es la que de verdad importa: el filtro de la pantalla usa rangos y
+    // la etiqueta de cada renglón sale del mismo lado. Si se separaran, un
+    // renglón diría "ciclo pasado" dentro del filtro del ciclo actual.
+    const rangos = rangosDeCiclo(CICLOS, HOY);
+    const dia = new Date("2023-12-01T12:00:00Z");
+    const ultimo = new Date("2026-09-08T12:00:00Z");
+
+    while (dia <= ultimo) {
+      const fecha = dia.toISOString().slice(0, 10);
+      expect(cicloDeFecha(fecha, rangos)).toBe(resolverCiclo(fecha, CICLOS, HOY));
+      dia.setUTCDate(dia.getUTCDate() + 1);
+    }
+  });
+
+  it("cuando dos ciclos se traslapan, al de antes se le recorta el final", () => {
+    const traslapados: CicloRango[] = [
+      { id: 7, startDate: "2026-01-01", endDate: "2026-12-31" },
+      { id: 8, startDate: "2026-06-01", endDate: "2026-12-31" },
+    ];
+    expect(rangosDeCiclo(traslapados, HOY)).toEqual([
+      { id: 7, desde: "2026-01-01", hasta: "2026-05-31" },
+      { id: 8, desde: "2026-06-01", hasta: "2026-12-31" },
+    ]);
+  });
+
+  it("no depende del orden en que vengan los ciclos", () => {
+    const traslapados: CicloRango[] = [
+      { id: 7, startDate: "2026-01-01", endDate: "2026-12-31" },
+      { id: 8, startDate: "2026-06-01", endDate: "2026-12-31" },
+    ];
+    const alReves = [...traslapados].reverse();
+    const porId = (r: { id: number }[]) => [...r].sort((a, b) => a.id - b.id);
+    expect(porId(rangosDeCiclo(alReves, HOY))).toEqual(porId(rangosDeCiclo(traslapados, HOY)));
+  });
+
+  it("dos ciclos que arrancan el mismo día: el de id mayor se queda con todo", () => {
+    const gemelos: CicloRango[] = [
+      { id: 4, startDate: "2026-02-01", endDate: null },
+      { id: 5, startDate: "2026-02-01", endDate: null },
+    ];
+    const rangos = rangosDeCiclo(gemelos, HOY);
+    // Al 4 le queda un rango vacío, y así se nota que algo se capturó mal
+    expect(rangos[0].hasta < rangos[0].desde).toBe(true);
+    expect(cicloDeFecha("2026-05-01", rangos)).toBe(5);
+  });
+
+  it("sin ciclos no hay rangos ni fecha que pertenezca a algo", () => {
+    expect(rangosDeCiclo([], HOY)).toEqual([]);
+    expect(cicloDeFecha("2026-08-01", [])).toBeNull();
   });
 });
