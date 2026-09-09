@@ -156,7 +156,7 @@ function CicloBoton({
 /** Un dato del modal: rótulo chico, valor, y una línea de contexto abajo. */
 function DatoDelModal({ titulo, valor, pie }: { titulo: string; valor: string; pie?: string | null }) {
   return (
-    <div className="rounded-2xl border border-white/60 bg-white/60 p-4 backdrop-blur-sm">
+    <div className="flex flex-col justify-center rounded-2xl border border-white/60 bg-white/60 p-4 backdrop-blur-sm">
       <p className="mb-1 text-xs font-medium uppercase tracking-wide text-green-600/80">{titulo}</p>
       <p className="font-semibold text-green-900">{valor}</p>
       {pie && <p className="mt-0.5 text-xs text-gray-500">{pie}</p>}
@@ -597,10 +597,14 @@ function BoxesContent() {
           /* El velo se desenfoca: la tabla de atrás tiene mucho texto chico y
              sin blur compite con la foto de la caja. */
           overlayClassName="bg-green-950/50 backdrop-blur-md"
-          className="max-w-6xl gap-0 overflow-hidden rounded-3xl border border-white/50 bg-white/70 p-0 shadow-2xl backdrop-blur-2xl"
+          /* Los anchos van con variantes sm:/lg:/xl: a fuerza. El diálogo trae
+             `sm:max-w-lg` de fábrica, y esa regla le gana a un `max-w-6xl`
+             pelón en cuanto la pantalla pasa de 640px: por eso se veía angosto
+             y alargado en la computadora aunque dijera 6xl. */
+          className="max-w-[96vw] gap-0 overflow-hidden rounded-3xl border border-white/50 bg-white/70 p-0 shadow-2xl backdrop-blur-2xl sm:max-w-3xl lg:max-w-5xl xl:max-w-[1100px]"
         >
           {selectedBox && (
-            <div className="flex max-h-[90vh] flex-col lg:flex-row">
+            <div className="flex max-h-[92vh] flex-col lg:min-h-[460px] lg:max-h-[86vh] lg:flex-row">
               {/* Cerrar: propio y no el de la librería, que se pierde encima de la foto */}
               <button
                 type="button"
@@ -612,7 +616,7 @@ function BoxesContent() {
               </button>
 
               {/* Foto */}
-              <div className="relative flex min-h-[35vh] flex-1 items-center justify-center overflow-hidden bg-green-950/90 p-4 lg:min-h-[70vh] lg:p-6">
+              <div className="relative flex min-h-[32vh] items-center lg:shrink-0 justify-center overflow-hidden bg-green-950/90 p-4 lg:h-full lg:w-[42%] lg:p-6">
                 {selectedBox.photoUrl ? (
                   <>
                     {/* La misma foto, ampliada y desenfocada, rellena las orillas
@@ -626,7 +630,7 @@ function BoxesContent() {
                     <img
                       src={getBoxPhotoUrl(selectedBox) || ""}
                       alt={`Caja ${selectedBox.boxCode}`}
-                      className="relative max-h-[45vh] w-full rounded-2xl object-contain shadow-2xl lg:max-h-[78vh]"
+                      className="relative h-full max-h-[42vh] w-full rounded-2xl object-contain shadow-2xl lg:max-h-full"
                     />
                   </>
                 ) : (
@@ -638,55 +642,74 @@ function BoxesContent() {
               </div>
 
               {/* Información */}
-              <div className="flex-1 overflow-y-auto bg-white/80 p-6 backdrop-blur-xl lg:p-8">
-                <DialogHeader className="mb-6">
-                  <div className="mb-2 flex flex-wrap items-center gap-2">
+              <div className="flex flex-1 flex-col overflow-y-auto bg-white/80 p-6 backdrop-blur-xl lg:p-8">
+                <DialogHeader className="mb-5">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <DialogTitle className="text-3xl font-bold tracking-tight text-green-900 lg:text-4xl">
+                      {selectedBox.boxCode}
+                    </DialogTitle>
                     <CicloChip nombre={selectedBox.cycleName} actual={selectedBox.cycleId === cicloDeHoy?.id} />
                     <span className={`inline-flex items-center rounded-full bg-white/70 px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ring-green-200 ${getQualityType(selectedBox.harvesterId).color}`}>
                       {getQualityType(selectedBox.harvesterId).label}
                     </span>
                   </div>
-                  <DialogTitle className="text-3xl font-bold tracking-tight text-green-900">
-                    {selectedBox.boxCode}
-                  </DialogTitle>
                 </DialogHeader>
 
-                {/* Peso: es el dato por el que se abre este modal, va solo y grande */}
-                <div className="mb-6 rounded-2xl border border-green-200/60 bg-gradient-to-br from-green-50/90 to-emerald-50/60 p-5 backdrop-blur-sm">
-                  <p className="mb-1 text-sm text-green-600">Peso neto</p>
-                  <p className="text-4xl font-bold tracking-tight text-green-900">
-                    {selectedBox.weight ? (selectedBox.weight / 1000).toFixed(2) : "0.00"}
-                    <span className="ml-1 text-xl font-semibold">kg</span>
-                  </p>
-                  <p className="mt-1 text-xs text-green-700/70">{(selectedBox.weight || 0).toLocaleString()} gramos, ya sin tara</p>
+                {/* Los dos datos por los que se abre este modal, uno al lado del
+                    otro. Apilados dejaban la columna alta y flaca con la mitad
+                    del ancho vacío. */}
+                <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-green-200/60 bg-gradient-to-br from-green-50/90 to-emerald-50/60 p-5 backdrop-blur-sm">
+                    <p className="mb-1 text-xs font-medium uppercase tracking-wide text-green-600/80">Peso neto</p>
+                    <p className="text-4xl font-bold tracking-tight text-green-900 lg:text-5xl">
+                      {selectedBox.weight ? (selectedBox.weight / 1000).toFixed(2) : "0.00"}
+                      <span className="ml-1 text-xl font-semibold">kg</span>
+                    </p>
+                    <p className="mt-1 text-xs text-green-700/70">
+                      {(selectedBox.weight || 0).toLocaleString()} gramos, ya sin tara
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-green-200/60 bg-gradient-to-br from-emerald-50/70 to-white/40 p-5 backdrop-blur-sm">
+                    <p className="mb-1 text-xs font-medium uppercase tracking-wide text-green-600/80">Cortadora</p>
+                    <p className="text-4xl font-bold tracking-tight text-green-900 lg:text-5xl">
+                      #{selectedBox.harvesterId}
+                    </p>
+                    <p className="mt-1 text-xs text-green-700/70">{getHarvesterName(selectedBox.harvesterId)}</p>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   <DatoDelModal titulo="Parcela" valor={selectedBox.parcelCode} pie={selectedBox.parcelName} />
                   <DatoDelModal
-                    titulo="Cortadora"
-                    valor={`#${selectedBox.harvesterId}`}
-                    pie={getHarvesterName(selectedBox.harvesterId)}
-                  />
-                  <DatoDelModal
-                    titulo="Fecha de registro"
+                    titulo="Fecha"
                     valor={new Date(selectedBox.submissionTime).toLocaleDateString("es-MX", {
                       year: "numeric",
                       month: "long",
                       day: "numeric",
                     })}
-                    pie={new Date(selectedBox.submissionTime).toLocaleTimeString("es-MX")}
+                    pie={`${new Date(selectedBox.submissionTime).toLocaleTimeString("es-MX")} · ${new Date(selectedBox.submissionTime).toLocaleDateString("es-MX", { weekday: "long" })}`}
                   />
                   <DatoDelModal
                     titulo="Ciclo"
                     valor={selectedBox.cycleName ?? "Sin ciclo"}
                     pie={
                       selectedBox.cycleName
-                        ? "Por la fecha en que se registró"
+                        ? "Se deduce de la fecha de registro"
                         : "Su fecha no cae en ningún ciclo capturado"
                     }
                   />
                 </div>
+
+                {/* De dónde salió la foto. Es lo que se pregunta cuando una caja
+                    aparece sin imagen, y hasta ahora el modal no lo decía. */}
+                <p className="mt-auto pt-5 text-xs text-gray-400">
+                  {selectedBox.photoUrl
+                    ? selectedBox.photoLocalPath
+                      ? "Foto guardada en el servidor"
+                      : "Foto todavía solo en KoboToolbox"
+                    : "Esta caja se registró sin foto"}
+                </p>
               </div>
             </div>
           )}
