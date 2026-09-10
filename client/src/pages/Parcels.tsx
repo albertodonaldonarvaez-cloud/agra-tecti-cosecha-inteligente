@@ -17,6 +17,7 @@ import { MapPin, Upload, Plus, Edit, Trash2, CheckCircle, XCircle, Map as MapIco
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ParcelMap } from "@/components/ParcelMap";
+import { leerArchivoDeParcelas } from "@/lib/kml";
 
 interface Parcel {
   id: number;
@@ -146,35 +147,10 @@ function ParcelsContent() {
       toast.error("Por favor selecciona un archivo KML/KMZ");
       return;
     }
-
-    const fileType = kmlFile.name.toLowerCase().endsWith('.kmz') ? 'kmz' : 'kml';
-    
     try {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const content = e.target?.result;
-        if (!content) return;
-
-        let fileContent: string;
-        if (fileType === 'kmz') {
-          fileContent = btoa(
-            new Uint8Array(content as ArrayBuffer)
-              .reduce((data, byte) => data + String.fromCharCode(byte), '')
-          );
-        } else {
-          fileContent = content as string;
-        }
-
-        uploadKml.mutate({ fileContent, fileType });
-      };
-
-      if (fileType === 'kmz') {
-        reader.readAsArrayBuffer(kmlFile);
-      } else {
-        reader.readAsText(kmlFile);
-      }
-    } catch (error) {
-      toast.error("Error leyendo el archivo");
+      uploadKml.mutate(await leerArchivoDeParcelas(kmlFile));
+    } catch (error: any) {
+      toast.error(error?.message ?? "Error leyendo el archivo");
     }
   };
 
@@ -211,7 +187,8 @@ function ParcelsContent() {
             <div className="flex-1">
               <h3 className="text-lg font-semibold text-green-900">Cargar desde KML/KMZ</h3>
               <p className="text-sm text-green-700">
-                Importa múltiples parcelas con sus polígonos desde un archivo KML o KMZ
+                Importa múltiples parcelas con sus polígonos desde un archivo KML o KMZ.
+                También está en <a href="/settings" className="underline hover:text-green-900">Configuración</a>.
               </p>
             </div>
             <div className="flex items-center gap-2">

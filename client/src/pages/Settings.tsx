@@ -7,8 +7,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save, Clock, Timer, CheckCircle, XCircle, Zap, Send, MessageCircle, Eye, EyeOff, Plane, Link2, Unlink, Wheat, ClipboardList, Loader2, ImageDown, HardDrive, Mail, AtSign, KeyRound, Copy, Trash2, Terminal } from "lucide-react";
+import { Settings as SettingsIcon, Upload, RefreshCw, AlertTriangle, FileSpreadsheet, MapPin, Save, Clock, Timer, CheckCircle, XCircle, Zap, Send, MessageCircle, Eye, EyeOff, Plane, Link2, Unlink, Wheat, ClipboardList, Loader2, ImageDown, HardDrive, Mail, AtSign, KeyRound, Copy, Trash2, Terminal, Map as MapIcon } from "lucide-react";
 import LocationMapPicker from "@/components/LocationMapPicker";
+import { leerArchivoDeParcelas } from "@/lib/kml";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -519,6 +520,9 @@ export default function Settings() {
           {/* Llaves de API para agentes y scripts */}
           <ApiKeysSection />
 
+          {/* Parcelas desde KML/KMZ */}
+          <ParcelasKmzSection />
+
           {/* Carga Manual */}
           <GlassCard className="p-4 md:p-6">
             <div className="mb-4 flex items-center gap-2">
@@ -666,6 +670,125 @@ export default function Settings() {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Cargar las parcelas y sus polígonos desde un KML o un KMZ.
+ *
+ * Esto mismo vive en la pantalla de Parcelas, pero ahí se pierde: es la novena
+ * de veinte pastillas de la barra de navegación y se llega rodando. Se subieron
+ * las parcelas UNA vez, cuando se dio de alta la finca, y la siguiente vez que
+ * hace falta es meses después — cuando ya nadie se acuerda de dónde estaba.
+ * Configuración es donde se busca lo que se hace una vez al año.
+ */
+function ParcelasKmzSection() {
+  const [archivo, setArchivo] = useState<File | null>(null);
+  const [cargadas, setCargadas] = useState<{ code: string; name: string }[] | null>(null);
+  const utils = trpc.useUtils();
+
+  const { data: parcelas } = trpc.parcels.list.useQuery();
+  const conPoligono = parcelas?.filter((p: any) => p.polygon).length ?? 0;
+  const total = parcelas?.length ?? 0;
+
+  const subir = trpc.parcels.uploadKML.useMutation({
+    onSuccess: (data) => {
+      toast.success(`${data.parcelsProcessed} parcelas cargadas desde el archivo`);
+      setCargadas(data.parcels);
+      setArchivo(null);
+      // El mapa y los análisis leen los polígonos: sin esto siguen enseñando
+      // los de antes hasta que alguien recarga la página.
+      utils.parcels.list.invalidate();
+      utils.boxes.parcelsWithoutPolygon.invalidate();
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
+  const cargar = async () => {
+    if (!archivo) {
+      toast.error("Primero escoge un archivo KML o KMZ");
+      return;
+    }
+    try {
+      subir.mutate(await leerArchivoDeParcelas(archivo));
+    } catch (error: any) {
+      toast.error(error?.message ?? "No se pudo leer el archivo");
+    }
+  };
+
+  return (
+    <GlassCard className="p-4 md:p-6 border-2 border-lime-200 bg-lime-50/30">
+      <div className="mb-4 flex items-center gap-2">
+        <MapIcon className="h-6 w-6 text-lime-700" />
+        <h2 className="text-lg md:text-2xl font-semibold text-green-900">Parcelas desde KML / KMZ</h2>
+      </div>
+
+      <p className="mb-4 text-sm text-green-700">
+        Sube el archivo que exporta Google Earth con los polígonos de tus parcelas. Es lo que
+        dibuja el mapa y lo que le permite al sistema saber de qué parcela es cada caja.
+      </p>
+
+      {total > 0 && (
+        <div className="mb-4 rounded-xl border border-lime-200 bg-white/60 p-3 text-sm">
+          <p className="text-green-900">
+            <strong>{total}</strong> parcelas registradas, <strong>{conPoligono}</strong> con polígono.
+          </p>
+          {conPoligono < total && (
+            /* Una parcela sin polígono no sale en el mapa ni en el análisis
+               satelital, y eso no se nota hasta que alguien la busca. */
+            <p className="mt-1 text-amber-700">
+              A {total - conPoligono} {total - conPoligono === 1 ? "parcela le falta" : "parcelas les falta"} su
+              polígono: no aparecen en el mapa ni en el análisis por parcela.
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <Input
+          type="file"
+          accept=".kml,.kmz"
+          onChange={(e) => {
+            setArchivo(e.target.files?.[0] || null);
+            setCargadas(null);
+          }}
+          className="flex-1"
+        />
+        <Button
+          onClick={cargar}
+          disabled={!archivo || subir.isPending}
+          className="bg-lime-700 hover:bg-lime-800 sm:w-40"
+        >
+          <Upload className="mr-2 h-4 w-4" />
+          {subir.isPending ? "Cargando..." : "Cargar"}
+        </Button>
+      </div>
+
+      {/* Qué le va a pasar a lo que ya está. Es la pregunta que frena a
+          cualquiera antes de subir un archivo a un sistema en producción. */}
+      <p className="mt-3 text-xs text-green-600">
+        Las parcelas se emparejan por su código: las que ya existen se actualizan y las nuevas se
+        agregan. <strong>No se borra ninguna</strong>, así que subir un archivo incompleto no te
+        quita parcelas — solo deja de actualizar las que no vengan en él.
+      </p>
+
+      {cargadas && cargadas.length > 0 && (
+        <div className="mt-4 rounded-xl border border-green-200 bg-white/70 p-3">
+          <p className="mb-2 text-sm font-medium text-green-900">Parcelas del archivo</p>
+          <div className="flex flex-wrap gap-1.5">
+            {cargadas.map((p) => (
+              <span
+                key={p.code}
+                className="rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-medium text-green-800"
+                title={p.name}
+              >
+                {p.code}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </GlassCard>
   );
 }
 
