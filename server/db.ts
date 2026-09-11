@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, getTableColumns } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users, apiConfig, harvesters, boxes, InsertBox, userActivityLogs, productionCycles } from "../drizzle/schema";
 import { rangosDeCiclo, cicloDeFecha, type RangoCiclo } from "../shared/ciclos";
@@ -421,33 +421,40 @@ export async function updateUserRole(userId: number, role: "user" | "admin") {
  * @param userId ID del usuario
  * @param permissions Objeto con los permisos a actualizar (campos canView*)
  */
+/**
+ * Qué columnas de `users` son permisos.
+ *
+ * Sale del esquema y NO de una lista escrita a mano. La lista escrita a mano
+ * que había aquí se quedó en diez nombres cuando ya existían veinte permisos,
+ * y el efecto no era un error: la pantalla de Usuarios decía "guardado" y esos
+ * diez permisos nunca llegaban a la base. Entre ellos el de Etiquetas, que es
+ * justo el que necesita una báscula para poder imprimir.
+ *
+ * Derivarlo del esquema hace que agregar una columna de permiso baste para que
+ * se pueda conceder, que es lo que cualquiera supondría al agregarla.
+ */
+const CAMPOS_DE_PERMISO: ReadonlySet<string> = new Set(
+  Object.keys(getTableColumns(users)).filter(
+    (columna) => columna.startsWith("canView") || columna.startsWith("canWeigh"),
+  ),
+);
+
+export function esCampoDePermiso(clave: string): boolean {
+  return CAMPOS_DE_PERMISO.has(clave);
+}
+
 export async function updateUserPermissions(userId: number, permissions: Record<string, boolean>) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  
-  // Construir objeto de actualización solo con campos válidos
+
   const updateData: Record<string, any> = { updatedAt: new Date() };
-  
-  // Lista de campos de permisos válidos en la tabla users
-  const validPermissionFields = [
-    'canViewDashboard',
-    'canViewBoxes', 
-    'canViewAnalytics',
-    'canViewDailyAnalysis',
-    'canViewClimate',
-    'canViewPerformance',
-    'canViewParcels',
-    'canViewHarvesters',
-    'canViewEditor',
-    'canViewErrors',
-  ];
-  
+
   for (const [key, value] of Object.entries(permissions)) {
-    if (validPermissionFields.includes(key)) {
+    if (esCampoDePermiso(key)) {
       updateData[key] = value;
     }
   }
-  
+
   await db.update(users).set(updateData).where(eq(users.id, userId));
 }
 

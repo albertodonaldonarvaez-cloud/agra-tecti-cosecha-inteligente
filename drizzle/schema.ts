@@ -188,7 +188,7 @@ export const boxes = mysqlTable("boxes", {
   clientUuid: varchar("clientUuid", { length: 64 }).unique(), // idempotencia del envío offline
   // Nulo en lo ya capturado: no se registró el origen y no vale la pena
   // suponerlo (hay cajas de Kobo y cajas cargadas por Excel mezcladas).
-  origin: mysqlEnum("origin", ["kobo", "app", "excel", "manual"]),
+  origin: mysqlEnum("origin", ["kobo", "app", "excel", "manual", "bascula"]),
   weighedAt: timestamp("weighedAt"), // cuándo se pesó, según la báscula
 
   createdAt: timestamp("createdAt").defaultNow().notNull(),

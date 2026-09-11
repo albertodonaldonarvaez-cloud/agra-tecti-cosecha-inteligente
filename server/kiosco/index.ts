@@ -37,6 +37,13 @@ import {
   reimprimirEtiqueta,
   resumenEtiquetas,
 } from "../etiquetas";
+import {
+  CAJAS_POR_ENVIO,
+  conflictosDePesaje,
+  estadoDeCaja,
+  recibirCajas,
+  tiposDeCaja,
+} from "../pesaje";
 import type { User } from "../../drizzle/schema";
 
 interface Peticion extends Request {
@@ -59,6 +66,12 @@ const ESTADOS: Record<string, number> = {
   folio_agotado: 409,
   etiqueta_desconocida: 404,
   lote_desconocido: 404,
+  // Pesaje. Casi todo aquí es 400 —el kiosco corrige y vuelve a mandar—
+  // incluido un ciclo que no existe, igual que en etiquetas. El único aparte
+  // es la tanda demasiado grande: no hay nada que corregir en los datos, hay
+  // que partirla, y 413 es lo que dice eso sin ambigüedad.
+  envio_vacio: 400,
+  envio_muy_grande: 413,
 };
 
 /** Envuelve un manejador: traduce errores y da la misma forma a toda respuesta. */
@@ -143,6 +156,23 @@ function exigirPermisoEtiquetas(req: Peticion, res: Response, siguiente: () => v
   });
 }
 
+/**
+ * Pesar tiene su propio permiso, y nace apagado.
+ *
+ * Imprimir de más cuesta papel. Pesar de más mete cajas en la cosecha, que es
+ * el dato del que cuelga todo lo demás, así que no se hereda de "Etiquetas":
+ * hay que encenderlo a propósito para la cuenta de cada báscula.
+ */
+function exigirPermisoPesaje(req: Peticion, res: Response, siguiente: () => void) {
+  const u = req.usuario!;
+  if (u.role === "admin" || u.canWeighBoxes) return siguiente();
+  return responderError(res, 403, {
+    codigo: "sin_permiso",
+    mensaje: "Esta cuenta no tiene permiso para pesar cajas",
+    ayuda: "Actívale “Pesar cajas” en Configuración → Usuarios.",
+  });
+}
+
 // ─────────────────────── lectura del cuerpo ───────────────────────
 
 function campoEntero(req: Peticion, nombre: string, min: number, max: number): number {
@@ -193,9 +223,13 @@ export function crearApiCampo(): Router {
       autenticacion: "Authorization: Bearer <token de auth.loginMobile>",
       dispositivo: "Encabezado opcional X-Dispositivo con el identificador del aparato",
       zonaHoraria: ZONA,
-      enEstaFase: "Etiquetas: apartar folios, confirmar, cancelar, reimprimir y consultar",
-      proximaFase: "Pesaje de cajas con tara",
+      enEstaFase: [
+        "Etiquetas: apartar folios, confirmar, cancelar, reimprimir y consultar",
+        "Pesaje: recibir cajas pesadas por tandas, con tara y sin perder nada por falta de señal",
+      ],
+      proximaFase: "Subir la foto de la caja",
       nota: "El folio lo reparte el servidor y se reinicia en cada ciclo. Nunca mandes un folio: pide cuántos necesitas.",
+      notaPesaje: "El peso viaja en gramos enteros y cada caja lleva su clientUuid. Reenviar la misma tanda no duplica nada.",
     });
   });
 
@@ -298,6 +332,50 @@ export function crearApiCampo(): Router {
   // como un código de caja.
   api.get("/etiquetas/:codigo", atender(async (req) =>
     await expedienteEtiqueta(req.params.codigo, entero(req, "ciclo", { min: 1, max: 2_000_000_000 }))
+  ));
+
+  // ── Pesaje ───────────────────────────────────────────────────
+  //
+  // El kiosco pesa sin señal y vacía su cola aquí cuando vuelve la red. Por eso
+  // el envío es por tandas y cada caja lleva su clientUuid: reenviar la misma
+  // tanda tiene que dar el mismo resultado, no cajas repetidas.
+  //
+  // Lo que llega con algo raro (peso alto, código repetido, sin etiqueta) SE
+  // GUARDA y se contesta marcado. Un peso ya ocurrió: rechazarlo borra una
+  // medición del mundo real y deja a la báscula reintentando para siempre.
+
+  api.post("/cosecha/cajas", exigirPermisoPesaje as any, atender(async (req) => {
+    const cuerpo = req.body ?? {};
+    const cajas = Array.isArray(cuerpo.cajas) ? cuerpo.cajas : null;
+    if (!cajas) {
+      throw new ApiError(400, "cajas_requerido", 'Falta el arreglo "cajas"',
+        `Manda {"cajas": [{...}]} con hasta ${CAJAS_POR_ENVIO} pesajes.`);
+    }
+    const resumen = await recibirCajas({
+      cajas,
+      usuarioId: req.usuario!.id,
+      deviceId: req.dispositivo ?? null,
+    });
+    return {
+      ...resumen,
+      siguientePaso: resumen.rechazadas > 0
+        ? "Las rechazadas NO se guardaron: consérvalas en la tableta. Cada una dice en su error qué corregir."
+        : "Todo lo que se mandó quedó guardado. Las que traen avisos sí entraron, solo hay que revisarlas.",
+      nota: "Reenviar la misma tanda es inofensivo: las que ya estaban contestan “duplicada” con el id de su caja.",
+    };
+  }));
+
+  api.get("/cosecha/tipos-de-caja", atender(async () => tiposDeCaja()));
+
+  api.get("/cosecha/conflictos", atender(async (req) => await conflictosDePesaje({
+    cicloId: entero(req, "ciclo", { min: 1, max: 2_000_000_000 }),
+    limite: entero(req, "limite", { min: 1, max: 200 }),
+  })));
+
+  // Al final del bloque, por lo mismo que en etiquetas: lo que no coincidió
+  // arriba se trata como un código de caja.
+  api.get("/cosecha/cajas/:codigo", atender(async (req) =>
+    await estadoDeCaja(req.params.codigo, entero(req, "ciclo", { min: 1, max: 2_000_000_000 }))
   ));
 
   api.use((req, res) => {

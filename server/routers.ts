@@ -1652,10 +1652,12 @@ export const appRouter = router({
         permissions: z.record(z.string(), z.boolean()),
       }))
       .mutation(async ({ input }) => {
-        // Filtrar solo los campos de permisos válidos (canView*)
+        // Qué es un permiso lo decide el esquema, no un prefijo escrito aquí:
+        // con "canView" se caía canWeighBoxes, que no es una pantalla sino la
+        // facultad de escribir cajas desde la báscula.
         const validPermissions: Record<string, boolean> = {};
         for (const [key, value] of Object.entries(input.permissions)) {
-          if (key.startsWith('canView')) {
+          if (db.esCampoDePermiso(key)) {
             validPermissions[key] = value;
           }
         }

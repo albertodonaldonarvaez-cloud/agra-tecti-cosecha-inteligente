@@ -575,6 +575,23 @@ async function migrate() {
     await ensureColumn('boxes', 'weighedAt',
       "ALTER TABLE boxes ADD COLUMN weighedAt TIMESTAMP NULL DEFAULT NULL");
 
+    // El kiosco de bascula es su propio origen: 'app' seria el telefono de
+    // campo, y confundirlos borraria justo la diferencia que sirve para saber
+    // de donde salio un peso. Agregar un valor AL FINAL de un ENUM es
+    // instantaneo en MySQL 8 (no reescribe la tabla); se revisa el tipo actual
+    // para no lanzar el ALTER en cada arranque.
+    {
+      const [tipo] = await conn.query(
+        "SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'boxes' AND COLUMN_NAME = 'origin'"
+      );
+      if (tipo.length > 0 && !String(tipo[0].COLUMN_TYPE).includes("'bascula'")) {
+        await conn.query(
+          "ALTER TABLE boxes MODIFY COLUMN origin ENUM('kobo','app','excel','manual','bascula') NULL DEFAULT NULL"
+        );
+        console.log('[Migration] + boxes.origin acepta bascula');
+      }
+    }
+
     // Varios NULL conviven en un indice unico de MySQL, asi que esto no estorba
     // a lo ya capturado y hace idempotente el envio de la bascula.
     await ensureIndex('boxes', 'boxes_clientUuid_unique',

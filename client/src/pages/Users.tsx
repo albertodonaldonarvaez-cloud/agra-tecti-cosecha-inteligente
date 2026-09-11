@@ -44,7 +44,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { toast } from "sonner";
-import { getPermissionPages, getDefaultPermissions } from "@/config/pages";
+import { getPermissionPages, getDefaultPermissions, getCapabilities } from "@/config/pages";
 
 const TIMEZONE = "America/Mexico_City";
 
@@ -146,6 +146,8 @@ export default function Users() {
   const [codeCopied, setCodeCopied] = useState(false);
 
   const permissionPages = useMemo(() => getPermissionPages(), []);
+  // Permisos que no son una pantalla, como pesar cajas desde la báscula
+  const capacidades = useMemo(() => getCapabilities(), []);
   const [permissions, setPermissions] = useState<Record<string, boolean>>(() => getDefaultPermissions());
 
   const { data: usersList, refetch } = trpc.usersAdmin.list.useQuery(undefined, {
@@ -296,6 +298,7 @@ export default function Users() {
     setSelectedUser(u);
     const cur: Record<string, boolean> = {};
     permissionPages.forEach(p => { cur[p.permissionKey] = u[p.permissionKey] ?? p.defaultValue; });
+    capacidades.forEach(c => { cur[c.permissionKey] = u[c.permissionKey] ?? c.defaultValue; });
     setPermissions(cur);
     setShowPermissionsDialog(true);
   };
@@ -742,20 +745,24 @@ export default function Users() {
             </DialogHeader>
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <p className="text-sm text-gray-600">Selecciona qué páginas puede ver</p>
+                <p className="text-sm text-gray-600">Qué puede ver y qué puede hacer</p>
                 <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
-                  {activePermissionsCount}/{permissionPages.length} activos
+                  {activePermissionsCount}/{permissionPages.length + capacidades.length} activos
                 </span>
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={() => {
                   const all: Record<string, boolean> = {};
                   permissionPages.forEach(p => { all[p.permissionKey] = true; });
+                  // Las capacidades no entran en “seleccionar todo”: pesar cajas
+                  // escribe en la cosecha y se enciende una por una, a propósito.
+                  capacidades.forEach(c => { all[c.permissionKey] = permissions[c.permissionKey] ?? c.defaultValue; });
                   setPermissions(all);
                 }}>Seleccionar todo</Button>
                 <Button variant="outline" size="sm" onClick={() => {
                   const none: Record<string, boolean> = {};
                   permissionPages.forEach(p => { none[p.permissionKey] = false; });
+                  capacidades.forEach(c => { none[c.permissionKey] = false; });
                   setPermissions(none);
                 }}>Deseleccionar todo</Button>
               </div>
@@ -781,6 +788,38 @@ export default function Users() {
                   );
                 })}
               </div>
+
+              {/* Lo que no es una pantalla. Va aparte y fuera del scroll porque
+                  no contesta "¿puede ver esto?" sino "¿puede escribir en la
+                  cosecha?", y eso no se enciende sin verlo. */}
+              {capacidades.length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
+                    Permisos que escriben datos
+                  </p>
+                  {capacidades.map((cap) => {
+                    const Icon = cap.icon;
+                    return (
+                      <div key={cap.permissionKey} className="flex items-start space-x-3">
+                        <Checkbox
+                          id={cap.permissionKey}
+                          checked={permissions[cap.permissionKey] ?? cap.defaultValue}
+                          onCheckedChange={(checked) => setPermissions(prev => ({ ...prev, [cap.permissionKey]: !!checked }))}
+                          className="mt-0.5"
+                        />
+                        <div className="flex-1">
+                          <label htmlFor={cap.permissionKey} className="text-sm font-medium leading-none cursor-pointer flex items-center gap-2">
+                            <Icon className="h-4 w-4 text-amber-600" />
+                            {cap.fullName}
+                          </label>
+                          <p className="text-xs text-gray-600 mt-1">{cap.description}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               <div className="flex justify-end gap-2 pt-4 border-t">
                 <Button variant="outline" onClick={() => setShowPermissionsDialog(false)}>Cancelar</Button>
                 <Button onClick={handleSavePermissions} disabled={updatePermissions.isPending}>Guardar Permisos</Button>

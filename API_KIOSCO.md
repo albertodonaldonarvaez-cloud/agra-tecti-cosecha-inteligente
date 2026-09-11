@@ -3,7 +3,7 @@
 Superficie que consume la app de Android. Vive en `/api/campo/v1` y **sí escribe**,
 a diferencia de `/api/v1`, que quedó de solo lectura para los agentes de IA.
 
-En esta fase están las etiquetas. El pesaje de cajas con tara entra en la fase 3.
+En esta fase están las **etiquetas** y el **pesaje**. Falta subir la foto de la caja.
 
 ---
 
@@ -208,9 +208,122 @@ las etiquetas que siguen apartadas.
 desperdicio. Se imprimen sus etiquetas igual que las demás, pero no cuentan como
 gente en ningún reporte.
 
-**El peso se guarda en gramos.** Cuando entre el pesaje en la fase 3, `weight`
-sigue siendo el peso **neto** —es lo que se ha capturado siempre— y el servidor lo
-calcula restando la tara del bruto.
+**El peso se guarda en gramos.** `weight` es el peso **neto** —es lo que se ha
+capturado siempre— y el servidor lo calcula restando la tara del bruto. El bruto
+y la tara se guardan aparte, que es lo que permite auditar una báscula
+descalibrada.
 
 **Un folio cancelado no vuelve.** Si el kiosco pierde el rango que apartó, pide
 otro; no intentes reusar números.
+
+---
+
+## 8. El pesaje
+
+```
+POST /api/campo/v1/cosecha/cajas
+```
+
+Manda hasta **200 cajas por tanda**. El peso va en **gramos enteros**: `12.345 kg`
+se manda como `12345`. Un decimal se rechaza, porque casi siempre significa que
+alguien convirtió mal la unidad.
+
+```bash
+curl -X POST https://TU-SERVIDOR/api/campo/v1/cosecha/cajas \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "X-Dispositivo: bascula-1" \
+  -H "Content-Type: application/json" \
+  -d '{"cajas": [
+        {"clientUuid": "5b9f0f4a-…",
+         "codigo": "07-001201",
+         "pesoBrutoGramos": 13450,
+         "taraGramos": 1200,
+         "pesadoEn": "2026-09-10T14:23:00-06:00"}
+      ]}'
+```
+
+| Campo | Obligatorio | Qué es |
+|---|---|---|
+| `clientUuid` | **sí** | El uuid que el kiosco generó **al guardar el pesaje**, no al mandarlo |
+| `codigo` | **sí** | El código impreso, `CC-FFFFFF` |
+| `pesoBrutoGramos` | sí, o `pesoNetoGramos` | Lo que marcó la báscula |
+| `taraGramos` | no | La caja vacía. Sin esto se guarda que nadie aplicó tara |
+| `pesoNetoGramos` | sí, si no mandas bruto | Para básculas que ya restan la tara solas |
+| `tipoCajaId` | no | De aquí sale la tara si no la mandas. Ver `GET /cosecha/tipos-de-caja` |
+| `pesadoEn` | no | **ISO 8601 CON zona.** Sin esto, el reloj del servidor |
+| `ciclo` | no | Por omisión, el que le toque a la fecha del pesaje |
+| `parcela` | no | Código de parcela. Sin esto la caja entra como `SIN_PARCELA` |
+
+### La regla que no se puede romper
+
+> **El `clientUuid` se genera al guardar en la tableta, no al enviar.**
+
+Es lo único que hace inofensivo reenviar. Si la respuesta se pierde a medio camino
+—que es lo normal en el campo— el reenvío trae el mismo uuid y el servidor contesta
+`duplicada` con el id de la caja que ya creó. Generarlo al enviar produce un uuid
+nuevo en cada intento y duplica la caja tantas veces como se reintente.
+
+### La fecha lleva zona, siempre
+
+`pesadoEn` tiene que ser un instante completo con zona: `2026-09-10T14:23:00-06:00`
+o con `Z`. Lo demás se rechaza, y no por estricto: JavaScript acepta las tres
+formas de abajo sin quejarse y ninguna guarda lo que el pesador tenía enfrente.
+
+| Lo que mandas | Lo que se guardaría |
+|---|---|
+| `10/09/2026` | 9 de **octubre**, a la americana |
+| `2026-09-07` | las 18:00 del día **6** en México |
+| `2026-09-07T14:23:00` | la hora del contenedor, que está en UTC |
+
+### Lo que entra marcado en vez de rechazarse
+
+Un peso ya ocurrió. Rechazarlo borra una medición real y deja a la báscula
+reintentando para siempre. Estas cajas **se guardan** y vienen con un aviso:
+
+| Aviso | Qué pasó |
+|---|---|
+| `peso_alto` | Más de 15 kg. Casi siempre es un punto decimal mal puesto |
+| `codigo_repetido` | Ya había una caja con ese código en el ciclo |
+| `sin_etiqueta` | El código no está en la tabla de etiquetas. **Normal por ahora** |
+| `etiqueta_cancelada` | Volvió una etiqueta dada por quemada |
+| `sin_ciclo` | La fecha no cae en ningún ciclo registrado |
+| `sin_parcela` | No se dijo de qué parcela salió |
+| `sin_tara` | Nadie aplicó tara. No es lo mismo que una tara de cero |
+
+`sin_etiqueta` va a ser lo normal durante semanas: la tabla de etiquetas nació
+vacía y solo se llena con lo que se imprima de ahora en adelante.
+
+### La respuesta va caja por caja
+
+```json
+{ "ok": true,
+  "datos": {
+    "recibidas": 2, "creadas": 1, "duplicadas": 1, "rechazadas": 0,
+    "resultados": [
+      { "indice": 0, "estado": "creada", "cajaId": 41822,
+        "pesoNetoGramos": 12250, "avisos": ["sin_parcela"] },
+      { "indice": 1, "estado": "duplicada", "cajaId": 41790, "avisos": ["ya_estaba"] }
+    ] } }
+```
+
+El `indice` es la posición en el arreglo que mandaste: con él se sabe **cuál** de
+las doscientas quedó, no solo cuántas. Solo se borran de la cola de la tableta las
+que contesten `creada` o `duplicada`. Las `rechazada` se quedan, y cada una dice
+en su error qué corregir.
+
+### Las otras tres rutas
+
+```
+GET /cosecha/cajas/{codigo}?ciclo=3    ¿ya se pesó? ¿cuántas veces?
+GET /cosecha/conflictos?ciclo=3        códigos con más de una caja
+GET /cosecha/tipos-de-caja             el catálogo de taras
+```
+
+La primera es lo que deja al kiosco preguntar **al servidor** si una caja ya se
+pesó. Su propia memoria no alcanza: dos básculas no se ven entre ellas.
+
+### El permiso
+
+Pesar tiene el suyo, **“Pesar cajas en la báscula”**, en Configuración → Usuarios,
+y nace apagado. No se hereda del de Etiquetas: imprimir de más cuesta papel, pesar
+de más mete cajas en la cosecha.

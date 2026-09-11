@@ -31,6 +31,7 @@ import {
   Tag,
   UsersRound,
   RefreshCcw,
+  Scale,
   type LucideIcon
 } from "lucide-react";
 
@@ -291,6 +292,37 @@ export const PAGES_CONFIG: PageConfig[] = [
     showInNav: false, // No mostrar en nav por ahora
   },
 ];
+
+/**
+ * Permisos que NO son una pantalla.
+ *
+ * Casi todo permiso aquí contesta "¿puede ver esto?" y por eso cuelga de una
+ * página. Pesar no: es la facultad de ESCRIBIR cajas en la cosecha desde el
+ * kiosco de báscula, sin abrir la web. Meterlo en la lista de páginas le
+ * inventaría una pantalla que no existe y lo pondría en la barra de abajo.
+ */
+export interface CapabilityConfig {
+  permissionKey: string;
+  icon: LucideIcon;
+  fullName: string;
+  description: string;
+  defaultValue: boolean;
+}
+
+export const CAPABILITIES_CONFIG: CapabilityConfig[] = [
+  {
+    permissionKey: "canWeighBoxes",
+    icon: Scale,
+    fullName: "Pesar cajas en la báscula",
+    description:
+      "Deja que esta cuenta registre cajas desde el kiosco. Cada caja pesada entra en la cosecha, así que nace apagado: enciéndelo solo en las cuentas de las básculas.",
+    defaultValue: false,
+  },
+];
+
+export function getCapabilities() {
+  return CAPABILITIES_CONFIG;
+}
 
 // Páginas de administración (no requieren permisos, solo ser admin)
 export const ADMIN_ONLY_PAGES = [
