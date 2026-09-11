@@ -55,6 +55,10 @@ import {
 import { getDb } from "./db";
 import { resolverCiclo, type CicloRango } from "../shared/ciclos";
 import { ErrorEtiqueta, desarmarCodigo, puedeTransicionar, type EstadoEtiqueta } from "./etiquetas";
+import { promises as fs } from "fs";
+import path from "path";
+import sharp from "sharp";
+import { PHOTOS_PUBLIC_PREFIX, PHOTOS_ROOT } from "./koboPhotoStore";
 
 const ZONA = "America/Mexico_City";
 
@@ -830,4 +834,84 @@ export async function conflictosDePesaje(params: { cicloId?: number | null; limi
     significado:
       "Cada renglón es un código que tiene más de una caja. Una de ellas sobra: archívala desde el Editor de Cajas.",
   };
+}
+
+// ─────────────────────────── foto de la caja ───────────────────────────
+
+/** Nombre de archivo seguro: solo lo que puede traer un uuid. */
+function uuidSeguro(valor: unknown): string | null {
+  const t = String(valor ?? "").trim();
+  return /^[A-Za-z0-9_-]{8,64}$/.test(t) ? t : null;
+}
+
+/**
+ * La foto que la báscula tomó al pesar. Llega después de la caja (la caja
+ * viaja en JSON por tandas; la foto es un archivo aparte), y se cuelga de la
+ * caja por su clientUuid: es lo único que las dos partes comparten con
+ * certeza aunque la respuesta del pesaje se haya perdido.
+ *
+ * Se guarda comprimida en /app/photos/bascula/ (el mismo volumen que las
+ * copias de Kobo) y se apunta desde boxes.photoUrl / photoLocalPath, que es
+ * lo que la pantalla de cajas ya sabe mostrar. Reenviar la misma foto solo
+ * la reemplaza: no hay nada que se duplique.
+ */
+export async function guardarFotoCaja(params: {
+  clientUuid: unknown;
+  archivoTemporal: string;
+  usuarioId?: number | null;
+}): Promise<{ cajaId: number; codigo: string; fotoUrl: string; reemplazo: boolean }> {
+  const db = await baseDeDatos();
+  const uuid = uuidSeguro(params.clientUuid);
+  if (!uuid) {
+    throw new ErrorEtiqueta(
+      "clientUuid_invalido",
+      "Falta el clientUuid de la caja o no tiene forma de uuid",
+      "Manda el mismo clientUuid con el que se guardó el pesaje.",
+    );
+  }
+
+  const [caja] = await db
+    .select({ id: boxes.id, boxCode: boxes.boxCode, photoLocalPath: boxes.photoLocalPath })
+    .from(boxes)
+    .where(eq(boxes.clientUuid, uuid))
+    .limit(1);
+  if (!caja) {
+    throw new ErrorEtiqueta(
+      "caja_desconocida",
+      `No hay ninguna caja con clientUuid ${uuid}`,
+      "Manda primero el pesaje a POST /cosecha/cajas y, cuando conteste creada o duplicada, sube la foto.",
+    );
+  }
+
+  const relativa = path.join("bascula", `${uuid}.jpg`);
+  const destino = path.join(PHOTOS_ROOT, relativa);
+  await fs.mkdir(path.dirname(destino), { recursive: true });
+  try {
+    // Misma compresión que las fotos de notas de campo: máximo 1920 px, JPEG 80 %.
+    const comprimida = await sharp(params.archivoTemporal)
+      .rotate()
+      .resize(1920, 1920, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+    await fs.writeFile(destino, comprimida);
+  } catch (e) {
+    console.warn("[Kiosco] sharp falló con la foto de la caja, se guarda tal cual:", e);
+    await fs.copyFile(params.archivoTemporal, destino);
+  } finally {
+    await fs.unlink(params.archivoTemporal).catch(() => undefined);
+  }
+
+  const publica = `${PHOTOS_PUBLIC_PREFIX}/${relativa.split(path.sep).join("/")}`;
+  await db
+    .update(boxes)
+    .set({
+      photoFilename: `${uuid}.jpg`,
+      photoUrl: publica,
+      photoLocalPath: publica,
+      photoDownloadedAt: new Date(),
+      photoDownloadError: null,
+    })
+    .where(eq(boxes.id, caja.id));
+
+  return { cajaId: caja.id, codigo: caja.boxCode, fotoUrl: publica, reemplazo: !!caja.photoLocalPath };
 }

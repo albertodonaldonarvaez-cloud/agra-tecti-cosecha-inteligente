@@ -3,7 +3,7 @@
 Superficie que consume la app de Android. Vive en `/api/campo/v1` y **sí escribe**,
 a diferencia de `/api/v1`, que quedó de solo lectura para los agentes de IA.
 
-En esta fase están las **etiquetas** y el **pesaje**. Falta subir la foto de la caja.
+Están las **etiquetas**, el **pesaje** y la **foto de la caja**.
 
 ---
 
@@ -327,3 +327,40 @@ pesó. Su propia memoria no alcanza: dos básculas no se ven entre ellas.
 Pesar tiene el suyo, **“Pesar cajas en la báscula”**, en Configuración → Usuarios,
 y nace apagado. No se hereda del de Etiquetas: imprimir de más cuesta papel, pesar
 de más mete cajas en la cosecha.
+
+---
+
+## 9. La foto de la caja
+
+La foto viaja aparte de la caja: la caja va en JSON por tandas, la foto es un
+archivo. Se cuelga de la caja por su `clientUuid`, que es lo único que las dos
+partes comparten con certeza aunque la respuesta del pesaje se haya perdido.
+
+```
+POST /api/campo/v1/cosecha/cajas/foto        multipart/form-data
+   foto        el archivo JPEG (hasta 15 MB)
+   clientUuid  el mismo con el que se guardó el pesaje
+```
+
+```bash
+curl -X POST https://TU-SERVIDOR/api/campo/v1/cosecha/cajas/foto \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "clientUuid=5b9f0f4a-…" \
+  -F "foto=@caja.jpg;type=image/jpeg"
+```
+
+```json
+{ "ok": true,
+  "datos": { "cajaId": 41822, "codigo": "07-001201",
+             "fotoUrl": "/app/photos/bascula/5b9f0f4a-….jpg", "reemplazo": false,
+             "nota": "Foto guardada. Ya se ve en la pantalla de cajas." } }
+```
+
+**El orden importa**: primero la caja (`creada` o `duplicada`), después la foto.
+Si la caja no existe todavía contesta `404 caja_desconocida`: guarda la foto en
+la tableta y vuelve a intentarlo después de que la caja entre. Reenviar la misma
+foto no duplica nada: solo la reemplaza (`reemplazo: true`).
+
+El servidor la comprime (máximo 1920 px, JPEG 80 %), la guarda en
+`/app/photos/bascula/` y la apunta desde la caja, así que aparece en la pantalla
+de cajas igual que las fotos que llegan de Kobo. Pide el mismo permiso que pesar.

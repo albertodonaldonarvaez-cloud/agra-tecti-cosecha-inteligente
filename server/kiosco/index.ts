@@ -21,6 +21,7 @@
  * En esta fase están los endpoints de etiquetas. El pesaje entra en la fase 3.
  */
 import { Router, type Request, type Response } from "express";
+import multer from "multer";
 import { getUserFromToken } from "../auth";
 import { ApiError, responder, responderError, entero, texto, ZONA } from "../api/util";
 import {
@@ -41,6 +42,7 @@ import {
   CAJAS_POR_ENVIO,
   conflictosDePesaje,
   estadoDeCaja,
+  guardarFotoCaja,
   recibirCajas,
   tiposDeCaja,
 } from "../pesaje";
@@ -72,7 +74,12 @@ const ESTADOS: Record<string, number> = {
   // que partirla, y 413 es lo que dice eso sin ambigüedad.
   envio_vacio: 400,
   envio_muy_grande: 413,
+  // Foto de la caja: sin caja no hay dónde colgarla.
+  caja_desconocida: 404,
 };
+
+/** Fotos de caja: llegan como multipart (campo "foto") a un temporal, y de ahí se comprimen. */
+const subidaFoto = multer({ dest: "/tmp/uploads/", limits: { fileSize: 15 * 1024 * 1024 } });
 
 /** Envuelve un manejador: traduce errores y da la misma forma a toda respuesta. */
 function atender(fn: (req: Peticion, res: Response) => Promise<unknown>) {
@@ -226,8 +233,9 @@ export function crearApiCampo(): Router {
       enEstaFase: [
         "Etiquetas: apartar folios, confirmar, cancelar, reimprimir y consultar",
         "Pesaje: recibir cajas pesadas por tandas, con tara y sin perder nada por falta de señal",
+        "Foto de la caja: POST /cosecha/cajas/foto (multipart, campo \"foto\" + clientUuid)",
       ],
-      proximaFase: "Subir la foto de la caja",
+      proximaFase: "Ninguna pendiente",
       nota: "El folio lo reparte el servidor y se reinicia en cada ciclo. Nunca mandes un folio: pide cuántos necesitas.",
       notaPesaje: "El peso viaja en gramos enteros y cada caja lleva su clientUuid. Reenviar la misma tanda no duplica nada.",
     });
@@ -374,6 +382,42 @@ export function crearApiCampo(): Router {
 
   // Al final del bloque, por lo mismo que en etiquetas: lo que no coincidió
   // arriba se trata como un código de caja.
+  // La foto viaja aparte de la caja: multipart con el campo "foto" y el
+  // clientUuid con el que se guardó el pesaje. Va antes de /:codigo por lo
+  // mismo que en etiquetas: "foto" no es un código de caja.
+  api.post(
+    "/cosecha/cajas/foto",
+    exigirPermisoPesaje as any,
+    (req: Request, res: Response, siguiente: () => void) => {
+      subidaFoto.single("foto")(req, res, (err: any) => {
+        if (!err) return siguiente();
+        responderError(res, 400, {
+          codigo: "foto_invalida",
+          mensaje: err.code === "LIMIT_FILE_SIZE" ? "La foto pesa más de 15 MB" : `No se pudo leer la foto: ${err.message}`,
+          ayuda: "Manda un multipart/form-data con el archivo en el campo \"foto\" (JPEG) y el clientUuid de la caja.",
+        });
+      });
+    },
+    atender(async (req) => {
+      const archivo = (req as any).file as { path: string } | undefined;
+      if (!archivo) {
+        throw new ApiError(400, "foto_requerida", "No se recibió ninguna foto",
+          "El archivo va en el campo \"foto\" del multipart/form-data.");
+      }
+      const resultado = await guardarFotoCaja({
+        clientUuid: (req.body ?? {}).clientUuid,
+        archivoTemporal: archivo.path,
+        usuarioId: req.usuario!.id,
+      });
+      return {
+        ...resultado,
+        nota: resultado.reemplazo
+          ? "La caja ya tenía foto; se reemplazó con esta."
+          : "Foto guardada. Ya se ve en la pantalla de cajas.",
+      };
+    }),
+  );
+
   api.get("/cosecha/cajas/:codigo", atender(async (req) =>
     await estadoDeCaja(req.params.codigo, entero(req, "ciclo", { min: 1, max: 2_000_000_000 }))
   ));
