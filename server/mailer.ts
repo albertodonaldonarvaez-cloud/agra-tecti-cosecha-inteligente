@@ -45,6 +45,42 @@ export function cifradoParaElPuerto(puerto: number, elegido: boolean): boolean {
   return elegido;
 }
 
+/**
+ * Limpia y valida el nombre del servidor de correo.
+ *
+ * El campo pide un nombre de servidor y es facilísimo pegarle otra cosa: la
+ * dirección de correo (que es lo que está justo arriba en el panel del
+ * proveedor), o la URL con `https://` delante. Ninguna de las dos resuelve en
+ * el DNS, y el error que sale —`queryA EBADNAME`— no le dice a nadie qué
+ * campo está mal.
+ *
+ * Lo que se puede arreglar solo se arregla: el esquema, las barras, el puerto
+ * pegado al final. El correo NO: `no-reply@agra.tecti.com.mx` podría querer
+ * decir `agra.tecti.com.mx` o `mail.agra.tecti.com.mx`, y adivinar mal deja
+ * el mismo problema con otra cara. Ahí se para y se dice qué poner.
+ */
+export function limpiarServidor(valor: string): string {
+  let host = (valor || "").trim().replace(/^[a-z]+:\/\//i, "").replace(/\/.*$/, "");
+  host = host.replace(/:\d+$/, ""); // "agra.tecti.com.mx:465"
+
+  if (host === "") {
+    throw new Error("Falta el servidor SMTP.");
+  }
+  if (host.includes("@")) {
+    const dominio = host.split("@").pop() || "";
+    throw new Error(
+      `"${host}" es una dirección de correo, no un servidor. En este campo va lo que tu proveedor ` +
+        `llame "Outgoing Server" — probablemente ${dominio} o mail.${dominio}. La dirección de correo ` +
+        `va en Usuario y en Correo remitente.`,
+    );
+  }
+  if (!host.includes(".") || /\s/.test(host)) {
+    throw new Error(`"${host}" no parece un servidor. Debería ser algo como mail.tudominio.com.`);
+  }
+
+  return host.toLowerCase();
+}
+
 /** Config cruda, con la contraseña todavía cifrada. Uso interno. */
 async function readConfigRow() {
   const db = await getDb();
@@ -100,7 +136,7 @@ export async function saveSmtpConfig(data: {
   }
 
   const values = {
-    host: data.host.trim(),
+    host: limpiarServidor(data.host),
     port: data.port,
     secure: cifradoParaElPuerto(data.port, data.secure),
     username: data.username?.trim() || null,
@@ -249,8 +285,16 @@ export function diagnosticarSmtp(
   }
 
   // 2. No hay camino hasta el servidor de correo.
+  if (codigo === "EBADNAME" || texto.includes("ebadname") || ctx.host.includes("@")) {
+    const dominio = ctx.host.split("@").pop() || ctx.host;
+    return con(
+      `"${ctx.host}" no es un nombre de servidor. En el campo Servidor SMTP va lo que tu proveedor ` +
+        `llame "Outgoing Server" —probablemente ${dominio} o mail.${dominio}—, no la dirección de correo. ` +
+        `La dirección va en Usuario y en Correo remitente.`,
+    );
+  }
   if (codigo === "ENOTFOUND" || codigo === "EAI_AGAIN" || texto.includes("getaddrinfo")) {
-    return con(`No existe el servidor "${ctx.host}". Revisa que esté bien escrito (por ejemplo smtp.gmail.com).`);
+    return con(`No existe el servidor "${ctx.host}". Revisa que esté bien escrito (por ejemplo mail.tudominio.com).`);
   }
   if (codigo === "ECONNREFUSED") {
     return con(`El servidor rechazó la conexión en el puerto ${ctx.port}. Comprueba que ese sea el puerto correcto.`);

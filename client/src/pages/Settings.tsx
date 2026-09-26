@@ -1178,9 +1178,19 @@ function SmtpSection() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  // Pegar aquí la dirección de correo es el error más fácil de cometer: en el
+  // panel del proveedor está justo encima del nombre del servidor. El servidor
+  // también lo rechaza, pero avisarlo aquí ahorra el viaje y señala el campo.
+  const servidorEsUnCorreo = host.includes("@");
+  const dominioDelCorreo = host.split("@").pop() || "";
+
   const handleSave = () => {
     if (!host.trim() || !fromEmail.trim()) {
       toast.error("El servidor y el correo remitente son obligatorios");
+      return;
+    }
+    if (servidorEsUnCorreo) {
+      toast.error(`En "Servidor SMTP" va el servidor, no el correo. Prueba con ${dominioDelCorreo}`);
       return;
     }
     if (!config?.hasPassword && username.trim() && !password.trim()) {
@@ -1229,10 +1239,21 @@ function SmtpSection() {
           <div className="sm:col-span-2">
             <Label className="text-sky-800 text-sm font-medium">Servidor SMTP</Label>
             <Input value={host} onChange={(e) => setHost(e.target.value)} placeholder="mail.tudominio.com"
-              className="mt-1 bg-white/60 border-sky-200" />
-            <p className="mt-1 text-xs text-gray-400">
-              El que diga tu proveedor como “Outgoing Server”. Sin https:// ni barras.
-            </p>
+              className={`mt-1 bg-white/60 ${servidorEsUnCorreo ? "border-red-400 focus-visible:ring-red-300" : "border-sky-200"}`} />
+            {servidorEsUnCorreo ? (
+              <p className="mt-1 text-xs text-red-600">
+                Eso es una dirección de correo, no un servidor. Aquí va lo que tu proveedor llame
+                “Outgoing Server”.{" "}
+                <button type="button" onClick={() => setHost(dominioDelCorreo)}
+                  className="font-semibold underline underline-offset-2">
+                  Usar {dominioDelCorreo}
+                </button>
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-gray-400">
+                El que diga tu proveedor como “Outgoing Server”. Sin https:// ni barras.
+              </p>
+            )}
           </div>
           <div>
             <Label className="text-sky-800 text-sm font-medium">Tipo de conexión</Label>

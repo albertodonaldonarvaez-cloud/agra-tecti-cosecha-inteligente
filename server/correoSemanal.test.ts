@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cifradoParaElPuerto, diagnosticarSmtp, parseRecipients } from "./mailer";
+import { cifradoParaElPuerto, diagnosticarSmtp, limpiarServidor, parseRecipients } from "./mailer";
 import { compararConLaPrevia, diaIso, semanaPasada } from "./reporteSemanal";
 import { documentoDeCosecha, documentoDeActividades } from "./reporteDocumentos";
 import { generarPdf } from "./reportePdf";
@@ -50,6 +50,20 @@ describe("diagnosticarSmtp", () => {
     expect(diagnosticarSmtp(err, propio)).toMatch(/reportes@finca\.mx/);
   });
 
+  it("señala el campo equivocado cuando el servidor trae una arroba", () => {
+    const err: any = new Error("queryA EBADNAME no-reply-report@agra.tecti.com.mx");
+    err.code = "EBADNAME";
+    const texto = diagnosticarSmtp(err, {
+      host: "no-reply-report@agra.tecti.com.mx",
+      port: 465,
+      secure: true,
+      username: "no-reply-report@agra.tecti.com.mx",
+      fromEmail: "no-reply-report@agra.tecti.com.mx",
+    });
+    expect(texto).toMatch(/no es un nombre de servidor/);
+    expect(texto).toMatch(/agra\.tecti\.com\.mx/);
+  });
+
   it("devuelve el error tal cual cuando no reconoce el caso", () => {
     expect(diagnosticarSmtp(new Error("algo rarísimo"), gmail)).toBe("algo rarísimo");
   });
@@ -58,6 +72,27 @@ describe("diagnosticarSmtp", () => {
     const err: any = new Error("Invalid login: 535 nope");
     err.code = "EAUTH";
     expect(diagnosticarSmtp(err, gmail)).toContain("Invalid login: 535 nope");
+  });
+});
+
+describe("limpiarServidor", () => {
+  it("quita lo que se puede quitar solo", () => {
+    expect(limpiarServidor("  https://agra.tecti.com.mx/  ")).toBe("agra.tecti.com.mx");
+    expect(limpiarServidor("MAIL.Tecti.com.mx")).toBe("mail.tecti.com.mx");
+    expect(limpiarServidor("agra.tecti.com.mx:465")).toBe("agra.tecti.com.mx");
+  });
+
+  it("no acepta una dirección de correo como servidor, y dice qué poner", () => {
+    // Es el error real: en el panel del proveedor la dirección está justo
+    // encima del nombre del servidor. El DNS respondía "EBADNAME", que no
+    // señala ningún campo.
+    expect(() => limpiarServidor("no-reply-report@agra.tecti.com.mx")).toThrow(/agra\.tecti\.com\.mx/);
+    expect(() => limpiarServidor("no-reply-report@agra.tecti.com.mx")).toThrow(/Usuario/);
+  });
+
+  it("no acepta algo que no sea un nombre de servidor", () => {
+    expect(() => limpiarServidor("localhost")).toThrow();
+    expect(() => limpiarServidor("")).toThrow(/Falta el servidor/);
   });
 });
 
