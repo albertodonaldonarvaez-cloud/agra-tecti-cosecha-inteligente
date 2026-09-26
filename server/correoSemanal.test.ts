@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { cifradoParaElPuerto, diagnosticarSmtp, limpiarServidor, parseRecipients } from "./mailer";
 import { diaIso, semanaPasada } from "./reporteSemanal";
+import { mensajeDeActividades } from "./telegramSemanal";
 import { compararConLaPrevia, documentoDeActividades, documentoDeCosecha } from "./reporteDocumentos";
 import { generarPdf } from "./reportePdf";
 import type { CosechaSemana } from "./reporteSemanal";
@@ -256,5 +257,97 @@ describe("generarPdf", () => {
       }),
     );
     expect(buffer.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+  });
+});
+
+// ── El mensaje de Telegram ───────────────────────────────────
+
+function resumenFalso(extra: Partial<any> = {}): any {
+  return {
+    total: 42, completed: 35, inProgress: 4, planned: 3, cancelled: 0,
+    hours: 318.5, workDays: 60, parcelsWorked: 9, peopleCount: 14, photos: 0,
+    byType: [{ key: "riego", label: "Riego", count: 12, hours: 90 }],
+    byParcel: [{ key: "Norte", name: "Norte", count: 5, hours: 30 }],
+    byPerson: [],
+    products: [{ name: "Urea 46", typeLabel: "Fertilizante granular", unit: "kg", total: 340, times: 4, sinCantidad: 0 }],
+    tools: [],
+    ...extra,
+  };
+}
+
+const PERIODO = { desde: "2026-09-14", hasta: "2026-09-20" };
+
+describe("mensajeDeActividades", () => {
+  it("trae los números de la semana, que es lo que se lee en el grupo", () => {
+    const m = mensajeDeActividades({ periodo: PERIODO, summary: resumenFalso(), ai: null });
+    expect(m).toMatch(/42/);
+    expect(m).toMatch(/318\.5/);
+    expect(m).toMatch(/Riego/);
+    expect(m).toMatch(/Urea 46/);
+  });
+
+  it("escapa lo que viene de la base, que Telegram lo lee como HTML", () => {
+    // Un producto llamado "Fungicida <B> & Co" rompía el mensaje entero:
+    // Telegram rechaza el HTML mal formado y no manda nada.
+    const m = mensajeDeActividades({
+      periodo: PERIODO,
+      summary: resumenFalso({
+        products: [{ name: "Fungicida <B> & Co", typeLabel: "Fungicida", unit: "L", total: 2, times: 1, sinCantidad: 0 }],
+      }),
+      ai: null,
+    });
+    expect(m).toContain("Fungicida &lt;B&gt; &amp; Co");
+    expect(m).not.toContain("<B>");
+  });
+
+  it("una semana sin labores lo dice, no manda un mensaje vacío", () => {
+    const m = mensajeDeActividades({
+      periodo: PERIODO,
+      summary: resumenFalso({ total: 0, completed: 0, planned: 0, inProgress: 0, byType: [], products: [], byParcel: [] }),
+      ai: null,
+    });
+    expect(m).toMatch(/No se registró ninguna labor/);
+  });
+
+  it("nunca se pasa del límite de Telegram, que rechaza el mensaje entero", () => {
+    const m = mensajeDeActividades({
+      periodo: PERIODO,
+      summary: resumenFalso({
+        byType: Array.from({ length: 80 }, (_, i) => ({ key: `t${i}`, label: `Tipo de labor con nombre larguísimo ${i}`, count: 9, hours: 12 })),
+        products: Array.from({ length: 200 }, (_, i) => ({ name: `Producto de nombre interminable ${i}`, typeLabel: "Fertilizante", unit: "kg", total: 10, times: 2, sinCantidad: 0 })),
+        byParcel: Array.from({ length: 200 }, (_, i) => ({ key: `p${i}`, name: `Parcela ${i}`, count: 3, hours: 4 })),
+      }),
+      ai: { resumen: "Frase larguísima. ".repeat(400), porLabor: [], insumos: null, pendientes: null, recomendaciones: [] },
+    });
+    expect(m.length).toBeLessThanOrEqual(4096);
+    expect(m).toMatch(/y \d+ producto\(s\) más/);
+  });
+
+  it("señala lo que quedó sin cerrar", () => {
+    const m = mensajeDeActividades({ periodo: PERIODO, summary: resumenFalso(), ai: null });
+    expect(m).toMatch(/Pendientes/);
+    expect(m).toMatch(/3 planificada\(s\) sin ejecutar/);
+  });
+});
+
+describe("el encabezado del mensaje de Telegram", () => {
+  it("no repite el mes cuando la semana no lo cruza", () => {
+    const m = mensajeDeActividades({ periodo: PERIODO, summary: resumenFalso(), ai: null });
+    expect(m).toContain("Semana del 14 al 20 de septiembre");
+  });
+
+  it("nombra los dos meses cuando la semana los cruza", () => {
+    const m = mensajeDeActividades({
+      periodo: { desde: "2026-09-28", hasta: "2026-10-04" },
+      summary: resumenFalso(),
+      ai: null,
+    });
+    expect(m).toContain("del 28 de septiembre al 4 de octubre");
+  });
+
+  it("no pone ceros de relleno en las cantidades", () => {
+    const m = mensajeDeActividades({ periodo: PERIODO, summary: resumenFalso(), ai: null });
+    expect(m).toContain("340 kg");
+    expect(m).not.toContain("340.00");
   });
 });

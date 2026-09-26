@@ -712,6 +712,7 @@ export const appRouter = router({
         hora: z.number().int().min(0).max(23),
         aTodos: z.boolean(),
         conCosecha: z.boolean(),
+        telegram: z.boolean(),
       }))
       .mutation(async ({ input }) => {
         const { guardarConfigSemanal } = await import("./reporteSemanal");

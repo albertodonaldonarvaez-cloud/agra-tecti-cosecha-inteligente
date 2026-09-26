@@ -113,6 +113,24 @@ el documento informa.
 La semana que se mide es siempre la **última completa, de lunes a domingo** —
 nunca "los últimos siete días", que contaría dos veces el día del envío.
 
+### El grupo de Telegram
+
+La casilla *Publicarlo también en el grupo de Telegram de cosecha* manda el
+reporte de **actividades** al mismo grupo que ya recibe el resumen diario de
+cosecha, el mismo día y a la misma hora que el correo.
+
+Ese **resumen diario de cosecha no cambia**: sigue saliendo cada mañana con
+sus reglas de siempre. Esto se suma, no lo sustituye. Y el reporte semanal de
+cosecha se queda solo en el correo.
+
+En el grupo el mensaje sí trae los números, al revés que el correo. Son dos
+sitios distintos: el correo llega con un PDF que se abre de un toque, pero en
+un grupo nadie abre el adjunto en pleno campo — se lee el mensaje y se sigue
+trabajando. El PDF va detrás, para quien lo quiera archivar.
+
+La casilla está apagada de fábrica y solo se puede encender si el bot y el
+chat del resumen de cosecha ya están configurados en la tarjeta de Telegram.
+
 ### A quién le llega
 
 - Todas las **cuentas activas** con correo, si la casilla está marcada.
@@ -124,7 +142,8 @@ desactivadas nunca lo reciben.
 ### Los dos botones
 
 - **Mandarme una prueba** → manda ambos reportes a una sola dirección. No
-  cuenta como el envío de la semana.
+  cuenta como el envío de la semana y **no se publica en el grupo**: sería
+  mandarle al equipo entero el ensayo de alguien.
 - **Mandar el de esta semana a todos ahora** → sale de verdad. Pide
   confirmación y sí marca la semana como enviada, así que el envío automático
   ya no la repite.
@@ -149,8 +168,11 @@ cuanto vuelva, dentro de la misma semana; no se pierde.
 | `server/reporteSemanal.ts` | Qué semana se mide, la consulta de cosecha, el reloj y el envío |
 | `server/reportePdf.ts` | Dibuja el PDF (pdfkit; sin navegador ni Chromium) |
 | `server/logo.ts` | El logo del membrete y del correo |
+| `server/telegramSemanal.ts` | El mensaje semanal al grupo de Telegram |
+| `server/harvestNotifier.ts` | El resumen DIARIO de cosecha; esto no se tocó |
 | `server/reporteDocumentos.ts` | Qué secciones lleva cada reporte |
 | `server/correoSemanal.test.ts` | Las pruebas de todo lo anterior |
 
-La configuración vive en columnas de la tabla `smtpConfig` (migración 0029) y
-la bitácora de envíos en `sentEmails`.
+La configuración vive en columnas de la tabla `smtpConfig` (migración 0029),
+salvo la casilla de Telegram, que está en `apiConfig` junto al bot y al chat
+(migración 0030). La bitácora de envíos está en `sentEmails`.

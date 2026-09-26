@@ -753,6 +753,14 @@ async function migrate() {
       "ALTER TABLE smtpConfig ADD COLUMN weeklyLastError VARCHAR(512) NULL");
 
     console.log('[Migration] 0029 (envio semanal por correo) OK');
+
+    // ── Reporte semanal de actividades por Telegram (0030) ───────
+    // Apagado de fabrica: el grupo de cosecha ya recibe el resumen diario y
+    // nadie pidio un mensaje mas hasta que lo enciendan en Ajustes.
+    await ensureColumn('apiConfig', 'telegramWeeklyEnabled',
+      "ALTER TABLE apiConfig ADD COLUMN telegramWeeklyEnabled BOOLEAN NOT NULL DEFAULT FALSE");
+
+    console.log('[Migration] 0030 (reporte semanal por Telegram) OK');
   } catch (err) {
     console.error('[Migration] Error:', err.message);
   } finally {

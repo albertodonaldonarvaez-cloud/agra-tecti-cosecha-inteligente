@@ -285,6 +285,9 @@ export const apiConfig = mysqlTable("apiConfig", {
   telegramHarvestEnabled: boolean("telegramHarvestEnabled").default(false),
   telegramFieldNotesChatId: varchar("telegramFieldNotesChatId", { length: 128 }),
   telegramFieldNotesEnabled: boolean("telegramFieldNotesEnabled").default(false),
+  // Reporte SEMANAL de actividades al mismo grupo del resumen de cosecha (0030).
+  // El resumen diario de cosecha no se toca: esto se suma, no lo sustituye.
+  telegramWeeklyEnabled: boolean("telegramWeeklyEnabled").default(false),
   copernicusClientId: varchar("copernicusClientId", { length: 256 }),
   copernicusClientSecret: varchar("copernicusClientSecret", { length: 1024 }),
   deepseekApiKey: varchar("deepseekApiKey", { length: 1024 }),

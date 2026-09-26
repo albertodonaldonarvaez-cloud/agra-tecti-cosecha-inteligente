@@ -73,6 +73,13 @@ export interface ConfigSemanal {
   aTodos: boolean;
   /** Incluir el correo de cosecha cuando la semana tuvo cajas */
   conCosecha: boolean;
+  /**
+   * Publicar además el reporte de actividades en el grupo de Telegram que ya
+   * recibe el resumen diario de cosecha. Ese resumen diario no se toca.
+   */
+  telegram: boolean;
+  /** Si hay bot y grupo configurados; sin eso la casilla no sirve de nada */
+  telegramDisponible: boolean;
   ultimaSemana: string | null;
   ultimoEnvio: Date | null;
   ultimoError: string | null;
@@ -83,12 +90,21 @@ export async function leerConfigSemanal(): Promise<ConfigSemanal | null> {
   if (!db) return null;
   const [row] = await db.select().from(smtpConfig).limit(1);
   if (!row) return null;
+
+  // El bot y el grupo viven con el resto de lo de Telegram, en apiConfig.
+  // El día y la hora no se duplican: el reporte semanal es uno solo y sale a
+  // la misma hora por todos sus canales.
+  const { destinoDeCosecha } = await import("./telegramSemanal");
+  const destino = await destinoDeCosecha();
+
   return {
     activo: !!row.weeklyEnabled,
     dia: row.weeklyDay ?? 1,
     hora: row.weeklyHour ?? 7,
     aTodos: row.weeklyToAllUsers !== false,
     conCosecha: row.weeklyHarvest !== false,
+    telegram: !!destino?.activo,
+    telegramDisponible: !!destino,
     ultimaSemana: row.weeklyLastWeek ?? null,
     ultimoEnvio: row.weeklyLastAt ?? null,
     ultimoError: row.weeklyLastError ?? null,
@@ -101,6 +117,7 @@ export async function guardarConfigSemanal(datos: {
   hora: number;
   aTodos: boolean;
   conCosecha: boolean;
+  telegram: boolean;
 }): Promise<ConfigSemanal | null> {
   const db = await getDb();
   if (!db) throw new Error("Base de datos no disponible");
@@ -118,6 +135,10 @@ export async function guardarConfigSemanal(datos: {
       weeklyHarvest: datos.conCosecha,
     })
     .where(eq(smtpConfig.id, row.id));
+
+  // La casilla de Telegram se guarda donde vive el bot, no aquí
+  await db.execute(sql`UPDATE apiConfig SET telegramWeeklyEnabled = ${datos.telegram}`);
+
   return leerConfigSemanal();
 }
 
@@ -358,7 +379,7 @@ export interface ResultadoSemanal {
   motivo?: string;
   semana: { desde: string; hasta: string };
   destinatarios: number;
-  correos: Array<{ tipo: "actividades" | "cosecha"; ok: boolean; error?: string }>;
+  correos: Array<{ tipo: "actividades" | "cosecha" | "telegram"; ok: boolean; error?: string }>;
 }
 
 /**
@@ -391,7 +412,12 @@ export async function enviarReporteSemanal(opciones?: {
     ? parseRecipients(opciones.soloA)
     : await destinatariosSemanales(config.aTodos);
 
-  if (destinatarios.length === 0) {
+  // Una prueba a una dirección suelta NO se publica en el grupo: seria
+  // mandarle al equipo entero el ensayo de alguien.
+  const porTelegram = !opciones?.soloA && config.telegram;
+  const porCorreo = destinatarios.length > 0;
+
+  if (!porCorreo && !porTelegram) {
     return {
       enviado: false,
       motivo: "Nadie a quién mandarlo: no hay cuentas activas con correo ni destinatarios fijos.",
@@ -436,17 +462,33 @@ export async function enviarReporteSemanal(opciones?: {
       `actividades-${semana.desde}_${semana.hasta}.pdf`,
     );
 
-    const r = await sendMail({
-      to: destinatarios,
-      subject: `Actividades de campo · semana del ${fechaCorta(semana.desde)} al ${fechaCorta(semana.hasta)}`,
-      html: renderActivityEmailHtml({ ...datos, scopeLabel: "Todas las parcelas", hasAttachment: hayPdf }),
-      text: renderActivityEmailText({ ...datos, scopeLabel: "Todas las parcelas" }),
-      attachments: adjuntos,
-      kind: "semanal-actividades",
-      userId: opciones?.usuarioId ?? null,
-      oculto: destinatarios.length > 1,
-    });
-    correos.push({ tipo: "actividades", ok: r.ok, error: r.error });
+    if (porCorreo) {
+      const r = await sendMail({
+        to: destinatarios,
+        subject: `Actividades de campo · semana del ${fechaCorta(semana.desde)} al ${fechaCorta(semana.hasta)}`,
+        html: renderActivityEmailHtml({ ...datos, scopeLabel: "Todas las parcelas", hasAttachment: hayPdf }),
+        text: renderActivityEmailText({ ...datos, scopeLabel: "Todas las parcelas" }),
+        attachments: adjuntos,
+        kind: "semanal-actividades",
+        userId: opciones?.usuarioId ?? null,
+        oculto: destinatarios.length > 1,
+      });
+      correos.push({ tipo: "actividades", ok: r.ok, error: r.error });
+    }
+
+    // El mismo PDF que viajó por correo, sin volver a dibujarlo
+    if (porTelegram) {
+      const { enviarActividadesPorTelegram } = await import("./telegramSemanal");
+      const pdf = adjuntos.find((a) => a.contentType === "application/pdf");
+      const t = await enviarActividadesPorTelegram({
+        periodo: semana,
+        summary: datos.summary,
+        ai: datos.ai,
+        pdf: pdf ? (pdf.content as Buffer) : null,
+        nombrePdf: pdf?.filename,
+      });
+      correos.push({ tipo: "telegram", ok: t.ok, error: t.error });
+    }
   } catch (e: any) {
     const error = String(e?.message || e).slice(0, 300);
     console.error(`${TAG} Falló el reporte de actividades:`, error);
@@ -454,7 +496,7 @@ export async function enviarReporteSemanal(opciones?: {
   }
 
   // 2. Cosecha — solo si hubo
-  if (config.conCosecha) {
+  if (config.conCosecha && porCorreo) {
     try {
       const cosecha = await resumenCosechaSemana(semana.desde, semana.hasta);
       if (cosecha) {
@@ -546,7 +588,7 @@ export function startWeeklyReportMailer() {
   const revisar = async () => {
     try {
       const config = await leerConfigSemanal();
-      if (!config || !config.activo) return;
+      if (!config || (!config.activo && !config.telegram)) return;
 
       const hoy = hoyMx();
       const diaDeHoy = diaIso(hoy);

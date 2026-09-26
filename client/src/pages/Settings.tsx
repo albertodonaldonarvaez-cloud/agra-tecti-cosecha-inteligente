@@ -1415,6 +1415,7 @@ function WeeklyReportSection() {
   const [hora, setHora] = useState(7);
   const [aTodos, setATodos] = useState(true);
   const [conCosecha, setConCosecha] = useState(true);
+  const [telegram, setTelegram] = useState(false);
   const [pruebaA, setPruebaA] = useState("");
 
   useEffect(() => {
@@ -1424,6 +1425,7 @@ function WeeklyReportSection() {
     setHora(config.hora ?? 7);
     setATodos(config.aTodos !== false);
     setConCosecha(config.conCosecha !== false);
+    setTelegram(!!config.telegram);
   }, [config]);
 
   const guardar = trpc.smtp.saveWeekly.useMutation({
@@ -1461,7 +1463,10 @@ function WeeklyReportSection() {
 
   const enviarDeVerdad = () => {
     const cuantos = config?.cuantosDestinatarios ?? 0;
-    if (!window.confirm(`Esto le manda el reporte de la semana pasada a ${cuantos} destinatario(s) ahora mismo. ¿Lo mando?`)) {
+    const destino = config?.telegram
+      ? `${cuantos} destinatario(s) y al grupo de Telegram`
+      : `${cuantos} destinatario(s)`;
+    if (!window.confirm(`Esto le manda el reporte de la semana pasada a ${destino} ahora mismo. ¿Lo mando?`)) {
       return;
     }
     enviar.mutate({});
@@ -1539,6 +1544,20 @@ function WeeklyReportSection() {
           </span>
         </label>
 
+        <label className={`flex items-start gap-2 text-sm ${config?.telegramDisponible ? "text-emerald-900" : "text-gray-400"}`}>
+          <input type="checkbox" checked={telegram} disabled={!config?.telegramDisponible}
+            onChange={(e) => setTelegram(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-emerald-300 disabled:opacity-50" />
+          <span>
+            Publicarlo también en el <strong>grupo de Telegram de cosecha</strong>
+            <span className="block text-xs text-emerald-700">
+              {config?.telegramDisponible
+                ? "Solo el de actividades, en el mismo grupo que ya recibe el resumen diario de cosecha. Ese resumen diario sigue igual."
+                : "Primero configura el bot y el chat del resumen de cosecha en la tarjeta de Telegram."}
+            </span>
+          </span>
+        </label>
+
         <div className="rounded-lg border border-emerald-200 bg-white/60 px-3 py-2 text-xs text-emerald-800">
           Ahora mismo le llegaría a <strong>{config?.cuantosDestinatarios ?? 0}</strong> destinatario(s).
           {config?.proximo && <> Próximo envío: <strong>{config.proximo}</strong>.</>}
@@ -1552,7 +1571,7 @@ function WeeklyReportSection() {
         )}
 
         <div className="flex flex-wrap gap-2 pt-1">
-          <Button onClick={() => guardar.mutate({ activo, dia, hora, aTodos, conCosecha })}
+          <Button onClick={() => guardar.mutate({ activo, dia, hora, aTodos, conCosecha, telegram })}
             disabled={guardar.isPending}
             className="bg-emerald-600 hover:bg-emerald-700 text-white">
             <Save className="h-4 w-4 mr-1" />
