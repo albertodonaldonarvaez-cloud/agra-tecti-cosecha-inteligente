@@ -1,0 +1,206 @@
+import { describe, expect, it } from "vitest";
+import { diagnosticarSmtp, parseRecipients } from "./mailer";
+import { compararConLaPrevia, diaIso, semanaPasada } from "./reporteSemanal";
+import { documentoDeCosecha, documentoDeActividades } from "./reporteDocumentos";
+import { generarPdf } from "./reportePdf";
+import type { CosechaSemana } from "./reporteSemanal";
+
+// ============================================================
+// El correo semanal
+//
+// Lo que se prueba aquí es lo que no se ve hasta que falla en producción: que
+// la semana que se mide sea la correcta, que un error del servidor de correo
+// se traduzca a algo accionable, y que el PDF salga siendo un PDF.
+// ============================================================
+
+describe("diagnosticarSmtp", () => {
+  const gmail = { host: "smtp.gmail.com", port: 587, secure: false, username: "a@gmail.com", fromEmail: "a@gmail.com" };
+  const propio = { host: "mail.finca.mx", port: 465, secure: false, username: "reportes", fromEmail: "reportes@finca.mx" };
+
+  it("reconoce el puerto cifrado con la casilla apagada", () => {
+    const err: any = new Error("140...:SSL routines:ssl3_get_record:wrong version number");
+    expect(diagnosticarSmtp(err, propio)).toMatch(/465 y el cifrado no cuadran/);
+  });
+
+  it("explica que el servidor nunca saludó como un problema de puerto", () => {
+    const err: any = new Error("Greeting never received");
+    expect(diagnosticarSmtp(err, propio)).toMatch(/465 la casilla de conexión cifrada directa va MARCADA/);
+  });
+
+  it("le dice a Gmail que necesita contraseña de aplicación", () => {
+    const err: any = new Error("Invalid login: 535-5.7.8 Username and Password not accepted");
+    err.code = "EAUTH";
+    err.responseCode = 535;
+    const texto = diagnosticarSmtp(err, gmail);
+    expect(texto).toMatch(/contraseña de aplicación/);
+    expect(texto).toMatch(/verificación en dos pasos/);
+  });
+
+  it("no culpa a la contraseña cuando el problema es el firewall del servidor", () => {
+    const err: any = new Error("Connection timeout");
+    err.code = "ETIMEDOUT";
+    const texto = diagnosticarSmtp(err, gmail);
+    expect(texto).toMatch(/bloqueada la salida de correo/);
+    expect(texto).not.toMatch(/contraseña de aplicación/);
+  });
+
+  it("señala el remitente cuando el servidor acepta la cuenta pero rechaza el envío", () => {
+    const err: any = new Error("Mail from not allowed");
+    err.responseCode = 550;
+    expect(diagnosticarSmtp(err, propio)).toMatch(/reportes@finca\.mx/);
+  });
+
+  it("devuelve el error tal cual cuando no reconoce el caso", () => {
+    expect(diagnosticarSmtp(new Error("algo rarísimo"), gmail)).toBe("algo rarísimo");
+  });
+
+  it("siempre deja ver lo que dijo el servidor", () => {
+    const err: any = new Error("Invalid login: 535 nope");
+    err.code = "EAUTH";
+    expect(diagnosticarSmtp(err, gmail)).toContain("Invalid login: 535 nope");
+  });
+});
+
+describe("parseRecipients", () => {
+  it("separa por coma, punto y coma y saltos de línea, y tira lo que no es correo", () => {
+    expect(parseRecipients("a@b.com, c@d.com;\ne@f.com\nbasura")).toEqual([
+      "a@b.com",
+      "c@d.com",
+      "e@f.com",
+    ]);
+  });
+
+  it("una lista vacía no es un destinatario", () => {
+    expect(parseRecipients(null)).toEqual([]);
+    expect(parseRecipients("  ")).toEqual([]);
+  });
+});
+
+describe("semanaPasada", () => {
+  it("un lunes mide la semana anterior completa, no los últimos siete días", () => {
+    // 2026-09-21 es lunes
+    expect(semanaPasada("2026-09-21")).toEqual({ desde: "2026-09-14", hasta: "2026-09-20" });
+  });
+
+  it("da la misma semana cualquier día que se pregunte", () => {
+    const esperado = { desde: "2026-09-14", hasta: "2026-09-20" };
+    for (const dia of ["2026-09-21", "2026-09-23", "2026-09-25", "2026-09-27"]) {
+      expect(semanaPasada(dia)).toEqual(esperado);
+    }
+  });
+
+  it("un domingo todavía pertenece a la semana que empezó el lunes anterior", () => {
+    // 2026-09-27 es domingo: la semana en curso arrancó el 21
+    expect(semanaPasada("2026-09-27").hasta).toBe("2026-09-20");
+  });
+
+  it("cruza el cambio de mes sin inventarse días", () => {
+    expect(semanaPasada("2026-10-05")).toEqual({ desde: "2026-09-28", hasta: "2026-10-04" });
+  });
+});
+
+describe("diaIso", () => {
+  it("el lunes es 1 y el domingo es 7", () => {
+    expect(diaIso("2026-09-21")).toBe(1);
+    expect(diaIso("2026-09-27")).toBe(7);
+  });
+});
+
+describe("compararConLaPrevia", () => {
+  it("no compara contra una semana sin cosecha", () => {
+    expect(compararConLaPrevia(1000, 0)).toBeNull();
+  });
+
+  it("dice cuánto se subió", () => {
+    expect(compararConLaPrevia(1100, 1000)).toMatch(/^\+10\.0%/);
+  });
+
+  it("dice cuánto se bajó, con signo", () => {
+    expect(compararConLaPrevia(900, 1000)).toMatch(/^-10\.0%/);
+  });
+});
+
+// ── El PDF ───────────────────────────────────────────────────
+
+const cosechaDePrueba: CosechaSemana = {
+  totales: { nombre: "TOTAL", cajas: 100, kg: 800, primera: 700, segunda: 70, desperdicio: 30 },
+  porParcela: [
+    { nombre: "Parcela norte", cajas: 60, kg: 500, primera: 450, segunda: 35, desperdicio: 15 },
+    { nombre: "Parcela sur", cajas: 40, kg: 300, primera: 250, segunda: 35, desperdicio: 15 },
+  ],
+  porDia: [
+    { fecha: "2026-09-14", cajas: 50, kg: 400, primera: 350 },
+    { fecha: "2026-09-15", cajas: 50, kg: 400, primera: 350 },
+  ],
+  porCortadora: [{ numero: 3, nombre: "Ángeles Ñuño", cajas: 30, kg: 240 }],
+  avisos: { sinParcela: 2, pesoAlto: 1, sinCiclo: 0 },
+  kgSemanaPrevia: 700,
+  ciclo: "Cosecha 2026",
+};
+
+describe("documentoDeCosecha", () => {
+  it("cierra cada tabla con su renglón de totales", () => {
+    const doc = documentoDeCosecha({ periodo: { desde: "2026-09-14", hasta: "2026-09-20" }, cosecha: cosechaDePrueba });
+    const porParcela = doc.secciones.find((s) => s.titulo === "Por parcela");
+    expect(porParcela?.totales?.[0]).toBe("TOTAL");
+  });
+
+  it("señala las cajas raras sin sacarlas de los totales", () => {
+    const doc = documentoDeCosecha({ periodo: { desde: "2026-09-14", hasta: "2026-09-20" }, cosecha: cosechaDePrueba });
+    expect(doc.avisos?.join(" ")).toMatch(/sin parcela/);
+    expect(doc.avisos?.join(" ")).toMatch(/más de 15 kg/);
+    // Los totales siguen siendo los mismos de la consulta
+    expect(doc.kpis.find((k) => k.etiqueta === "Cajas")?.valor).toBe("100");
+  });
+
+  it("no inventa un aviso cuando no hay nada que revisar", () => {
+    const limpia = { ...cosechaDePrueba, avisos: { sinParcela: 0, pesoAlto: 0, sinCiclo: 0 } };
+    const doc = documentoDeCosecha({ periodo: { desde: "2026-09-14", hasta: "2026-09-20" }, cosecha: limpia });
+    expect(doc.avisos).toEqual([]);
+  });
+});
+
+describe("generarPdf", () => {
+  it("devuelve un PDF de verdad", async () => {
+    const buffer = await generarPdf(
+      documentoDeCosecha({ periodo: { desde: "2026-09-14", hasta: "2026-09-20" }, cosecha: cosechaDePrueba }),
+    );
+    expect(buffer.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+    expect(buffer.length).toBeGreaterThan(1000);
+  });
+
+  it("aguanta un reporte largo sin romperse al paginar", async () => {
+    const grande: CosechaSemana = {
+      ...cosechaDePrueba,
+      porParcela: Array.from({ length: 120 }, (_, i) => ({
+        nombre: `Parcela con un nombre bastante largo para forzar el salto ${i}`,
+        cajas: 10,
+        kg: 80,
+        primera: 70,
+        segunda: 7,
+        desperdicio: 3,
+      })),
+    };
+    const buffer = await generarPdf(
+      documentoDeCosecha({ periodo: { desde: "2026-09-14", hasta: "2026-09-20" }, cosecha: grande }),
+    );
+    expect(buffer.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+  });
+
+  it("un reporte de actividades vacío sigue saliendo", async () => {
+    const buffer = await generarPdf(
+      documentoDeActividades({
+        period: { from: "2026-09-14", to: "2026-09-20" },
+        scopeLabel: "Todas las parcelas",
+        ai: null,
+        activities: [],
+        summary: {
+          total: 0, completed: 0, inProgress: 0, planned: 0, cancelled: 0,
+          hours: 0, workDays: 0, parcelsWorked: 0, peopleCount: 0, photos: 0,
+          byType: [], byParcel: [], byPerson: [], products: [], tools: [],
+        } as any,
+      }),
+    );
+    expect(buffer.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+  });
+});

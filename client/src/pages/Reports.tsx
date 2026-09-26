@@ -769,8 +769,10 @@ ${html}
       parcelId: selectedParcelId,
       scopeLabel: activityScopeLabel,
       recipients: destinatarios.length > 0 ? destinatarios : undefined,
-      // El documento completo viaja adjunto tal como se ve en pantalla
-      reportHtml: buildActivityDoc(),
+      // El PDF adjunto lo dibuja el servidor: es el mismo que manda el envío
+      // semanal automático. Antes se subía el documento de la pantalla —hasta
+      // seis megas de HTML por correo— y llegaba un adjunto que había que
+      // reimprimir a mano para convertirlo en PDF.
     });
   }
 

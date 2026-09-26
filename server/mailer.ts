@@ -102,9 +102,18 @@ export async function saveSmtpConfig(data: {
 
 // ── Transporte ───────────────────────────────────────────────
 
-let cachedTransport: { transport: Transporter; from: string } | null = null;
+/** Lo que necesita `diagnosticarSmtp` para explicar un fallo */
+export interface ContextoSmtp {
+  host: string;
+  port: number;
+  secure: boolean;
+  username: string | null;
+  fromEmail: string;
+}
 
-async function getTransport(): Promise<{ transport: Transporter; from: string }> {
+let cachedTransport: { transport: Transporter; from: string; ctx: ContextoSmtp } | null = null;
+
+async function getTransport(): Promise<{ transport: Transporter; from: string; ctx: ContextoSmtp }> {
   if (cachedTransport) return cachedTransport;
 
   const row = await readConfigRow();
@@ -128,14 +137,26 @@ async function getTransport(): Promise<{ transport: Transporter; from: string }>
     host: row.host,
     port: row.port,
     secure: row.secure, // 465 = TLS directo; 587/25 = STARTTLS
+    // Con usuario y contraseña en el 587, exigir que la sesión se cifre antes
+    // de autenticarse. Sin esto, un servidor que no ofrezca STARTTLS recibiría
+    // la contraseña en claro y nadie se enteraría.
+    requireTLS: !row.secure && row.port === 587 && !!row.username,
     auth: row.username ? { user: row.username, pass: password } : undefined,
+    tls: { servername: row.host },
     connectionTimeout: 20000,
     greetingTimeout: 15000,
     socketTimeout: 30000,
   });
 
   const from = row.fromName ? `"${row.fromName}" <${row.fromEmail}>` : row.fromEmail;
-  cachedTransport = { transport, from };
+  const ctx: ContextoSmtp = {
+    host: row.host,
+    port: row.port,
+    secure: row.secure,
+    username: row.username,
+    fromEmail: row.fromEmail,
+  };
+  cachedTransport = { transport, from, ctx };
   return cachedTransport;
 }
 
@@ -146,6 +167,120 @@ export function parseRecipients(raw: string | null | undefined): string[] {
     .split(/[,;\n]/)
     .map((r) => r.trim())
     .filter((r) => r.length > 0 && r.includes("@"));
+}
+
+// ── Diagnóstico de fallos ────────────────────────────────────
+
+/**
+ * Traduce el error de nodemailer a algo que se pueda arreglar.
+ *
+ * El error crudo ("wrong version number", "Greeting never received",
+ * "ETIMEDOUT") no le dice nada a quien configura el correo, y son siempre las
+ * mismas cuatro o cinco causas: el puerto no cuadra con la casilla de cifrado,
+ * el proveedor exige contraseña de aplicación, el servidor de producción tiene
+ * bloqueada la salida, o el remitente no es el de la cuenta.
+ *
+ * Pura a propósito: recibe el error y la configuración y devuelve texto, para
+ * poder probarla sin levantar un servidor de correo.
+ */
+export function diagnosticarSmtp(
+  error: unknown,
+  ctx: { host: string; port: number; secure: boolean; username?: string | null; fromEmail?: string | null },
+): string {
+  const err = error as any;
+  const crudo = String(err?.message || err || "").trim();
+  const codigo = String(err?.code || "");
+  const respuesta = Number(err?.responseCode || 0);
+  const texto = `${crudo} ${String(err?.response || "")}`.toLowerCase();
+  const host = (ctx.host || "").toLowerCase();
+
+  const esGmail = host.includes("gmail") || host.includes("googlemail");
+  const esOutlook = host.includes("outlook") || host.includes("office365") || host.includes("hotmail");
+
+  /** Pega el error original al final, que para eso lo mandó el servidor */
+  const con = (explicacion: string) => `${explicacion} (el servidor dijo: ${crudo})`;
+
+  // 1. El puerto y la casilla de cifrado no cuadran. Es la causa más común
+  //    porque la pantalla deja marcar cualquier combinación.
+  if (texto.includes("wrong version number") || texto.includes("packet length too long")) {
+    return con(
+      `El puerto ${ctx.port} y el cifrado no cuadran: estás hablando en claro con un puerto cifrado. ` +
+        `Marca la casilla de conexión cifrada directa si usas el 465, o cambia al puerto 587 y déjala desmarcada.`,
+    );
+  }
+  if (texto.includes("greeting never received") || codigo === "ETIMEDOUT" && ctx.port === 465 && !ctx.secure) {
+    return con(
+      `El servidor nunca saludó. Casi siempre es el puerto ${ctx.port} con el cifrado al revés: ` +
+        `en el 465 la casilla de conexión cifrada directa va MARCADA, en el 587 va desmarcada.`,
+    );
+  }
+  if (texto.includes("ssl") && texto.includes("routines")) {
+    return con(
+      `Falló el cifrado con el servidor. Revisa que el puerto ${ctx.port} y la casilla de conexión cifrada ` +
+        `directa vayan juntos: 465 marcada, 587 desmarcada.`,
+    );
+  }
+
+  // 2. No hay camino hasta el servidor de correo.
+  if (codigo === "ENOTFOUND" || codigo === "EAI_AGAIN" || texto.includes("getaddrinfo")) {
+    return con(`No existe el servidor "${ctx.host}". Revisa que esté bien escrito (por ejemplo smtp.gmail.com).`);
+  }
+  if (codigo === "ECONNREFUSED") {
+    return con(`El servidor rechazó la conexión en el puerto ${ctx.port}. Comprueba que ese sea el puerto correcto.`);
+  }
+  if (codigo === "ETIMEDOUT" || codigo === "ESOCKET" || texto.includes("timeout")) {
+    return con(
+      `No se pudo llegar a ${ctx.host}:${ctx.port} desde el servidor. Lo más común es que el proveedor del ` +
+        `servidor (AWS, Oracle, Google Cloud…) tenga bloqueada la salida de correo: hay que pedirle que abra ` +
+        `el puerto ${ctx.port}, o usar el 587 si estabas en el 465. Ojo: desde tu computadora sí funciona ` +
+        `aunque desde el servidor no, así que la prueba hay que hacerla desde el sistema.`,
+    );
+  }
+
+  // 3. Credenciales.
+  if (codigo === "EAUTH" || respuesta === 535 || respuesta === 534 || respuesta === 530 || texto.includes("authentication")) {
+    if (esGmail) {
+      return con(
+        `Gmail no acepta la contraseña normal de la cuenta. Hay que activar la verificación en dos pasos y ` +
+          `generar una "contraseña de aplicación" de 16 letras en la cuenta de Google, y pegar esa aquí. ` +
+          `El usuario debe ser el correo completo.`,
+      );
+    }
+    if (esOutlook) {
+      return con(
+        `Microsoft rechazó la contraseña. Las cuentas de Microsoft 365 ya no permiten autenticación básica: ` +
+          `hay que habilitar SMTP AUTH para el buzón, o usar el relay de la organización.`,
+      );
+    }
+    return con(
+      `El servidor rechazó el usuario o la contraseña. Suele ser que el usuario tiene que ser el correo ` +
+        `completo, o que la cuenta pide una contraseña de aplicación en vez de la normal.`,
+    );
+  }
+
+  // 4. El servidor conecta y autentica, pero no acepta el envío.
+  if (respuesta === 550 || respuesta === 553 || texto.includes("relay") || texto.includes("not allowed")) {
+    return con(
+      `El servidor aceptó la cuenta pero no el envío. Casi siempre el correo remitente ` +
+        `(${ctx.fromEmail || "el configurado"}) tiene que ser el mismo de la cuenta con la que te conectas` +
+        (ctx.username ? ` (${ctx.username})` : "") +
+        `, o un alias autorizado.`,
+    );
+  }
+  if (respuesta === 552 || respuesta === 523 || texto.includes("message size")) {
+    return con(`El correo pesa más de lo que acepta el servidor. Manda el reporte sin el documento adjunto.`);
+  }
+  if (texto.includes("self-signed") || texto.includes("self signed") || texto.includes("altname")) {
+    return con(
+      `El certificado del servidor no coincide con "${ctx.host}". Revisa que el nombre del servidor sea ` +
+        `exactamente el que te dio tu proveedor.`,
+    );
+  }
+  if (respuesta === 421 || texto.includes("too many") || texto.includes("rate")) {
+    return con(`El servidor está limitando los envíos. Espera unos minutos y vuelve a intentar.`);
+  }
+
+  return crudo || "El envío falló sin mensaje del servidor";
 }
 
 export interface MailAttachment {
@@ -167,6 +302,12 @@ export async function sendMail(options: {
   attachments?: MailAttachment[];
   kind?: string;
   userId?: number | null;
+  /**
+   * Manda una sola copia con los destinatarios ocultos. Es lo que usa el envío
+   * semanal: un correo a toda la plantilla con todos en el "para" le enseña a
+   * cada quien la libreta de direcciones de los demás.
+   */
+  oculto?: boolean;
 }): Promise<{ ok: boolean; error?: string; messageId?: string }> {
   const recipients = options.to.filter((r) => r.includes("@"));
   if (recipients.length === 0) {
@@ -178,19 +319,28 @@ export async function sendMail(options: {
   let messageId: string | undefined;
 
   try {
-    const { transport, from } = await getTransport();
-    const info = await transport.sendMail({
-      from,
-      to: recipients.join(", "),
-      subject: options.subject,
-      html: options.html,
-      text: options.text,
-      attachments: options.attachments,
-    });
-    ok = true;
-    messageId = info.messageId;
+    const { transport, from, ctx } = await getTransport();
+    try {
+      const info = await transport.sendMail({
+        from,
+        // En copia oculta el sobre necesita un "para": va el propio remitente.
+        to: options.oculto ? ctx.fromEmail : recipients.join(", "),
+        bcc: options.oculto ? recipients.join(", ") : undefined,
+        subject: options.subject,
+        html: options.html,
+        text: options.text,
+        attachments: options.attachments,
+      });
+      ok = true;
+      messageId = info.messageId;
+    } catch (err: any) {
+      error = diagnosticarSmtp(err, ctx).slice(0, 480);
+      throw err;
+    }
   } catch (err: any) {
-    error = String(err?.message || err).slice(0, 480);
+    // El fallo pudo ser del envío (ya traducido arriba) o de armar el
+    // transporte, que trae su propio mensaje en español.
+    error = error || String(err?.message || err).slice(0, 480);
     console.error("[Correo] Falló el envío:", error);
     // Un rechazo puede venir de credenciales cambiadas: rearmar el transporte
     cachedTransport = null;
@@ -223,9 +373,12 @@ export async function testSmtp(sendTo?: string): Promise<{ ok: boolean; message:
   let ok = false;
   let message = "";
 
+  let ctx: ContextoSmtp | null = null;
+
   try {
-    const { transport } = await getTransport();
-    await transport.verify();
+    const armado = await getTransport();
+    ctx = armado.ctx;
+    await armado.transport.verify();
     ok = true;
     message = "Conexión con el servidor de correo correcta";
 
@@ -245,7 +398,9 @@ export async function testSmtp(sendTo?: string): Promise<{ ok: boolean; message:
     }
   } catch (err: any) {
     ok = false;
-    message = String(err?.message || err).slice(0, 480);
+    // Sin ctx el fallo es de configuración (no hay cuenta, está apagada, la
+    // contraseña no se pudo descifrar) y ese mensaje ya viene en español.
+    message = ctx ? diagnosticarSmtp(err, ctx).slice(0, 480) : String(err?.message || err).slice(0, 480);
   }
 
   // Dejar constancia del último intento para que Ajustes lo muestre

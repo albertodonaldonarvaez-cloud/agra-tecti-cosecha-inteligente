@@ -495,6 +495,7 @@ export default function Settings() {
 
           {/* Correo saliente */}
           <SmtpSection />
+          <WeeklyReportSection />
 
           {/* Notificaciones Telegram */}
           <TelegramSection />
@@ -1331,6 +1332,205 @@ function SmtpSection() {
           </div>
         </div>
       )}
+    </GlassCard>
+  );
+}
+
+const DIAS_SEMANA = [
+  { valor: 1, nombre: "Lunes" },
+  { valor: 2, nombre: "Martes" },
+  { valor: 3, nombre: "Miércoles" },
+  { valor: 4, nombre: "Jueves" },
+  { valor: 5, nombre: "Viernes" },
+  { valor: 6, nombre: "Sábado" },
+  { valor: 7, nombre: "Domingo" },
+];
+
+/**
+ * Reporte semanal automático.
+ *
+ * Va aparte de la tarjeta del SMTP a propósito: aquella dice CÓMO se manda el
+ * correo, y esta dice QUÉ sale solo y a quién. Encenderlo le manda correo a
+ * toda la plantilla, así que el botón de "mandar ahora" pide confirmación y
+ * hay una prueba a una sola dirección al lado.
+ */
+function WeeklyReportSection() {
+  const { data: config, refetch } = trpc.smtp.getWeekly.useQuery(undefined, { retry: false });
+
+  const [activo, setActivo] = useState(false);
+  const [dia, setDia] = useState(1);
+  const [hora, setHora] = useState(7);
+  const [aTodos, setATodos] = useState(true);
+  const [conCosecha, setConCosecha] = useState(true);
+  const [pruebaA, setPruebaA] = useState("");
+
+  useEffect(() => {
+    if (!config) return;
+    setActivo(!!config.activo);
+    setDia(config.dia ?? 1);
+    setHora(config.hora ?? 7);
+    setATodos(config.aTodos !== false);
+    setConCosecha(config.conCosecha !== false);
+  }, [config]);
+
+  const guardar = trpc.smtp.saveWeekly.useMutation({
+    onSuccess: () => {
+      toast.success("Programación del reporte semanal guardada");
+      refetch();
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const enviar = trpc.smtp.sendWeeklyNow.useMutation({
+    onSuccess: (r: any) => {
+      if (r.enviado) {
+        toast.success(`Reporte enviado a ${r.destinatarios} destinatario(s)`);
+      } else {
+        toast.error(r.motivo || "No se pudo enviar el reporte");
+      }
+      refetch();
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  if (config === null) {
+    return (
+      <GlassCard className="p-4 md:p-6 border-2 border-slate-200 bg-slate-50/40">
+        <div className="flex items-center gap-2 text-slate-600">
+          <Clock className="h-5 w-5" />
+          <p className="text-sm">
+            Configura primero la cuenta de correo aquí arriba y esta sección se activa sola.
+          </p>
+        </div>
+      </GlassCard>
+    );
+  }
+
+  const enviarDeVerdad = () => {
+    const cuantos = config?.cuantosDestinatarios ?? 0;
+    if (!window.confirm(`Esto le manda el reporte de la semana pasada a ${cuantos} destinatario(s) ahora mismo. ¿Lo mando?`)) {
+      return;
+    }
+    enviar.mutate({});
+  };
+
+  return (
+    <GlassCard className="p-4 md:p-6 border-2 border-emerald-200 bg-emerald-50/30">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Clock className="h-6 w-6 text-emerald-600" />
+          <h2 className="text-lg md:text-2xl font-semibold text-emerald-900">Reporte semanal automático</h2>
+        </div>
+        <span className={`rounded-full px-3 py-1 text-xs font-medium ${activo ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
+          {activo ? "Encendido" : "Apagado"}
+        </span>
+      </div>
+
+      <p className="mb-4 text-sm text-emerald-800">
+        Cada semana el sistema manda el reporte de <strong>actividades de campo</strong> de la semana que acaba
+        de cerrar (lunes a domingo). Si esa semana hubo cajas, manda además un segundo correo con el{" "}
+        <strong>reporte de cosecha</strong>. Los destinatarios van en copia oculta: nadie ve el correo de los demás.
+      </p>
+
+      <div className="space-y-3">
+        <label className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-white/60 p-3 text-sm text-emerald-900">
+          <input type="checkbox" checked={activo} onChange={(e) => setActivo(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-emerald-300" />
+          <span>
+            <strong>Mandar el reporte solo cada semana</strong>
+            <span className="block text-xs text-emerald-700">
+              Mientras esté apagado no sale ningún correo automático; el botón de abajo sigue funcionando.
+            </span>
+          </span>
+        </label>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <Label className="text-emerald-800 text-sm font-medium">Día</Label>
+            <select value={dia} onChange={(e) => setDia(Number(e.target.value))}
+              className="mt-1 w-full rounded-md border border-emerald-200 bg-white/60 px-3 py-2 text-sm">
+              {DIAS_SEMANA.map((d) => <option key={d.valor} value={d.valor}>{d.nombre}</option>)}
+            </select>
+          </div>
+          <div>
+            <Label className="text-emerald-800 text-sm font-medium">Hora (hora de México)</Label>
+            <select value={hora} onChange={(e) => setHora(Number(e.target.value))}
+              className="mt-1 w-full rounded-md border border-emerald-200 bg-white/60 px-3 py-2 text-sm">
+              {Array.from({ length: 24 }, (_, h) => (
+                <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <label className="flex items-start gap-2 text-sm text-emerald-900">
+          <input type="checkbox" checked={aTodos} onChange={(e) => setATodos(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-emerald-300" />
+          <span>
+            Mandarlo a <strong>todas las cuentas activas</strong> del sistema
+            <span className="block text-xs text-emerald-700">
+              Desmárcalo para que solo llegue a los destinatarios predeterminados de la tarjeta de arriba.
+              Las cuentas desactivadas nunca lo reciben.
+            </span>
+          </span>
+        </label>
+
+        <label className="flex items-start gap-2 text-sm text-emerald-900">
+          <input type="checkbox" checked={conCosecha} onChange={(e) => setConCosecha(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-emerald-300" />
+          <span>
+            Incluir el correo de <strong>cosecha</strong> cuando la semana tuvo cajas
+            <span className="block text-xs text-emerald-700">
+              Fuera de temporada no se manda nada: no hay correos en cero.
+            </span>
+          </span>
+        </label>
+
+        <div className="rounded-lg border border-emerald-200 bg-white/60 px-3 py-2 text-xs text-emerald-800">
+          Ahora mismo le llegaría a <strong>{config?.cuantosDestinatarios ?? 0}</strong> destinatario(s).
+          {config?.proximo && <> Próximo envío: <strong>{config.proximo}</strong>.</>}
+          {config?.ultimaSemana && <> Última semana enviada: <strong>{config.ultimaSemana}</strong>.</>}
+        </div>
+
+        {config?.ultimoError && (
+          <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+            El último envío automático falló: {config.ultimoError}
+          </p>
+        )}
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Button onClick={() => guardar.mutate({ activo, dia, hora, aTodos, conCosecha })}
+            disabled={guardar.isPending}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white">
+            <Save className="h-4 w-4 mr-1" />
+            {guardar.isPending ? "Guardando..." : "Guardar programación"}
+          </Button>
+
+          <Button onClick={() => {
+              if (!pruebaA.trim().includes("@")) {
+                toast.error("Escribe el correo al que quieres la prueba");
+                return;
+              }
+              enviar.mutate({ soloA: pruebaA.trim() });
+            }}
+            disabled={enviar.isPending}
+            variant="outline" className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+            <AtSign className="h-4 w-4 mr-1" />
+            {enviar.isPending ? "Enviando..." : "Mandarme una prueba"}
+          </Button>
+          <Input value={pruebaA} onChange={(e) => setPruebaA(e.target.value)}
+            placeholder="correo para la prueba"
+            className="flex-1 min-w-[200px] bg-white/60 border-emerald-200" />
+        </div>
+
+        <div className="pt-1">
+          <Button onClick={enviarDeVerdad} disabled={enviar.isPending}
+            variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50">
+            <Send className="h-4 w-4 mr-1" />
+            Mandar el de esta semana a todos ahora
+          </Button>
+        </div>
+      </div>
     </GlassCard>
   );
 }

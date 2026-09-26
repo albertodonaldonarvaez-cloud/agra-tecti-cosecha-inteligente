@@ -142,7 +142,7 @@ export function renderActivityEmailHtml(data: {
     ${
       data.hasAttachment
         ? `<p style="margin:22px 0 0;font-size:13px;color:${GRIS};padding-top:14px;border-top:1px solid ${BORDE}">
-             El reporte completo va adjunto a este correo. Ábrelo en el navegador y usa <strong>Imprimir → Guardar como PDF</strong> si necesitas archivarlo.
+             El <strong>reporte completo en PDF</strong> va adjunto a este correo: ahí están todas las labores, los insumos con su dosis, el trabajo por parcela y quién participó.
            </p>`
         : ""
     }
@@ -185,6 +185,6 @@ export function renderActivityEmailText(data: {
       lineas.push("");
     }
   }
-  lineas.push("El reporte completo va adjunto a este correo.");
+  lineas.push("El reporte completo en PDF va adjunto a este correo.");
   return lineas.join("\n");
 }

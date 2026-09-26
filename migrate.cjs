@@ -730,6 +730,29 @@ async function migrate() {
     }
 
     console.log('[Migration] 0028 (reparto de folios) OK');
+
+    // ── Envío semanal del reporte por correo (0029) ──────────────
+    // Columnas nuevas sobre la tabla que ya existía. weeklyEnabled arranca en
+    // FALSE: al desplegar esto NO empieza a salir correo a nadie hasta que
+    // alguien lo encienda en Ajustes.
+    await ensureColumn('smtpConfig', 'weeklyEnabled',
+      "ALTER TABLE smtpConfig ADD COLUMN weeklyEnabled BOOLEAN NOT NULL DEFAULT FALSE");
+    await ensureColumn('smtpConfig', 'weeklyDay',
+      "ALTER TABLE smtpConfig ADD COLUMN weeklyDay INT NOT NULL DEFAULT 1");
+    await ensureColumn('smtpConfig', 'weeklyHour',
+      "ALTER TABLE smtpConfig ADD COLUMN weeklyHour INT NOT NULL DEFAULT 7");
+    await ensureColumn('smtpConfig', 'weeklyToAllUsers',
+      "ALTER TABLE smtpConfig ADD COLUMN weeklyToAllUsers BOOLEAN NOT NULL DEFAULT TRUE");
+    await ensureColumn('smtpConfig', 'weeklyHarvest',
+      "ALTER TABLE smtpConfig ADD COLUMN weeklyHarvest BOOLEAN NOT NULL DEFAULT TRUE");
+    await ensureColumn('smtpConfig', 'weeklyLastWeek',
+      "ALTER TABLE smtpConfig ADD COLUMN weeklyLastWeek VARCHAR(10) NULL");
+    await ensureColumn('smtpConfig', 'weeklyLastAt',
+      "ALTER TABLE smtpConfig ADD COLUMN weeklyLastAt TIMESTAMP NULL");
+    await ensureColumn('smtpConfig', 'weeklyLastError',
+      "ALTER TABLE smtpConfig ADD COLUMN weeklyLastError VARCHAR(512) NULL");
+
+    console.log('[Migration] 0029 (envio semanal por correo) OK');
   } catch (err) {
     console.error('[Migration] Error:', err.message);
   } finally {

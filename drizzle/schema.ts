@@ -236,6 +236,20 @@ export const smtpConfig = mysqlTable("smtpConfig", {
   lastTestAt: timestamp("lastTestAt"),
   lastTestOk: boolean("lastTestOk"),
   lastTestError: varchar("lastTestError", { length: 512 }),
+
+  // ── Envío semanal automático (0029) ──────────────────────────────
+  // Nace apagado a propósito: enciende solo un correo que sale a toda la
+  // plantilla, y eso no debe pasar por haber desplegado.
+  weeklyEnabled: boolean("weeklyEnabled").default(false).notNull(),
+  weeklyDay: int("weeklyDay").default(1).notNull(), // 1 = lunes … 7 = domingo
+  weeklyHour: int("weeklyHour").default(7).notNull(), // hora de México
+  weeklyToAllUsers: boolean("weeklyToAllUsers").default(true).notNull(),
+  weeklyHarvest: boolean("weeklyHarvest").default(true).notNull(),
+  // Lunes de la última semana que SÍ salió. Es lo que evita que un reinicio
+  // del contenedor vuelva a mandar el mismo reporte.
+  weeklyLastWeek: varchar("weeklyLastWeek", { length: 10 }),
+  weeklyLastAt: timestamp("weeklyLastAt"),
+  weeklyLastError: varchar("weeklyLastError", { length: 512 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

@@ -829,6 +829,14 @@ async function startServer() {
       console.error("Error al iniciar WeeklySummary:", err);
     });
 
+    // Reporte semanal por correo: actividades de campo y, si hubo, cosecha.
+    // Arranca siempre, pero no manda nada hasta que se encienda en Ajustes.
+    import("../reporteSemanal").then(({ startWeeklyReportMailer }) => {
+      startWeeklyReportMailer();
+    }).catch((err) => {
+      console.error("Error al iniciar el reporte semanal por correo:", err);
+    });
+
     // Iniciar bot de Telegram para Notas de Campo
     // Escucha mensajes privados para crear notas y enviar notificaciones
     import("../telegramFieldNotesBot").then(({ startFieldNotesBot }) => {

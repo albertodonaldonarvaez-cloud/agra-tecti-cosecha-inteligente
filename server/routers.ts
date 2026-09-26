@@ -692,6 +692,47 @@ export const appRouter = router({
       const { getRecentEmails } = await import("./mailer");
       return await getRecentEmails(15);
     }),
+
+    // ── Reporte semanal automático ──────────────────────────
+    getWeekly: adminProcedure.query(async () => {
+      const { leerConfigSemanal, proximoEnvio, destinatariosSemanales } = await import("./reporteSemanal");
+      const config = await leerConfigSemanal();
+      if (!config) return null;
+      return {
+        ...config,
+        proximo: config.activo ? proximoEnvio(config) : null,
+        cuantosDestinatarios: (await destinatariosSemanales(config.aTodos)).length,
+      };
+    }),
+
+    saveWeekly: adminProcedure
+      .input(z.object({
+        activo: z.boolean(),
+        dia: z.number().int().min(1).max(7),
+        hora: z.number().int().min(0).max(23),
+        aTodos: z.boolean(),
+        conCosecha: z.boolean(),
+      }))
+      .mutation(async ({ input }) => {
+        const { guardarConfigSemanal } = await import("./reporteSemanal");
+        return await guardarConfigSemanal(input);
+      }),
+
+    /**
+     * Manda el reporte ahora mismo. Sin `soloA` sale de verdad a todo mundo,
+     * así que la pantalla lo pide dos veces; con `soloA` es una prueba a una
+     * sola dirección y no cuenta como el envío de la semana.
+     */
+    sendWeeklyNow: adminProcedure
+      .input(z.object({ soloA: z.string().optional() }).optional())
+      .mutation(async ({ input, ctx }) => {
+        const { enviarReporteSemanal } = await import("./reporteSemanal");
+        return await enviarReporteSemanal({
+          forzar: true,
+          usuarioId: ctx.user?.id ?? null,
+          soloA: input?.soloA?.trim() || undefined,
+        });
+      }),
   }),
 
   // Archivo local de las fotos de KoboToolbox
@@ -5843,7 +5884,24 @@ Da un análisis ejecutivo de 6-8 líneas máximo: estado general de la operació
         });
 
         const scopeLabel = input.scopeLabel || "Todas las parcelas";
-        const html = renderActivityEmailHtml({ ...data, scopeLabel, hasAttachment: !!input.reportHtml });
+
+        // El PDF lo dibuja el servidor, no el navegador: así el reporte que
+        // se manda a mano es exactamente el mismo que sale solo cada semana.
+        // Si el dibujo falla, el correo sale igual con su cuerpo completo.
+        const attachments: Array<{ filename: string; content: string | Buffer; contentType?: string }> = [];
+        try {
+          const { generarPdf } = await import("./reportePdf");
+          const { documentoDeActividades } = await import("./reporteDocumentos");
+          attachments.push({
+            filename: `actividades-${input.fromDate}_${input.toDate}.pdf`,
+            content: await generarPdf(documentoDeActividades({ ...data, scopeLabel })),
+            contentType: "application/pdf",
+          });
+        } catch (e) {
+          console.error("[Correo] No se pudo generar el PDF del reporte:", e);
+        }
+
+        const html = renderActivityEmailHtml({ ...data, scopeLabel, hasAttachment: attachments.length > 0 });
         const text = renderActivityEmailText({ ...data, scopeLabel });
         const subject = input.subject
           || `Reporte de actividades ${input.fromDate} a ${input.toDate} — Agra Tec-Ti`;
@@ -5853,13 +5911,7 @@ Da un análisis ejecutivo de 6-8 líneas máximo: estado general de la operació
           subject,
           html,
           text,
-          attachments: input.reportHtml
-            ? [{
-                filename: `reporte-actividades-${input.fromDate}_${input.toDate}.html`,
-                content: input.reportHtml,
-                contentType: "text/html; charset=utf-8",
-              }]
-            : undefined,
+          attachments: attachments.length > 0 ? attachments : undefined,
           kind: "reporte-actividades",
           userId: ctx.user?.id ?? null,
         });
