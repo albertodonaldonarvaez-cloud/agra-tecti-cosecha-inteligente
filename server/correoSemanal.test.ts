@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diagnosticarSmtp, parseRecipients } from "./mailer";
+import { cifradoParaElPuerto, diagnosticarSmtp, parseRecipients } from "./mailer";
 import { compararConLaPrevia, diaIso, semanaPasada } from "./reporteSemanal";
 import { documentoDeCosecha, documentoDeActividades } from "./reporteDocumentos";
 import { generarPdf } from "./reportePdf";
@@ -58,6 +58,25 @@ describe("diagnosticarSmtp", () => {
     const err: any = new Error("Invalid login: 535 nope");
     err.code = "EAUTH";
     expect(diagnosticarSmtp(err, gmail)).toContain("Invalid login: 535 nope");
+  });
+});
+
+describe("cifradoParaElPuerto", () => {
+  // Esta es la regla que tuvo el correo de la finca sin salir: puerto 465
+  // guardado con el cifrado apagado. El envío se quedaba esperando un saludo
+  // que en ese puerto nunca llega en claro.
+  it("el 465 va cifrado aunque se haya guardado que no", () => {
+    expect(cifradoParaElPuerto(465, false)).toBe(true);
+  });
+
+  it("el 587 y el 25 no llevan cifrado directo aunque se haya marcado", () => {
+    expect(cifradoParaElPuerto(587, true)).toBe(false);
+    expect(cifradoParaElPuerto(25, true)).toBe(false);
+  });
+
+  it("un puerto fuera de lo normal respeta lo que se eligió", () => {
+    expect(cifradoParaElPuerto(2525, true)).toBe(true);
+    expect(cifradoParaElPuerto(2525, false)).toBe(false);
   });
 });
 

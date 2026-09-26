@@ -9,12 +9,31 @@ qué hacer cuando la prueba de SMTP falla.
 
 | Campo | Qué va | Ojo |
 |---|---|---|
-| Servidor | `smtp.gmail.com`, `mail.tudominio.com`… | Sin `https://` ni barras |
-| Puerto | `587` o `465` | Tiene que cuadrar con la casilla de abajo |
-| Conexión cifrada directa | **Marcada** con el 465, **desmarcada** con el 587 | Es el error más común |
+| Servidor | Lo que el proveedor llame *Outgoing Server* | Sin `https://` ni barras |
+| Tipo de conexión | **465 · SSL/TLS** casi siempre | El puerto y el cifrado se eligen juntos |
 | Usuario | Casi siempre el correo completo | No solo la parte de antes de la arroba |
 | Contraseña | La de la cuenta, o la **de aplicación** | Gmail y Microsoft ya no aceptan la normal |
 | Correo remitente | El mismo de la cuenta, o un alias autorizado | Si no, el servidor rechaza el envío |
+
+El puerto y el cifrado son **un solo campo** a propósito. El 465 habla cifrado
+desde el primer byte y el 587 empieza en claro y sube con STARTTLS: son dos
+protocolos distintos y ningún servidor los cruza. Cuando eran dos campos
+sueltos se podían contradecir, y el envío se quedaba colgado esperando un
+saludo que nunca llegaba. Si tu proveedor usa un puerto raro, la opción
+*Otro puerto* devuelve los dos campos por separado.
+
+### cPanel (Neubox, Hostgator, y la mayoría del hosting compartido)
+
+En cPanel, *Correo electrónico → Cuentas de correo → Conectar dispositivos*
+sale el recuadro **Secure SSL/TLS Settings (Recommended)**. De ahí:
+
+- **Servidor** = lo que diga *Outgoing Server* (el dominio, no el nombre del
+  servidor físico tipo `svgrNNN.serverneubox.com.mx`)
+- **Tipo de conexión** = Puerto 465 · SSL/TLS
+- **Usuario** = la dirección completa
+- **Contraseña** = la de esa cuenta de correo, no la de cPanel
+
+El puerto **25 suele estar cerrado** en este tipo de hosting. No lo uses.
 
 La contraseña se guarda cifrada con `JWT_SECRET` y nunca vuelve al navegador.
 **Si cambia `JWT_SECRET` hay que volver a escribirla**, porque deja de poder
@@ -38,8 +57,10 @@ más a menos frecuente.
 
 ### "El puerto y el cifrado no cuadran" / "El servidor nunca saludó"
 
-La casilla de conexión cifrada y el puerto van al revés. **465 → marcada.
-587 → desmarcada.** Es la mitad de los casos.
+El puerto y el cifrado van al revés. Desde que se eligen juntos esto ya no
+debería pasar, y una configuración vieja mal guardada se corrige sola al
+leerla. Si aparece, es que el puerto es uno raro y el cifrado se eligió a
+mano.
 
 ### "No se pudo llegar al servidor" (tiempo agotado)
 

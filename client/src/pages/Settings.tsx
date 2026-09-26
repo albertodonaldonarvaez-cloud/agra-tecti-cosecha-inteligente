@@ -1228,21 +1228,53 @@ function SmtpSection() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="sm:col-span-2">
             <Label className="text-sky-800 text-sm font-medium">Servidor SMTP</Label>
-            <Input value={host} onChange={(e) => setHost(e.target.value)} placeholder="smtp.gmail.com"
+            <Input value={host} onChange={(e) => setHost(e.target.value)} placeholder="mail.tudominio.com"
               className="mt-1 bg-white/60 border-sky-200" />
+            <p className="mt-1 text-xs text-gray-400">
+              El que diga tu proveedor como “Outgoing Server”. Sin https:// ni barras.
+            </p>
           </div>
           <div>
-            <Label className="text-sky-800 text-sm font-medium">Puerto</Label>
-            <Input type="number" value={port} onChange={(e) => setPort(Number(e.target.value))}
-              className="mt-1 bg-white/60 border-sky-200" />
+            <Label className="text-sky-800 text-sm font-medium">Tipo de conexión</Label>
+            {/*
+              Antes eran dos campos sueltos —puerto y casilla de cifrado— y se
+              podían contradecir. El 465 habla cifrado desde el primer byte y
+              el 587 empieza en claro; cruzarlos deja el envío colgado
+              esperando un saludo que nunca llega, y eso tuvo el correo de la
+              finca sin salir. Ahora se eligen juntos, que es como van.
+            */}
+            <select
+              value={port === 465 || port === 587 ? String(port) : "otro"}
+              onChange={(e) => {
+                // 2525 es el alternativo más común, y sobre todo NO es 465
+                // ni 587: así aparecen los dos campos sueltos de abajo.
+                if (e.target.value === "otro") { setPort(2525); setSecure(false); return; }
+                const p = Number(e.target.value);
+                setPort(p);
+                setSecure(p === 465);
+              }}
+              className="mt-1 w-full rounded-md border border-sky-200 bg-white/60 px-3 py-2 text-sm">
+              <option value="465">Puerto 465 · SSL/TLS (lo normal)</option>
+              <option value="587">Puerto 587 · STARTTLS</option>
+              <option value="otro">Otro puerto…</option>
+            </select>
           </div>
         </div>
 
-        <label className="flex items-center gap-2 text-sm text-sky-800">
-          <input type="checkbox" checked={secure} onChange={(e) => setSecure(e.target.checked)}
-            className="h-4 w-4 rounded border-sky-300" />
-          Conexión cifrada directa (SSL/TLS, puerto 465). Déjalo desmarcado para el puerto 587.
-        </label>
+        {port !== 465 && port !== 587 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <Label className="text-sky-800 text-sm font-medium">Puerto</Label>
+              <Input type="number" value={port} onChange={(e) => setPort(Number(e.target.value))}
+                className="mt-1 bg-white/60 border-sky-200" />
+            </div>
+            <label className="flex items-end gap-2 pb-2 text-sm text-sky-800">
+              <input type="checkbox" checked={secure} onChange={(e) => setSecure(e.target.checked)}
+                className="h-4 w-4 rounded border-sky-300" />
+              Conexión cifrada directa (SSL/TLS)
+            </label>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>

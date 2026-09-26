@@ -25,6 +25,26 @@ export interface SmtpSettings {
   enabled: boolean;
 }
 
+/**
+ * Qué tipo de cifrado le toca a un puerto.
+ *
+ * El 465 habla TLS desde el primer byte; el 587 y el 25 empiezan en claro y
+ * suben a TLS con STARTTLS. Son dos protocolos distintos y no hay servidor en
+ * el mundo que los cruce, pero la pantalla dejaba marcar cualquier
+ * combinación y el correo de la finca llevaba semanas sin salir por
+ * exactamente eso: puerto 465 con el cifrado apagado, que se queda esperando
+ * un saludo que nunca llega ("Greeting never received").
+ *
+ * Por eso el par lo decide el puerto y no la persona. Un puerto que no sea
+ * uno de los tres conocidos sí respeta lo que se haya elegido: ahí no hay
+ * ninguna convención que aplicar.
+ */
+export function cifradoParaElPuerto(puerto: number, elegido: boolean): boolean {
+  if (puerto === 465) return true;
+  if (puerto === 587 || puerto === 25) return false;
+  return elegido;
+}
+
 /** Config cruda, con la contraseña todavía cifrada. Uso interno. */
 async function readConfigRow() {
   const db = await getDb();
@@ -41,7 +61,9 @@ export async function getSmtpConfigPublic() {
     id: row.id,
     host: row.host,
     port: row.port,
-    secure: row.secure,
+    // El que de verdad se va a usar, no el que quedó guardado: así la
+    // pantalla enseña lo mismo que hace el envío.
+    secure: cifradoParaElPuerto(row.port, row.secure),
     username: row.username,
     hasPassword: !!row.password,
     fromName: row.fromName,
@@ -80,7 +102,7 @@ export async function saveSmtpConfig(data: {
   const values = {
     host: data.host.trim(),
     port: data.port,
-    secure: data.secure,
+    secure: cifradoParaElPuerto(data.port, data.secure),
     username: data.username?.trim() || null,
     password,
     fromName: data.fromName?.trim() || "Agra Tec-Ti",
@@ -133,14 +155,19 @@ async function getTransport(): Promise<{ transport: Transporter; from: string; c
     }
   }
 
+  // También al leer, no solo al guardar: la configuración que ya está en la
+  // base se escribió cuando la pantalla permitía cruzarlos, y así se arregla
+  // sola sin que nadie tenga que volver a entrar a Ajustes.
+  const secure = cifradoParaElPuerto(row.port, row.secure);
+
   const transport = nodemailer.createTransport({
     host: row.host,
     port: row.port,
-    secure: row.secure, // 465 = TLS directo; 587/25 = STARTTLS
+    secure, // 465 = TLS directo; 587/25 = STARTTLS
     // Con usuario y contraseña en el 587, exigir que la sesión se cifre antes
     // de autenticarse. Sin esto, un servidor que no ofrezca STARTTLS recibiría
     // la contraseña en claro y nadie se enteraría.
-    requireTLS: !row.secure && row.port === 587 && !!row.username,
+    requireTLS: !secure && row.port === 587 && !!row.username,
     auth: row.username ? { user: row.username, pass: password } : undefined,
     tls: { servername: row.host },
     connectionTimeout: 20000,
@@ -152,7 +179,7 @@ async function getTransport(): Promise<{ transport: Transporter; from: string; c
   const ctx: ContextoSmtp = {
     host: row.host,
     port: row.port,
-    secure: row.secure,
+    secure,
     username: row.username,
     fromEmail: row.fromEmail,
   };
