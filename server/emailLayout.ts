@@ -145,6 +145,80 @@ export function tabla(columnas: Columna[], filas: string[][]): string {
 }
 
 /**
+ * El correo de aviso: llegó el reporte, y el reporte va adjunto.
+ *
+ * Antes el cuerpo del correo repetía el reporte entero —los totales, la
+ * tabla de labores, el desglose— y el PDF traía otra vez lo mismo. Leerlo
+ * dos veces no aporta nada y en el teléfono es una pared de números. El
+ * correo avisa; el documento informa.
+ *
+ * Por eso aquí no hay tablas ni cifras: logo, una línea, y de qué periodo es.
+ */
+export function plantillaAviso(opciones: {
+  /** Qué reporte llegó: "Reporte semanal de cosecha" */
+  titulo: string;
+  /** El periodo en palabras */
+  periodo: string;
+  /** La línea que explica qué trae, en una frase */
+  frase: string;
+  /** Nombre del PDF adjunto, si lo hay */
+  adjunto?: string;
+  /** El logo va como imagen en línea; sin él el correo sale igual */
+  logoCid?: string;
+}): string {
+  const logo = opciones.logoCid
+    ? `<img src="cid:${esc(opciones.logoCid)}" width="64" height="64" alt="Agra Tec-Ti"
+         style="display:block;width:64px;height:64px;border:0;outline:none;text-decoration:none">`
+    : `<div style="font-size:13px;font-weight:700;color:${VERDE_OSCURO};letter-spacing:.12em">AGRA TEC-TI</div>`;
+
+  return `<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(opciones.titulo)}</title></head>
+<body style="margin:0;padding:0;background:${FONDO}">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${FONDO};padding:40px 16px">
+<tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border:1px solid #e8efe9;border-radius:16px;box-shadow:0 10px 34px rgba(20,83,45,.09);font-family:${TIPOGRAFIA}">
+
+  <!--
+    El filo verde de arriba. Sin degradados ni sombras dentro de la tarjeta:
+    Outlook los tira y quedaría una caja a medio pintar. Un rectángulo de
+    color sí lo dibujan todos.
+  -->
+  <tr><td style="background:${VERDE};height:3px;line-height:3px;font-size:0;border-radius:16px 16px 0 0">&nbsp;</td></tr>
+
+  <tr><td align="center" style="padding:38px 32px 0">${logo}</td></tr>
+
+  <tr><td align="center" style="padding:22px 32px 0">
+    <div style="font-size:20px;font-weight:700;color:${VERDE_OSCURO};line-height:1.3">${esc(opciones.titulo)}</div>
+    <div style="font-size:13px;color:${GRIS};margin-top:7px">${esc(opciones.periodo)}</div>
+  </td></tr>
+
+  <tr><td align="center" style="padding:20px 32px 0">
+    <div style="font-size:14px;line-height:1.65;color:${TINTA}">${esc(opciones.frase)}</div>
+  </td></tr>
+
+  ${
+    opciones.adjunto
+      ? `<tr><td align="center" style="padding:24px 32px 0">
+          <table role="presentation" cellpadding="0" cellspacing="0" style="background:#f6faf7;border:1px solid ${VERDE_TENUE};border-radius:10px">
+            <tr><td style="padding:12px 18px;font-size:12px;color:${VERDE_OSCURO};font-weight:600">${esc(opciones.adjunto)}</td></tr>
+          </table>
+        </td></tr>`
+      : ""
+  }
+
+  <tr><td align="center" style="padding:32px 32px 36px">
+    <div style="font-size:11px;color:#9ca3af;line-height:1.6">
+      Agra Tec-Ti · Cosecha inteligente<br>
+      Correo automático, no hace falta responderlo.
+    </div>
+  </td></tr>
+
+</table>
+</td></tr></table>
+</body></html>`;
+}
+
+/**
  * El sobre: cabecera verde, contenido y pie. Todo correo del sistema pasa
  * por aquí, y por eso todos se ven iguales.
  */

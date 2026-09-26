@@ -5888,7 +5888,10 @@ Da un análisis ejecutivo de 6-8 líneas máximo: estado general de la operació
         // El PDF lo dibuja el servidor, no el navegador: así el reporte que
         // se manda a mano es exactamente el mismo que sale solo cada semana.
         // Si el dibujo falla, el correo sale igual con su cuerpo completo.
-        const attachments: Array<{ filename: string; content: string | Buffer; contentType?: string }> = [];
+        const { logoAdjunto } = await import("./logo");
+        const attachments: Array<{ filename: string; content: string | Buffer; contentType?: string; cid?: string }> =
+          [...logoAdjunto()];
+        let hayPdf = false;
         try {
           const { generarPdf } = await import("./reportePdf");
           const { documentoDeActividades } = await import("./reporteDocumentos");
@@ -5897,11 +5900,12 @@ Da un análisis ejecutivo de 6-8 líneas máximo: estado general de la operació
             content: await generarPdf(documentoDeActividades({ ...data, scopeLabel })),
             contentType: "application/pdf",
           });
+          hayPdf = true;
         } catch (e) {
           console.error("[Correo] No se pudo generar el PDF del reporte:", e);
         }
 
-        const html = renderActivityEmailHtml({ ...data, scopeLabel, hasAttachment: attachments.length > 0 });
+        const html = renderActivityEmailHtml({ ...data, scopeLabel, hasAttachment: hayPdf });
         const text = renderActivityEmailText({ ...data, scopeLabel });
         const subject = input.subject
           || `Reporte de actividades ${input.fromDate} a ${input.toDate} — Agra Tec-Ti`;

@@ -31,6 +31,17 @@ function num(valor: number, decimales = 0): string {
   });
 }
 
+/**
+ * "+12.4% contra la semana anterior", o null si la semana pasada no hubo
+ * cosecha y no hay contra qué comparar.
+ */
+export function compararConLaPrevia(kgAhora: number, kgAntes: number): string | null {
+  if (kgAntes <= 0) return null;
+  const cambio = ((kgAhora - kgAntes) / kgAntes) * 100;
+  const signo = cambio >= 0 ? "+" : "";
+  return `${signo}${cambio.toFixed(1)}% contra la semana anterior (${num(kgAntes, 0)} kg)`;
+}
+
 function pct(parte: number, total: number): string {
   if (!total) return "—";
   return `${((parte / total) * 100).toFixed(1)}%`;
@@ -157,10 +168,12 @@ export function documentoDeCosecha(datos: {
 }): DocumentoPdf {
   const c = datos.cosecha;
   const t = c.totales;
+  const comparacion = compararConLaPrevia(t.kg, c.kgSemanaPrevia);
 
   const secciones: SeccionPdf[] = [
     {
       titulo: "Calidad de la semana",
+      parrafos: [comparacion].filter((x): x is string => x !== null),
       vinetas: [
         `Primera: ${num(t.primera, 0)} kg (${pct(t.primera, t.kg)})`,
         `Segunda: ${num(t.segunda, 0)} kg (${pct(t.segunda, t.kg)})`,

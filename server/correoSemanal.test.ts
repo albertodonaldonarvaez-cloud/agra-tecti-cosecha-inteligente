@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { cifradoParaElPuerto, diagnosticarSmtp, limpiarServidor, parseRecipients } from "./mailer";
-import { compararConLaPrevia, diaIso, semanaPasada } from "./reporteSemanal";
-import { documentoDeCosecha, documentoDeActividades } from "./reporteDocumentos";
+import { diaIso, semanaPasada } from "./reporteSemanal";
+import { compararConLaPrevia, documentoDeActividades, documentoDeCosecha } from "./reporteDocumentos";
 import { generarPdf } from "./reportePdf";
 import type { CosechaSemana } from "./reporteSemanal";
 

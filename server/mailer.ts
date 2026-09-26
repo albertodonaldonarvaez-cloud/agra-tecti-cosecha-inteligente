@@ -358,6 +358,8 @@ export interface MailAttachment {
   filename: string;
   content: string | Buffer;
   contentType?: string;
+  /** Con esto el archivo no se adjunta aparte: se muestra dentro del correo */
+  cid?: string;
 }
 
 /**

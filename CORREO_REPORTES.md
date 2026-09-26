@@ -104,8 +104,11 @@ Cuando está encendido, el día y la hora que se elijan (hora de México) manda:
 2. **Cosecha** — solo si esa semana hubo cajas. Fuera de temporada no se manda
    nada, para no tener cinco meses de correos en cero.
 
-Los dos llevan **el reporte completo en PDF adjunto**, dibujado por el
-servidor. No hace falta que haya un navegador abierto.
+El correo es corto a propósito: el logo, una línea con lo esencial y el
+periodo. El reporte entero va en el **PDF adjunto**, dibujado por el servidor
+—no hace falta que haya un navegador abierto—. Antes el cuerpo del correo
+repetía el reporte y el adjunto lo repetía otra vez; ahora el correo avisa y
+el documento informa.
 
 La semana que se mide es siempre la **última completa, de lunes a domingo** —
 nunca "los últimos siete días", que contaría dos veces el día del envío.
@@ -145,6 +148,7 @@ cuanto vuelva, dentro de la misma semana; no se pierde.
 | `server/emailLayout.ts` | El aspecto de **todos** los correos: cabecera, tablas, avisos, pie |
 | `server/reporteSemanal.ts` | Qué semana se mide, la consulta de cosecha, el reloj y el envío |
 | `server/reportePdf.ts` | Dibuja el PDF (pdfkit; sin navegador ni Chromium) |
+| `server/logo.ts` | El logo del membrete y del correo |
 | `server/reporteDocumentos.ts` | Qué secciones lleva cada reporte |
 | `server/correoSemanal.test.ts` | Las pruebas de todo lo anterior |
 

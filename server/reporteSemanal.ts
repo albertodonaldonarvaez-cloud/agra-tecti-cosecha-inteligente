@@ -22,25 +22,9 @@
 import { eq, sql } from "drizzle-orm";
 import { getDb } from "./db";
 import { smtpConfig, users } from "../drizzle/schema";
-import { parseRecipients, sendMail } from "./mailer";
-import {
-  BORDE,
-  GRIS,
-  ROJO,
-  TINTA,
-  VERDE,
-  VERDE_OSCURO,
-  aviso,
-  diaDeLaSemana,
-  esc,
-  fechaCorta,
-  filaDeKpis,
-  kpi,
-  num,
-  plantilla,
-  tabla,
-  titulo,
-} from "./emailLayout";
+import { type MailAttachment, parseRecipients, sendMail } from "./mailer";
+import { fechaCorta, num, plantillaAviso } from "./emailLayout";
+import { LOGO_CID, logoAdjunto } from "./logo";
 
 const TAG = "[ReporteSemanal]";
 const ZONA = "America/Mexico_City";
@@ -323,150 +307,31 @@ export async function resumenCosechaSemana(desde: string, hasta: string): Promis
 
 // ── El correo de cosecha ─────────────────────────────────────
 
-function porcentaje(parte: number, total: number): string {
-  if (!total) return "—";
-  return `${((parte / total) * 100).toFixed(1)}%`;
-}
-
-/** "+12.4% contra la semana pasada", o null si no hay con qué comparar */
-export function compararConLaPrevia(kgAhora: number, kgAntes: number): string | null {
-  if (kgAntes <= 0) return null;
-  const cambio = ((kgAhora - kgAntes) / kgAntes) * 100;
-  const signo = cambio >= 0 ? "+" : "";
-  return `${signo}${cambio.toFixed(1)}% contra la semana anterior (${num(kgAntes, 0)} kg)`;
-}
-
+/**
+ * El correo de cosecha: un aviso, no el reporte.
+ *
+ * De toda la semana sobrevive una sola cifra —los kilos— porque es la que se
+ * lee de un vistazo en el teléfono y decide si abres el documento ahora o
+ * despues. El desglose por dia, por parcela y por cortadora esta en el PDF,
+ * y repetirlo aqui solo obligaba a leerlo dos veces.
+ */
 export function renderCosechaEmailHtml(datos: {
   periodo: { desde: string; hasta: string };
   cosecha: CosechaSemana;
+  hayPdf?: boolean;
 }): string {
-  const { cosecha } = datos;
-  const t = cosecha.totales;
-  const diasConCosecha = cosecha.porDia.length;
+  const t = datos.cosecha.totales;
+  const dias = datos.cosecha.porDia.length;
 
-  const comparacion = compararConLaPrevia(t.kg, cosecha.kgSemanaPrevia);
-
-  const kpis = filaDeKpis([
-    kpi("Cajas", num(t.cajas)),
-    kpi("Kilos", num(t.kg, 0)),
-    kpi("1ra calidad", porcentaje(t.primera, t.kg)),
-    kpi("Parcelas", num(cosecha.porParcela.length)),
-    kpi("Días de corte", num(diasConCosecha)),
-  ]);
-
-  const tablaDias = tabla(
-    [
-      { titulo: "Día", sinCorte: true },
-      { titulo: "Cajas", alinear: "right", sinCorte: true },
-      { titulo: "Kilos", alinear: "right", sinCorte: true },
-      { titulo: "1ra calidad", alinear: "right", sinCorte: true },
-    ],
-    cosecha.porDia.map((d) => [
-      esc(diaDeLaSemana(d.fecha)),
-      num(d.cajas),
-      `<strong>${num(d.kg, 0)}</strong>`,
-      `${num(d.primera, 0)} <span style="color:${GRIS}">(${porcentaje(d.primera, d.kg)})</span>`,
-    ]),
-  );
-
-  const tablaParcelas = tabla(
-    [
-      { titulo: "Parcela" },
-      { titulo: "Cajas", alinear: "right", sinCorte: true },
-      { titulo: "Kilos", alinear: "right", sinCorte: true },
-      { titulo: "1ra", alinear: "right", sinCorte: true },
-      { titulo: "2da", alinear: "right", sinCorte: true },
-      { titulo: "Desperdicio", alinear: "right", sinCorte: true },
-    ],
-    cosecha.porParcela.map((p) => [
-      `<strong>${esc(p.nombre)}</strong>`,
-      num(p.cajas),
-      `<strong>${num(p.kg, 0)}</strong>`,
-      num(p.primera, 0),
-      `<span style="color:${p.segunda > 0 ? TINTA : GRIS}">${num(p.segunda, 0)}</span>`,
-      `<span style="color:${p.desperdicio > 0 ? ROJO : GRIS}">${num(p.desperdicio, 0)}</span>`,
-    ]),
-  );
-
-  const tablaCortadoras = tabla(
-    [
-      { titulo: "#", sinCorte: true },
-      { titulo: "Cortadora" },
-      { titulo: "Cajas", alinear: "right", sinCorte: true },
-      { titulo: "Kilos", alinear: "right", sinCorte: true },
-    ],
-    cosecha.porCortadora.map((c) => [
-      `<span style="color:${GRIS}">${String(c.numero).padStart(2, "0")}</span>`,
-      esc(c.nombre),
-      num(c.cajas),
-      `<strong>${num(c.kg, 0)}</strong>`,
-    ]),
-  );
-
-  const puntosDeRevision: string[] = [];
-  if (cosecha.avisos.sinParcela > 0) {
-    puntosDeRevision.push(
-      `${num(cosecha.avisos.sinParcela)} caja(s) entraron sin parcela: no suman a ninguna parcela del desglose de arriba.`,
-    );
-  }
-  if (cosecha.avisos.pesoAlto > 0) {
-    puntosDeRevision.push(
-      `${num(cosecha.avisos.pesoAlto)} caja(s) pesan más de 15 kg. Sí están contadas en los totales; vale la pena revisar si fue la báscula o la captura.`,
-    );
-  }
-  if (cosecha.avisos.sinCiclo > 0) {
-    puntosDeRevision.push(
-      `${num(cosecha.avisos.sinCiclo)} caja(s) con una fecha que no cae en ningún ciclo registrado.`,
-    );
-  }
-
-  const cuerpo = `
-    ${kpis}
-    ${
-      comparacion
-        ? `<p style="margin:14px 0 0;font-size:13px;color:${
-            t.kg >= cosecha.kgSemanaPrevia ? VERDE : ROJO
-          };font-weight:600">${esc(comparacion)}</p>`
-        : ""
-    }
-
-    ${titulo("Calidad de la semana")}
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ${BORDE};border-radius:8px">
-      <tr>
-        <td style="padding:12px 14px;font-size:13px;color:${TINTA}">
-          <strong style="color:${VERDE_OSCURO}">Primera</strong> ${num(t.primera, 0)} kg · ${porcentaje(t.primera, t.kg)}<br>
-          <strong style="color:#b45309">Segunda</strong> ${num(t.segunda, 0)} kg · ${porcentaje(t.segunda, t.kg)}<br>
-          <strong style="color:${ROJO}">Desperdicio</strong> ${num(t.desperdicio, 0)} kg · ${porcentaje(t.desperdicio, t.kg)}
-        </td>
-      </tr>
-    </table>
-
-    ${titulo("Día por día")}
-    ${tablaDias}
-
-    ${titulo("Por parcela")}
-    ${tablaParcelas}
-
-    ${cosecha.porCortadora.length > 0 ? `${titulo("Las diez cortadoras con más kilos")}${tablaCortadoras}` : ""}
-
-    ${
-      puntosDeRevision.length > 0
-        ? `${titulo("Para revisar")}${aviso(
-            `<ul style="margin:0;padding-left:18px">${puntosDeRevision
-              .map((p) => `<li style="margin-bottom:5px">${esc(p)}</li>`)
-              .join("")}</ul>`,
-          )}`
-        : ""
-    }
-  `;
-
-  return plantilla({
+  return plantillaAviso({
     titulo: "Reporte semanal de cosecha",
-    bajada: "Cajas · Kilos · Calidad · Parcelas",
-    contexto: cosecha.ciclo ? `Ciclo ${cosecha.ciclo}` : "Cosecha de la semana",
-    periodo: `${fechaCorta(datos.periodo.desde)} — ${fechaCorta(datos.periodo.hasta)}`,
-    cuerpo,
-    pie: "Los kilos son peso neto, tal como quedaron registrados en cada caja.",
+    periodo: `${datos.cosecha.ciclo ? `Ciclo ${datos.cosecha.ciclo} · ` : ""}${fechaCorta(datos.periodo.desde)} — ${fechaCorta(datos.periodo.hasta)}`,
+    frase:
+      `Se cosecharon ${num(t.kg, 0)} kg en ${num(t.cajas)} cajas, ` +
+      `a lo largo de ${dias} ${dias === 1 ? "día" : "días"} de corte.` +
+      (datos.hayPdf === false ? "" : " El desglose completo va en el PDF adjunto."),
+    adjunto: datos.hayPdf === false ? undefined : "Reporte completo en PDF",
+    logoCid: LOGO_CID,
   });
 }
 
@@ -475,23 +340,15 @@ export function renderCosechaEmailText(datos: {
   cosecha: CosechaSemana;
 }): string {
   const t = datos.cosecha.totales;
-  const lineas = [
+  return [
     "REPORTE SEMANAL DE COSECHA",
     `${fechaCorta(datos.periodo.desde)} a ${fechaCorta(datos.periodo.hasta)}`,
     "",
-    `Cajas: ${num(t.cajas)}`,
-    `Kilos: ${num(t.kg, 0)}`,
-    `Primera: ${num(t.primera, 0)} kg (${porcentaje(t.primera, t.kg)})`,
-    `Segunda: ${num(t.segunda, 0)} kg (${porcentaje(t.segunda, t.kg)})`,
-    `Desperdicio: ${num(t.desperdicio, 0)} kg (${porcentaje(t.desperdicio, t.kg)})`,
+    `Se cosecharon ${num(t.kg, 0)} kg en ${num(t.cajas)} cajas.`,
+    "El desglose completo va en el PDF adjunto.",
     "",
-    "POR PARCELA",
-  ];
-  datos.cosecha.porParcela.forEach((p) => {
-    lineas.push(`- ${p.nombre}: ${num(p.cajas)} cajas, ${num(p.kg, 0)} kg`);
-  });
-  lineas.push("", "Abre este correo en HTML para ver el desglose completo.");
-  return lineas.join("\n");
+    "Agra Tec-Ti · Correo automático, no hace falta responderlo.",
+  ].join("\n");
 }
 
 // ── El envío ─────────────────────────────────────────────────
@@ -555,13 +412,15 @@ export async function enviarReporteSemanal(opciones?: {
    * reventar el envío.
    */
   const pdfSeguro = async (armar: () => Promise<Buffer>, nombre: string) => {
+    // El logo va siempre: es la imagen en linea del cuerpo, no un adjunto
+    // que la gente vea colgando del correo.
+    const adjuntos: MailAttachment[] = [...logoAdjunto()];
     try {
-      const contenido = await armar();
-      return [{ filename: nombre, content: contenido, contentType: "application/pdf" }];
+      adjuntos.push({ filename: nombre, content: await armar(), contentType: "application/pdf" });
     } catch (e) {
       console.error(`${TAG} No se pudo generar ${nombre}, va el correo sin adjunto:`, e);
-      return undefined;
     }
+    return { adjuntos, hayPdf: adjuntos.some((a) => a.filename === nombre) };
   };
 
   // 1. Actividades de campo — siempre
@@ -569,16 +428,10 @@ export async function enviarReporteSemanal(opciones?: {
     const { buildActivityReport } = await import("./activityReport");
     const { renderActivityEmailHtml, renderActivityEmailText } = await import("./activityReportEmail");
     const datos = await buildActivityReport({ fromDate: semana.desde, toDate: semana.hasta });
-    const html = renderActivityEmailHtml({
-      ...datos,
-      scopeLabel: "Todas las parcelas",
-      hasAttachment: false,
-    });
-    const text = renderActivityEmailText({ ...datos, scopeLabel: "Todas las parcelas" });
 
     const { generarPdf } = await import("./reportePdf");
     const { documentoDeActividades } = await import("./reporteDocumentos");
-    const adjuntos = await pdfSeguro(
+    const { adjuntos, hayPdf } = await pdfSeguro(
       () => generarPdf(documentoDeActividades({ ...datos, scopeLabel: "Todas las parcelas" })),
       `actividades-${semana.desde}_${semana.hasta}.pdf`,
     );
@@ -586,8 +439,8 @@ export async function enviarReporteSemanal(opciones?: {
     const r = await sendMail({
       to: destinatarios,
       subject: `Actividades de campo · semana del ${fechaCorta(semana.desde)} al ${fechaCorta(semana.hasta)}`,
-      html,
-      text,
+      html: renderActivityEmailHtml({ ...datos, scopeLabel: "Todas las parcelas", hasAttachment: hayPdf }),
+      text: renderActivityEmailText({ ...datos, scopeLabel: "Todas las parcelas" }),
       attachments: adjuntos,
       kind: "semanal-actividades",
       userId: opciones?.usuarioId ?? null,
@@ -607,7 +460,7 @@ export async function enviarReporteSemanal(opciones?: {
       if (cosecha) {
         const { generarPdf } = await import("./reportePdf");
         const { documentoDeCosecha } = await import("./reporteDocumentos");
-        const adjuntos = await pdfSeguro(
+        const { adjuntos, hayPdf } = await pdfSeguro(
           () => generarPdf(documentoDeCosecha({ periodo: semana, cosecha })),
           `cosecha-${semana.desde}_${semana.hasta}.pdf`,
         );
@@ -615,7 +468,7 @@ export async function enviarReporteSemanal(opciones?: {
         const r = await sendMail({
           to: destinatarios,
           subject: `Cosecha · semana del ${fechaCorta(semana.desde)} al ${fechaCorta(semana.hasta)} — ${num(cosecha.totales.kg, 0)} kg`,
-          html: renderCosechaEmailHtml({ periodo: semana, cosecha }),
+          html: renderCosechaEmailHtml({ periodo: semana, cosecha, hayPdf }),
           text: renderCosechaEmailText({ periodo: semana, cosecha }),
           attachments: adjuntos,
           kind: "semanal-cosecha",
