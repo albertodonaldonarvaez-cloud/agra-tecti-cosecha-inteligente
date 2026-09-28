@@ -8,7 +8,7 @@ import {
   BookOpen, Plus, Search, Filter, Calendar, User, Clock, MapPin, Package, Wrench,
   Trash2, Edit3, ChevronDown, ChevronUp, Save, X, Droplets, FlaskConical, Scissors,
   Bug, Sprout, CloudSun, Thermometer, Camera, CheckCircle2, AlertCircle, Pause,
-  Leaf, Shield, Warehouse, ArrowDown, Info, UsersRound,
+  Leaf, Shield, Warehouse, ArrowDown, Info, UsersRound, Smartphone, Monitor,
 } from "lucide-react";
 
 // ===== CONSTANTES =====
@@ -111,6 +111,9 @@ function FieldNotebookContent() {
   const [filterStatus, setFilterStatus] = useState("");
   const [filterStartDate, setFilterStartDate] = useState("");
   const [filterEndDate, setFilterEndDate] = useState("");
+  // Cuenta que registró la actividad. "app" / "web" filtran por origen;
+  // un número filtra por esa cuenta en particular.
+  const [filterAuthor, setFilterAuthor] = useState("");
 
   // Formulario
   const [formData, setFormData] = useState({
@@ -134,9 +137,17 @@ function FieldNotebookContent() {
 
   // Queries
   const { data: activities, isLoading, refetch } = trpc.fieldNotebook.list.useQuery(
-    { activityType: filterType || undefined, status: filterStatus || undefined, startDate: filterStartDate || undefined, endDate: filterEndDate || undefined },
+    {
+      activityType: filterType || undefined,
+      status: filterStatus || undefined,
+      startDate: filterStartDate || undefined,
+      endDate: filterEndDate || undefined,
+      createdByUserId: /^\d+$/.test(filterAuthor) ? Number(filterAuthor) : undefined,
+      origen: filterAuthor === "app" || filterAuthor === "web" ? filterAuthor : undefined,
+    },
     { staleTime: 60_000 }
   );
+  const { data: cuentasQueRegistran } = trpc.fieldNotebook.cuentasQueRegistran.useQuery(undefined, { staleTime: 120_000 });
   const { data: stats } = trpc.fieldNotebook.stats.useQuery(undefined, { staleTime: 120_000 });
   const { data: allParcels } = trpc.parcels.listActive.useQuery(undefined, { staleTime: 300_000 });
   const { data: warehouseProductsList } = trpc.warehouse.listProducts.useQuery({ }, { staleTime: 120_000 });
@@ -315,6 +326,8 @@ function FieldNotebookContent() {
     if (!searchTerm.trim()) return activities;
     const term = searchTerm.toLowerCase();
     return activities.filter((a: any) =>
+      a.registradoPor?.nombre?.toLowerCase().includes(term) ||
+      a.registradoPor?.correo?.toLowerCase().includes(term) ||
       a.assignments?.some((as: any) => as.name.toLowerCase().includes(term)) ||
       a.description?.toLowerCase().includes(term) ||
       a.activitySubtype?.toLowerCase().includes(term) ||
@@ -405,7 +418,7 @@ function FieldNotebookContent() {
             <Filter className="w-4 h-4 text-gray-500" />
             <span className="text-sm font-semibold text-gray-600">Filtros</span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input type="text" placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
@@ -425,6 +438,20 @@ function FieldNotebookContent() {
               className="px-3 py-2 text-sm border border-gray-200 rounded-xl bg-white/70 focus:ring-2 focus:ring-green-300 outline-none" />
             <input type="date" value={filterEndDate} onChange={(e) => setFilterEndDate(e.target.value)}
               className="px-3 py-2 text-sm border border-gray-200 rounded-xl bg-white/70 focus:ring-2 focus:ring-green-300 outline-none" />
+            {/* Quién lo registró: las cuentas salen de las actividades mismas,
+                así que aquí solo aparece quien de verdad ha capturado algo */}
+            <select value={filterAuthor} onChange={(e) => setFilterAuthor(e.target.value)}
+              className="px-3 py-2 text-sm border border-gray-200 rounded-xl bg-white/70 focus:ring-2 focus:ring-green-300 outline-none"
+              title="Cuenta que registró la actividad">
+              <option value="">Todas las cuentas</option>
+              <option value="app">📱 Solo desde la app</option>
+              <option value="web">💻 Solo desde la web</option>
+              {((cuentasQueRegistran as any[]) || []).map((c: any) => (
+                <option key={c.id} value={String(c.id)}>
+                  {c.emoji} {c.nombre} ({c.total})
+                </option>
+              ))}
+            </select>
           </div>
         </GlassCard>
 
@@ -894,6 +921,7 @@ function FieldNotebookContent() {
                             <Calendar className="w-3 h-3" />
                             {(() => { const raw = activity.activityDate instanceof Date ? activity.activityDate.toISOString().slice(0, 10) : String(activity.activityDate).slice(0, 10); return new Date(raw + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" }); })()}
                           </span>
+                          <SelloDeCuenta activity={activity} esMia={user?.id === activity.createdByUserId} />
                           {activity.assignments?.length > 0 && (
                             <span className="flex items-center gap-1"><UsersRound className="w-3 h-3" />{activity.assignments.map((a: any) => a.name).join(", ")}</span>
                           )}
@@ -1091,8 +1119,31 @@ function FieldNotebookContent() {
                         onChanged={refetch}
                       />
 
-                      <div className="text-xs text-gray-400 pt-2 border-t border-gray-100">
-                        Registrado el {new Date(activity.createdAt).toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      {/* De dónde salió el registro: la cuenta y el aparato */}
+                      <div className="pt-2 border-t border-gray-100 flex items-center gap-2 flex-wrap text-xs text-gray-400">
+                        {activity.registradoPor ? (
+                          <>
+                            <span
+                              className="flex h-7 w-7 items-center justify-center rounded-full text-sm flex-shrink-0"
+                              style={{ backgroundColor: (activity.registradoPor.color || "#16a34a") + "20" }}
+                            >
+                              {activity.registradoPor.emoji}
+                            </span>
+                            <span>
+                              Registrado por{" "}
+                              <span className="font-semibold text-gray-600">{activity.registradoPor.nombre}</span>
+                              {activity.registradoPor.correo && (
+                                <span className="text-gray-400"> · {activity.registradoPor.correo}</span>
+                              )}
+                              {" "}
+                              {activity.origen === "app" ? "desde la app de campo" : "desde la web"}
+                            </span>
+                          </>
+                        ) : (
+                          <span>Registrado {activity.origen === "app" ? "desde la app de campo" : "desde la web"} — sin cuenta guardada</span>
+                        )}
+                        <span className="text-gray-300">·</span>
+                        <span>{new Date(activity.createdAt).toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
                       </div>
                     </div>
                   )}
@@ -1103,6 +1154,43 @@ function FieldNotebookContent() {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * La cuenta que registró la actividad, en la fila principal.
+ *
+ * Va en la fila de arriba y no solo en el detalle porque lo que se quiere
+ * saber de un vistazo, recorriendo la lista, es quién subió qué. El punto
+ * verde marca la app de campo: ahí cada quien entra con su cuenta, así que
+ * el registro trae nombre y apellido sin que nadie lo escriba.
+ */
+function SelloDeCuenta({ activity, esMia }: { activity: any; esMia: boolean }) {
+  const cuenta = activity.registradoPor;
+  const desdeApp = activity.origen === "app";
+  const titulo = cuenta
+    ? `${cuenta.nombre}${cuenta.correo ? ` · ${cuenta.correo}` : ""} — ${desdeApp ? "desde la app de campo" : "desde la web"}`
+    : `${desdeApp ? "Desde la app de campo" : "Desde la web"} — sin cuenta guardada`;
+
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white/60 px-2 py-0.5"
+      title={titulo}
+    >
+      <span
+        className="flex h-4 w-4 items-center justify-center rounded-full text-[10px] leading-none flex-shrink-0"
+        style={{ backgroundColor: (cuenta?.color || "#9ca3af") + "20" }}
+      >
+        {cuenta?.emoji || "👤"}
+      </span>
+      <span className="font-medium text-gray-600">{cuenta?.nombre || "Sin cuenta"}</span>
+      {esMia && <span className="text-green-600">(tú)</span>}
+      {desdeApp ? (
+        <Smartphone className="w-3 h-3 text-green-600" />
+      ) : (
+        <Monitor className="w-3 h-3 text-gray-400" />
+      )}
+    </span>
   );
 }
 

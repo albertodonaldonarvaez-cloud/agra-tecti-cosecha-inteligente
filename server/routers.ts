@@ -9,7 +9,8 @@ import * as dbExt from "./db_extended";
 import * as webodm from "./webodmService";
 import { getDb } from "./db";
 import { users, boxes, harvesters, parcels, parcelDetails, parcelAiAnalysis, crops, cropVarieties, productionCycles, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, fieldActivityWorkSessions, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos, telegramLinkCodes, collaborators, collaboratorRoles, collaboratorLinkCodes, fieldActivityAssignments, labelPrintHistory, weeklySummaries, appReleases, userActivityLogs, ACTIVITY_ACTIONS, PRODUCT_UNITS } from "../drizzle/schema";
-import { eq, desc, asc, and, gte, lte, inArray, isNull, sql } from "drizzle-orm";
+import { eq, desc, asc, and, gte, lte, inArray, isNull, isNotNull, sql } from "drizzle-orm";
+import { autoriaDe, cuentasPorId } from "./autoriaLibreta";
 
 // Fecha local de México "YYYY-MM-DD" (el negocio opera en America/Mexico_City)
 function todayMx(): string {
@@ -2847,6 +2848,9 @@ export const appRouter = router({
         activityType: z.string().optional(),
         parcelId: z.number().optional(),
         status: z.string().optional(),
+        // Cuenta que registró la actividad, y si se capturó desde la app o la web
+        createdByUserId: z.number().optional(),
+        origen: z.enum(["app", "web"]).optional(),
       }).optional())
       .query(async ({ input }) => {
         const drizzle = await getDb();
@@ -2855,12 +2859,19 @@ export const appRouter = router({
         if (input?.status) filters.push(eq(fieldActivities.status, input.status as any));
         if (input?.startDate) filters.push(gte(fieldActivities.activityDate, input.startDate));
         if (input?.endDate) filters.push(lte(fieldActivities.activityDate, input.endDate));
+        if (input?.createdByUserId) filters.push(eq(fieldActivities.createdByUserId, input.createdByUserId));
+        // El clientUuid solo lo genera la app; la web lo deja en null
+        if (input?.origen === "app") filters.push(isNotNull(fieldActivities.clientUuid));
+        if (input?.origen === "web") filters.push(isNull(fieldActivities.clientUuid));
 
         let query = drizzle.select().from(fieldActivities).orderBy(desc(fieldActivities.activityDate), desc(fieldActivities.id));
         if (filters.length > 0) {
           query = query.where(and(...filters)) as any;
         }
         const activities = await query;
+
+        // Las cuentas que registraron, en una sola consulta para todas las filas
+        const cuentas = await cuentasPorId(drizzle, activities.map((a: any) => a.createdByUserId));
 
         // Enriquecer con parcelas, productos, herramientas, fotos, asignaciones y jornadas
         const enriched = await Promise.all(activities.map(async (act) => {
@@ -2894,6 +2905,7 @@ export const appRouter = router({
 
           return {
             ...act,
+            ...autoriaDe(act, cuentas),
             parcels: parcelNames,
             products: actProducts,
             tools: actTools,
@@ -2932,8 +2944,38 @@ export const appRouter = router({
           parcelNames = parcelRows;
         }
 
-        return { ...activity, parcels: parcelNames, products: actProducts, tools: actTools, photos: actPhotos };
+        const cuentas = await cuentasPorId(drizzle, [activity.createdByUserId]);
+
+        return { ...activity, ...autoriaDe(activity, cuentas), parcels: parcelNames, products: actProducts, tools: actTools, photos: actPhotos };
       }),
+
+    // Cuentas que han registrado actividades, para el filtro de la pantalla.
+    // Sale de las actividades y no de la lista de usuarios: así lo puede ver
+    // quien no es admin, y no aparecen cuentas que nunca capturaron nada.
+    cuentasQueRegistran: protectedProcedure.query(async () => {
+      const drizzle = await getDb();
+      if (!drizzle) return [];
+
+      const conteos = await drizzle
+        .select({
+          userId: fieldActivities.createdByUserId,
+          total: sql<number>`COUNT(*)`,
+          desdeApp: sql<number>`SUM(CASE WHEN ${fieldActivities.clientUuid} IS NOT NULL THEN 1 ELSE 0 END)`,
+        })
+        .from(fieldActivities)
+        .groupBy(fieldActivities.createdByUserId);
+
+      const cuentas = await cuentasPorId(drizzle, conteos.map((c: any) => c.userId));
+
+      return conteos
+        .map((c: any) => {
+          const cuenta = cuentas.get(Number(c.userId));
+          if (!cuenta) return null;
+          return { ...cuenta, total: Number(c.total) || 0, desdeApp: Number(c.desdeApp) || 0 };
+        })
+        .filter((c: any): c is NonNullable<typeof c> => c !== null)
+        .sort((a, b) => b.total - a.total);
+    }),
 
     // Crear nueva actividad
     create: protectedProcedure
