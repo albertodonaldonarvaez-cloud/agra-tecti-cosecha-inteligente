@@ -45,8 +45,17 @@ export function FloatingNav({ isAdmin = false }: FloatingNavProps) {
     return true;
   });
 
-  // Agregar páginas de admin si es administrador
-  const adminPages = isAdmin ? ADMIN_ONLY_PAGES.filter(p => p.showInNav) : [];
+  // Lo que ve cualquiera con permiso va primero; lo que solo ve el admin se
+  // junta al final, a la derecha, en su propio grupo. Antes iban intercalados
+  // por `order` (Cortadoras, Parcelas y Editor en medio de Libreta y Notas) y
+  // el admin no distinguía las pantallas de operación de las de administración.
+  const generalPages = filteredItems.filter(page => !page.adminOnly);
+  const adminPages = isAdmin
+    ? [
+        ...filteredItems.filter(page => page.adminOnly),
+        ...ADMIN_ONLY_PAGES.filter(p => p.showInNav),
+      ]
+    : [];
 
   const handleLogout = () => {
     if (confirm("¿Estás seguro de que deseas cerrar sesión?")) {
@@ -121,7 +130,7 @@ export function FloatingNav({ isAdmin = false }: FloatingNavProps) {
             }}
           >
             {/* Páginas con permisos */}
-            {filteredItems.map((page) => {
+            {generalPages.map((page) => {
               const Icon = page.icon;
               const isActive = location === page.path;
               
@@ -142,28 +151,38 @@ export function FloatingNav({ isAdmin = false }: FloatingNavProps) {
               );
             })}
 
-            {/* Páginas solo de admin */}
-            {adminPages.map((page) => {
-              const Icon = page.icon;
-              const isActive = location === page.path;
-              
-              return (
-                <Link
-                  key={page.path}
-                  href={page.path}
-                  className={cn(
-                    "flex items-center justify-center rounded-full p-3 transition-all duration-300 flex-shrink-0",
-                    isActive
-                      ? "bg-white/30 text-green-700 shadow-md backdrop-blur-sm border border-green-400/50"
-                      : "text-green-600 hover:bg-white/20 hover:text-green-700"
-                  )}
-                  title={page.label}
+            {/* Páginas solo de admin: separadas y agrupadas a la derecha */}
+            {adminPages.length > 0 && (
+              <>
+                <div className="h-6 w-px bg-green-300/30 flex-shrink-0" />
+                <div
+                  className="flex items-center gap-1 rounded-full bg-green-900/5 p-0.5 ring-1 ring-inset ring-green-300/40 flex-shrink-0"
+                  title="Solo administradores"
                 >
-                  <Icon className="h-5 w-5" />
-                </Link>
-              );
-            })}
-            
+                  {adminPages.map((page) => {
+                    const Icon = page.icon;
+                    const isActive = location === page.path;
+
+                    return (
+                      <Link
+                        key={page.path}
+                        href={page.path}
+                        className={cn(
+                          "flex items-center justify-center rounded-full p-3 transition-all duration-300 flex-shrink-0",
+                          isActive
+                            ? "bg-white/30 text-green-700 shadow-md backdrop-blur-sm border border-green-400/50"
+                            : "text-green-600 hover:bg-white/20 hover:text-green-700"
+                        )}
+                        title={`${page.label} (solo admin)`}
+                      >
+                        <Icon className="h-5 w-5" />
+                      </Link>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
             {/* Separador */}
             <div className="h-6 w-px bg-green-300/30 flex-shrink-0" />
 
