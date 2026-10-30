@@ -7,7 +7,7 @@
  * otro, y eso no se nota hasta que alguien compara dos cosechas.
  */
 import { describe, it, expect } from "vitest";
-import { resolverCiclo, finDeCiclo, rangosDeCiclo, cicloDeFecha, type CicloRango } from "../shared/ciclos";
+import { resolverCiclo, finDeCiclo, rangosDeCiclo, cicloDeFecha, ventanaDeFinDeCosecha, cicloQueQuedaAtras, type CicloRango } from "../shared/ciclos";
 
 const HOY = "2026-09-08";
 
@@ -158,5 +158,49 @@ describe("rangosDeCiclo", () => {
   it("sin ciclos no hay rangos ni fecha que pertenezca a algo", () => {
     expect(rangosDeCiclo([], HOY)).toEqual([]);
     expect(cicloDeFecha("2026-08-01", [])).toBeNull();
+  });
+});
+
+describe("fin de cosecha deducido", () => {
+  const HOY = "2026-10-29";
+  // La temporada pasada se cerró sola al arrancar la nueva con la poda
+  const pasada: CicloRango = { id: 1, startDate: "2025-09-01", endDate: "2026-08-31" };
+  const actual: CicloRango = { id: 2, startDate: "2026-09-01", endDate: null };
+
+  it("en un ciclo cerrado se busca hasta el día antes del siguiente", () => {
+    const rangos = rangosDeCiclo([pasada, actual], HOY);
+    expect(ventanaDeFinDeCosecha(1, rangos, HOY)).toEqual({ desde: "2025-09-01", hasta: "2026-08-31" });
+  });
+
+  it("el ciclo en curso no tiene fin de cosecha que deducir", () => {
+    const rangos = rangosDeCiclo([pasada, actual], HOY);
+    expect(ventanaDeFinDeCosecha(2, rangos, HOY)).toBeNull();
+  });
+
+  it("si otro ciclo se le encimó, la búsqueda para donde arranca el otro", () => {
+    // Mal capturado: la pasada dice terminar después de que arrancó la actual
+    const encimada: CicloRango = { id: 1, startDate: "2025-09-01", endDate: "2026-09-15" };
+    const rangos = rangosDeCiclo([encimada, actual], HOY);
+    expect(ventanaDeFinDeCosecha(1, rangos, HOY)?.hasta).toBe("2026-08-31");
+  });
+
+  it("al arrancar un ciclo, el abierto anterior se busca hasta el día previo", () => {
+    const abierta: CicloRango = { id: 2, startDate: "2026-09-01", endDate: null };
+    const { ciclo, ventana } = cicloQueQuedaAtras("2027-08-20", [pasada, abierta]);
+    expect(ciclo?.id).toBe(2);
+    expect(ventana).toEqual({ desde: "2026-09-01", hasta: "2027-08-19" });
+  });
+
+  it("si el anterior ya estaba cerrado, se busca solo hasta su propio fin", () => {
+    const { ciclo, ventana } = cicloQueQuedaAtras("2026-09-10", [pasada]);
+    expect(ciclo?.id).toBe(1);
+    expect(ventana.hasta).toBe("2026-08-31");
+  });
+
+  it("sin ciclos antes, se busca en toda la historia", () => {
+    expect(cicloQueQuedaAtras("2025-09-01", [pasada, actual])).toEqual({
+      ciclo: null,
+      ventana: { desde: null, hasta: "2025-08-31" },
+    });
   });
 });

@@ -158,3 +158,66 @@ export function cicloDeFecha(fecha: string, rangos: RangoCiclo[]): number | null
   }
   return null;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// El fin de cosecha que se deduce solo
+//
+// Casi nadie captura a mano cuándo terminó la cosecha: se poda, se arranca el
+// ciclo nuevo, y el anterior se queda con el fin de cosecha en blanco. Pero el
+// dato existe — es el día de la última caja antes de que arrancara el nuevo —
+// y se puede deducir igual que el inicio de cosecha se deduce con la primera.
+//
+// Aquí solo se decide EN QUÉ PEDAZO DE CALENDARIO buscar esa última caja; la
+// búsqueda la hace el servidor contra la tabla de cajas.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface VentanaDeCosecha {
+  /** Desde qué día buscar; null = desde el principio de la historia */
+  desde: string | null;
+  /** Último día que todavía cuenta, inclusive */
+  hasta: string;
+}
+
+/**
+ * Dónde buscar la última caja de un ciclo que ya terminó.
+ *
+ * Devuelve null mientras el ciclo siga en curso: la cosecha puede continuar y
+ * "la última caja hasta hoy" no es un fin de cosecha, es solo la de ayer.
+ */
+export function ventanaDeFinDeCosecha(
+  cicloId: number,
+  rangos: RangoCiclo[],
+  hoy: string,
+): VentanaDeCosecha | null {
+  const r = rangos.find((x) => x.id === cicloId);
+  if (!r || r.hasta < r.desde) return null; // rango vacío por un traslape
+  if (r.hasta >= hoy) return null;
+  return { desde: r.desde, hasta: r.hasta };
+}
+
+/**
+ * Qué ciclo queda atrás cuando arranca uno nuevo en `fecha`, y dónde buscar su
+ * última caja.
+ *
+ * Es el ciclo más reciente que arrancó antes. Si sigue abierto, el alta del
+ * nuevo lo cierra el día anterior (ver cycles.create), así que su cosecha
+ * llega hasta ese día; si ya estaba cerrado, hasta su propio fin. Sin ciclos
+ * anteriores se busca en toda la historia: la última cosecha antes de la poda
+ * sigue siendo un dato útil aunque no tenga ciclo.
+ */
+export function cicloQueQuedaAtras<T extends CicloRango>(
+  fecha: string,
+  ciclos: T[],
+): { ciclo: T | null; ventana: VentanaDeCosecha } {
+  const diaPrevio = diaAnterior(fecha);
+  let anterior: T | null = null;
+  for (const c of ciclos) {
+    if (c.startDate >= fecha) continue;
+    if (!anterior || leGana(anterior, c)) anterior = c;
+  }
+
+  if (!anterior) return { ciclo: null, ventana: { desde: null, hasta: diaPrevio } };
+
+  const fin = anterior.endDate && anterior.endDate < diaPrevio ? anterior.endDate : diaPrevio;
+  return { ciclo: anterior, ventana: { desde: anterior.startDate, hasta: fin } };
+}

@@ -1,7 +1,7 @@
 import { eq, getTableColumns } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users, apiConfig, harvesters, boxes, InsertBox, userActivityLogs, productionCycles } from "../drizzle/schema";
-import { rangosDeCiclo, cicloDeFecha, type RangoCiclo } from "../shared/ciclos";
+import { rangosDeCiclo, cicloDeFecha, type RangoCiclo, type VentanaDeCosecha } from "../shared/ciclos";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -184,6 +184,32 @@ export async function getCiclosDeCajas(): Promise<CicloDeCajas[]> {
     const ciclo = filas.find((f) => f.id === r.id)!;
     return { ...r, name: ciclo.name, esElDeHoy: hoy >= r.desde && hoy <= r.hasta };
   });
+}
+
+/**
+ * Último día con cajas dentro de una ventana de fechas, "YYYY-MM-DD", o null
+ * si no hubo cosecha en ella.
+ *
+ * Con esto se deduce el fin de cosecha de un ciclo que nadie capturó. Los
+ * límites van como texto contra submissionTime, igual que en
+ * condicionesDeCiclo, para que MySQL use el índice; y el día sale formateado
+ * por MySQL, con el mismo criterio que DATE() en las gráficas.
+ */
+export async function ultimoDiaConCosecha(ventana: VentanaDeCosecha): Promise<string | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const { sql } = await import("drizzle-orm");
+
+  const desde = ventana.desde ? sql` AND ${boxes.submissionTime} >= ${ventana.desde + " 00:00:00"}` : sql``;
+  const resultado: any = await db.execute(sql`
+    SELECT DATE_FORMAT(MAX(${boxes.submissionTime}), '%Y-%m-%d') AS dia
+      FROM ${boxes}
+     WHERE ${boxes.archived} = 0
+       AND ${boxes.submissionTime} < ${diaSiguiente(ventana.hasta) + " 00:00:00"}
+       ${desde}
+  `);
+  const fila = (resultado?.[0] as any[])?.[0];
+  return fila?.dia ? String(fila.dia) : null;
 }
 
 /**

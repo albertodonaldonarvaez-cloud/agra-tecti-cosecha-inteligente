@@ -11,6 +11,7 @@ import { getDb } from "./db";
 import { users, boxes, harvesters, parcels, parcelDetails, parcelAiAnalysis, crops, cropVarieties, productionCycles, fieldActivities, fieldActivityParcels, fieldActivityProducts, fieldActivityTools, fieldActivityPhotos, fieldActivityWorkSessions, warehouseSuppliers, warehouseProducts, warehouseTools, warehouseProductMovements, warehouseToolAssignments, fieldNotes, fieldNotePhotos, telegramLinkCodes, collaborators, collaboratorRoles, collaboratorLinkCodes, fieldActivityAssignments, labelPrintHistory, weeklySummaries, appReleases, userActivityLogs, ACTIVITY_ACTIONS, PRODUCT_UNITS } from "../drizzle/schema";
 import { eq, desc, asc, and, gte, lte, inArray, isNull, isNotNull, sql } from "drizzle-orm";
 import { autoriaDe, cuentasPorId } from "./autoriaLibreta";
+import { cicloQueQuedaAtras, rangosDeCiclo, ventanaDeFinDeCosecha } from "../shared/ciclos";
 
 // Fecha local de México "YYYY-MM-DD" (el negocio opera en America/Mexico_City)
 function todayMx(): string {
@@ -2417,6 +2418,9 @@ export const appRouter = router({
         .orderBy(desc(productionCycles.startDate), desc(productionCycles.id));
 
       const today = todayMx();
+      // El pedazo de calendario de cada ciclo, ya resuelto el traslape: es de
+      // donde sale hasta qué día buscar su última caja
+      const rangos = rangosDeCiclo(allCycles, today);
 
       const cycles = await Promise.all(
         allCycles.map(async (c) => {
@@ -2424,11 +2428,22 @@ export const appRouter = router({
           // (fin de cosecha si existe; si no, fin de ciclo; si sigue abierto, hasta hoy)
           const rangeEnd = c.harvestEndDate ?? c.endDate ?? undefined;
           const stats = await db.getDashboardStats(c.startDate, rangeEnd);
+
+          // Fin de cosecha: el capturado a mano o, en un ciclo que ya terminó,
+          // el día de la última caja antes de que arrancara el siguiente. Un
+          // ciclo en curso no tiene fin detectado: su cosecha puede seguir.
+          let harvestEndDetected: string | null = c.harvestEndDate ?? null;
+          if (!harvestEndDetected) {
+            const ventana = ventanaDeFinDeCosecha(c.id, rangos, today);
+            if (ventana) harvestEndDetected = await db.ultimoDiaConCosecha(ventana);
+          }
+
           return {
             ...c,
             stats,
             // Inicio de cosecha: manual si se capturó, si no la primera caja del ciclo
             harvestStartDetected: c.harvestStartDate ?? stats?.firstDate ?? null,
+            harvestEndDetected,
             isActive: !c.endDate || c.endDate >= today,
           };
         })
@@ -2641,6 +2656,34 @@ export const appRouter = router({
         return { cycles };
       }),
 
+    /**
+     * El último día que se cosechó antes de que arranque un ciclo en `fecha`.
+     *
+     * Lo usa el formulario de ciclo nuevo para decir, antes de guardar, cómo
+     * quedaría cerrada la cosecha anterior: qué ciclo se cierra, cuándo fue su
+     * última caja y cuántos días van sin cosecha hasta la poda.
+     */
+    ultimaCosechaAntesDe: protectedProcedure
+      .input(z.object({ fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }))
+      .query(async ({ input }) => {
+        const drizzle = await getDb();
+        if (!drizzle) return null;
+        const ciclos = await drizzle
+          .select({ id: productionCycles.id, name: productionCycles.name, startDate: productionCycles.startDate, endDate: productionCycles.endDate })
+          .from(productionCycles);
+        const { ciclo, ventana } = cicloQueQuedaAtras(input.fecha, ciclos);
+        const dia = await db.ultimoDiaConCosecha(ventana);
+        return {
+          dia,
+          diasSinCosecha: dia
+            ? Math.round((new Date(input.fecha + "T12:00:00").getTime() - new Date(dia + "T12:00:00").getTime()) / 86400000)
+            : null,
+          ciclo: ciclo ? { id: ciclo.id, name: ciclo.name, startDate: ciclo.startDate } : null,
+          // El ciclo anterior sigue abierto: al guardar se cerrará este día
+          cierre: ciclo && !ciclo.endDate ? addDaysStr(input.fecha, -1) : null,
+        };
+      }),
+
     create: adminProcedure
       .input(z.object({
         name: z.string().min(1).max(255),
@@ -2650,6 +2693,16 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         const drizzle = await getDb();
         if (!drizzle) throw new Error("Base de datos no disponible");
+
+        // La última cosecha del ciclo que queda atrás, para decirla al guardar.
+        // No se escribe en su fin de cosecha: se sigue deduciendo de las cajas
+        // en cada consulta, así una caja rezagada que se sincronice después
+        // también cuenta (y si alguien lo captura a mano, manda lo capturado).
+        const todos = await drizzle
+          .select({ id: productionCycles.id, name: productionCycles.name, startDate: productionCycles.startDate, endDate: productionCycles.endDate })
+          .from(productionCycles);
+        const atras = cicloQueQuedaAtras(input.startDate, todos);
+        const ultimaCosecha = await db.ultimoDiaConCosecha(atras.ventana);
 
         // Cerrar automáticamente los ciclos que sigan abiertos:
         // terminan el día anterior al inicio del nuevo
@@ -2670,8 +2723,8 @@ export const appRouter = router({
 
         const dayBefore = addDaysStr(input.startDate, -1);
         for (const c of open) {
-          // Solo se fija el fin de ciclo; el fin de cosecha no se inventa
-          // (queda vacío si nunca se capturó — se puede editar después)
+          // Solo se fija el fin de ciclo; el fin de cosecha se deduce de las
+          // cajas al consultar (ver overview) o se captura a mano
           await drizzle
             .update(productionCycles)
             .set({ endDate: dayBefore })
@@ -2689,6 +2742,9 @@ export const appRouter = router({
           success: true,
           id: Number((result as any)[0].insertId),
           closedPrevious: open.length,
+          ultimaCosecha: ultimaCosecha
+            ? { dia: ultimaCosecha, ciclo: atras.ciclo?.name ?? null }
+            : null,
         };
       }),
 

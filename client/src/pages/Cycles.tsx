@@ -43,6 +43,8 @@ interface EditForm {
   harvestEndDate: string;
   endDate: string;
   notes: string;
+  /** Lo que se deduce de las cajas si el fin de cosecha se deja vacío */
+  finDetectado: string | null;
 }
 
 export default function Cycles() {
@@ -75,13 +77,21 @@ function CyclesContent() {
     utils.boxes.availableMonths.invalidate();
   };
 
+  // Al escoger la fecha de inicio, cuál fue la última cosecha antes de ella:
+  // así se ve, antes de guardar, cómo queda cerrada la temporada anterior
+  const fechaValida = /^\d{4}-\d{2}-\d{2}$/.test(createStart);
+  const { data: cosechaPrevia, isFetching: buscandoCosechaPrevia } = trpc.cycles.ultimaCosechaAntesDe.useQuery(
+    { fecha: createStart },
+    { enabled: showCreate && fechaValida, staleTime: 60_000 }
+  );
+
   const createMutation = trpc.cycles.create.useMutation({
     onSuccess: (data) => {
-      toast.success(
-        data.closedPrevious > 0
-          ? `Ciclo creado (se cerró ${data.closedPrevious} ciclo anterior)`
-          : "Ciclo creado"
-      );
+      const cerrado = data.closedPrevious > 0 ? ` Se cerró ${data.closedPrevious} ciclo anterior.` : "";
+      const ultima = data.ultimaCosecha
+        ? ` Última cosecha${data.ultimaCosecha.ciclo ? ` de "${data.ultimaCosecha.ciclo}"` : ""}: ${formatDate(data.ultimaCosecha.dia)}.`
+        : "";
+      toast.success(`Ciclo creado.${cerrado}${ultima}`);
       setShowCreate(false);
       setCreateName("");
       setCreateNotes("");
@@ -128,6 +138,7 @@ function CyclesContent() {
       harvestEndDate: c.harvestEndDate ?? "",
       endDate: c.endDate ?? "",
       notes: c.notes ?? "",
+      finDetectado: c.harvestEndDate ? null : c.harvestEndDetected ?? null,
     });
   };
 
@@ -230,10 +241,33 @@ function CyclesContent() {
                 />
               </div>
             </div>
-            {cycles.some((c) => c.isActive) && (
-              <p className="mt-3 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-3">
-                ⚠️ Al crear este ciclo, el ciclo abierto actual se cerrará automáticamente con fecha del día anterior al nuevo inicio.
-              </p>
+            {/* Cómo queda la temporada anterior: la última caja antes de la
+                poda es su fin de cosecha, sin que nadie tenga que capturarlo */}
+            {fechaValida && (
+              <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                <Flag className="mt-0.5 h-4 w-4 shrink-0" />
+                {buscandoCosechaPrevia && !cosechaPrevia ? (
+                  <span>Buscando la última cosecha antes del {formatDate(createStart)}…</span>
+                ) : cosechaPrevia?.dia ? (
+                  <span>
+                    Último día de cosecha antes del inicio: <strong>{formatDate(cosechaPrevia.dia)}</strong>
+                    {cosechaPrevia.ciclo ? <> en <strong>{cosechaPrevia.ciclo.name}</strong></> : null}
+                    {cosechaPrevia.diasSinCosecha != null && cosechaPrevia.diasSinCosecha > 1
+                      ? ` (${cosechaPrevia.diasSinCosecha} días antes de la poda)`
+                      : ""}
+                    .{" "}
+                    {cosechaPrevia.cierre
+                      ? `Ese ciclo se cerrará el ${formatDate(cosechaPrevia.cierre)} y su fin de cosecha quedará en esa fecha.`
+                      : "Queda como su fin de cosecha si no se capturó otro."}
+                  </span>
+                ) : (
+                  <span>
+                    No hay cajas registradas antes del {formatDate(createStart)}
+                    {cosechaPrevia?.ciclo ? ` en ${cosechaPrevia.ciclo.name}` : ""}.
+                    {cosechaPrevia?.cierre ? ` Ese ciclo se cerrará el ${formatDate(cosechaPrevia.cierre)}.` : ""}
+                  </span>
+                )}
+              </div>
             )}
             <div className="mt-4 flex gap-3">
               <button
@@ -290,14 +324,19 @@ function CyclesContent() {
             isAdmin={isAdmin}
             highlight
             onEdit={() => openEdit(activeCycle)}
-            onEndHarvest={() =>
-              updateMutation.mutate({ id: activeCycle.id, harvestEndDate: today })
-            }
+            // La cosecha terminó el día de la última caja, no el día en que
+            // alguien se acordó de picarle al botón
+            onEndHarvest={() => {
+              const ultima = activeCycle.stats?.lastDate ?? today;
+              if (confirm(`¿Finalizar la cosecha de "${activeCycle.name}"? Quedará con fecha ${formatDate(ultima)}, el día de la última caja registrada.`)) {
+                updateMutation.mutate({ id: activeCycle.id, harvestEndDate: ultima });
+              }
+            }}
             onCloseCycle={() =>
               updateMutation.mutate({
                 id: activeCycle.id,
                 endDate: today,
-                harvestEndDate: activeCycle.harvestEndDate ?? today,
+                harvestEndDate: activeCycle.harvestEndDate ?? activeCycle.stats?.lastDate ?? null,
               })
             }
             onDelete={() => {
@@ -382,6 +421,20 @@ function CyclesContent() {
                       onChange={(e) => setEditForm({ ...editForm, harvestEndDate: e.target.value })}
                       className="w-full rounded-xl border border-green-200 px-3 py-2.5 outline-none focus:border-green-400"
                     />
+                    {!editForm.harvestEndDate && editForm.finDetectado ? (
+                      <p className="mt-0.5 text-xs text-gray-400">
+                        Vacío = última caja ({formatDate(editForm.finDetectado)}){" "}
+                        <button
+                          type="button"
+                          onClick={() => setEditForm({ ...editForm, harvestEndDate: editForm.finDetectado! })}
+                          className="font-medium text-green-600 hover:underline"
+                        >
+                          fijarla
+                        </button>
+                      </p>
+                    ) : (
+                      <p className="mt-0.5 text-xs text-gray-400">Vacío = se detecta con la última caja al cerrar el ciclo</p>
+                    )}
                   </div>
                   <div>
                     <label className="mb-1 block text-sm font-medium text-green-800">Fin del ciclo</label>
@@ -438,6 +491,8 @@ interface CycleCardProps {
     endDate: string | null;
     notes: string | null;
     harvestStartDetected: string | null;
+    /** El capturado, o la última caja antes de que arrancara el siguiente ciclo */
+    harvestEndDetected: string | null;
     isActive: boolean;
     stats: {
       total: number;
@@ -527,7 +582,21 @@ function CycleCard({ cycle, today, isAdmin, highlight, onEdit, onDelete, onEndHa
         <div className="rounded-2xl bg-amber-50/60 border border-amber-100 p-3">
           <p className="text-xs font-medium text-amber-500 flex items-center gap-1"><Flag className="h-3 w-3" /> Fin cosecha</p>
           <p className="mt-0.5 font-bold text-amber-900">
-            {harvestOngoing ? <span className="text-green-600">En curso</span> : formatDate(cycle.harvestEndDate)}
+            {harvestOngoing ? (
+              <span className="text-green-600">En curso</span>
+            ) : (
+              <>
+                {formatDate(cycle.harvestEndDetected)}
+                {!cycle.harvestEndDate && cycle.harvestEndDetected && (
+                  <span
+                    className="ml-1 text-xs font-normal text-amber-500"
+                    title="Día de la última caja antes de que arrancara el siguiente ciclo"
+                  >
+                    (detectado)
+                  </span>
+                )}
+              </>
+            )}
           </p>
         </div>
         <div className="rounded-2xl bg-gray-50/60 border border-gray-200 p-3">
