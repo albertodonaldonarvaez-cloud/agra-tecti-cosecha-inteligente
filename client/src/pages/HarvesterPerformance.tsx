@@ -23,6 +23,20 @@ import { getBoxPhotoUrl } from "@/lib/imageProxy";
 import { BarChart3, TrendingUp, Package, Weight, Calendar, X } from "lucide-react";
 import { useEffect, useState, useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { cicloDeFecha, type RangoCiclo } from "@shared/ciclos";
+import { SelectorDeCiclo, diaEnPalabras, type CicloParaFiltrar } from "@/components/Ciclos";
+
+/**
+ * El día de la caja en hora local, "YYYY-MM-DD".
+ *
+ * No toISOString: en UTC la cosecha de la tarde se pasaba al día siguiente, y
+ * con eso una caja podía caer en otra fecha —o en otro ciclo— que la que dicen
+ * el análisis diario y el listado de cajas.
+ */
+function diaDeCaja(submissionTime: string | Date): string {
+  const f = new Date(submissionTime);
+  return `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, "0")}-${String(f.getDate()).padStart(2, "0")}`;
+}
 
 export default function HarvesterPerformance() {
   return (
@@ -60,43 +74,97 @@ function HarvesterPerformanceContent() {
     enabled: !!user,
   });
 
+  // Los rangos de fecha de cada ciclo: con ellos el navegador sabe a qué
+  // cosecha pertenece cada caja con el mismo criterio que el servidor
+  const { data: rangosCiclo } = trpc.cycles.rangos.useQuery(undefined, {
+    enabled: !!user,
+    staleTime: 10 * 60 * 1000,
+  });
+  // Memorizado: `?? []` fabricaría un arreglo nuevo en cada render y el
+  // recorrido de todas las cajas de abajo se repetiría cada vez
+  const rangos = useMemo<RangoCiclo[]>(() => rangosCiclo ?? [], [rangosCiclo]);
+
+  // null = todavía no se escoge; entonces manda el ciclo que se propone abajo
+  const [cicloElegido, setCicloElegido] = useState<string | null>(null);
+
   useEffect(() => {
     if (!loading && !user) {
       window.location.href = getLoginUrl();
     }
   }, [user, loading]);
 
-  // Obtener fechas únicas
-  const uniqueDates = useMemo(() => {
+  /** Cada caja con su día local y su ciclo ya resueltos, una sola vez */
+  const cajasConCiclo = useMemo(() => {
     if (!boxes) return [];
-    const dates = new Set<string>();
-    boxes.forEach(box => {
-      const date = new Date(box.submissionTime).toISOString().split('T')[0];
-      dates.add(date);
+    return boxes.map((box: any) => {
+      const dia = diaDeCaja(box.submissionTime);
+      return { box, dia, cicloId: cicloDeFecha(dia, rangos) };
     });
+  }, [boxes, rangos]);
+
+  // Cuántas cajas le tocan a cada ciclo, para que los botones digan el reparto
+  const ciclosParaFiltrar = useMemo<CicloParaFiltrar[]>(() => {
+    const conteo = new Map<number | null, number>();
+    for (const c of cajasConCiclo) conteo.set(c.cicloId, (conteo.get(c.cicloId) ?? 0) + 1);
+    return (rangosCiclo ?? []).map((r) => ({ ...r, cajas: conteo.get(r.id) ?? 0 }));
+  }, [cajasConCiclo, rangosCiclo]);
+
+  const sinCiclo = useMemo(() => cajasConCiclo.filter((c) => c.cicloId === null).length, [cajasConCiclo]);
+
+  /**
+   * El ciclo con el que abre la pantalla: el que está en curso si ya tiene
+   * cosecha; si no (recién podado, sin cajas todavía), el último que sí tuvo.
+   * Un ranking vacío al entrar no le sirve a nadie.
+   */
+  const cicloPropuesto = useMemo(() => {
+    const deHoy = ciclosParaFiltrar.find((c) => c.esElDeHoy && c.cajas > 0);
+    if (deHoy) return String(deHoy.id);
+    const conCosecha = [...ciclosParaFiltrar]
+      .filter((c) => c.cajas > 0)
+      .sort((a, b) => b.desde.localeCompare(a.desde))[0];
+    return conCosecha ? String(conCosecha.id) : "all";
+  }, [ciclosParaFiltrar]);
+
+  const ciclo = cicloElegido ?? cicloPropuesto;
+  const cicloActual = ciclosParaFiltrar.find((c) => String(c.id) === ciclo) ?? null;
+
+  const cambiarCiclo = (valor: string) => {
+    setCicloElegido(valor);
+    // Una fecha suelta de otro ciclo dejaría la gráfica vacía sin explicación
+    setSelectedDate("all");
+  };
+
+  const cajasDelCiclo = useMemo(() => {
+    if (ciclo === "all") return cajasConCiclo;
+    if (ciclo === "sin") return cajasConCiclo.filter((c) => c.cicloId === null);
+    return cajasConCiclo.filter((c) => String(c.cicloId) === ciclo);
+  }, [cajasConCiclo, ciclo]);
+
+  // Fechas con cosecha dentro del ciclo elegido
+  const uniqueDates = useMemo(() => {
+    const dates = new Set<string>();
+    cajasDelCiclo.forEach((c) => dates.add(c.dia));
     return Array.from(dates).sort((a, b) => b.localeCompare(a));
-  }, [boxes]);
+  }, [cajasDelCiclo]);
 
   // Filtrar cajas por fecha (para gráfica principal)
   const filteredBoxes = useMemo(() => {
-    if (!boxes) return [];
-    if (selectedDate === "all") return boxes;
-    
-    return boxes.filter(box => {
-      const boxDate = new Date(box.submissionTime).toISOString().split('T')[0];
-      return boxDate === selectedDate;
-    });
-  }, [boxes, selectedDate]);
+    if (selectedDate === "all") return cajasDelCiclo.map((c) => c.box);
+    return cajasDelCiclo.filter((c) => c.dia === selectedDate).map((c) => c.box);
+  }, [cajasDelCiclo, selectedDate]);
 
-  // Filtrar cajas por rango de fechas (para gráfica personalizada)
+  // Filtrar cajas por rango de fechas (para gráfica personalizada). El rango
+  // es explícito, así que no se acota al ciclo: manda lo que se escribió.
   const rangeFilteredBoxes = useMemo(() => {
-    if (!boxes || !startDate || !endDate) return [];
-    
-    return boxes.filter(box => {
-      const boxDate = new Date(box.submissionTime).toISOString().split('T')[0];
-      return boxDate >= startDate && boxDate <= endDate;
-    });
-  }, [boxes, startDate, endDate]);
+    if (!startDate || !endDate) return [];
+    return cajasConCiclo
+      .filter((c) => c.dia >= startDate && c.dia <= endDate)
+      .map((c) => c.box);
+  }, [cajasConCiclo, startDate, endDate]);
+
+  // Cómo se llama lo que se está viendo, para el título del ranking
+  const nombreDelPeriodo =
+    ciclo === "all" ? "Todos los ciclos" : ciclo === "sin" ? "Fuera de ciclo" : cicloActual?.name ?? "Ciclo";
 
   // Calcular estadísticas por cortadora
   const calculateStats = (boxList: any[]): HarvesterStats[] => {
@@ -193,6 +261,19 @@ function HarvesterPerformanceContent() {
 
         {/* Filtros */}
         <GlassCard className="mb-4 md:mb-6 p-4 md:p-6">
+          {/* El ranking se lee por cosecha: mezclar ciclos compara la temporada
+              de una cortadora con dos de otra */}
+          {ciclosParaFiltrar.length > 0 && (
+            <div className="mb-4 border-b border-green-100 pb-4">
+              <SelectorDeCiclo
+                ciclos={ciclosParaFiltrar}
+                sinCiclo={sinCiclo}
+                valor={ciclo}
+                onChange={cambiarCiclo}
+                detalleDeTodos={`${cajasConCiclo.length.toLocaleString()} cajas en total`}
+              />
+            </div>
+          )}
           <div className="flex items-center gap-3 md:gap-4">
             <Calendar className="h-5 w-5 text-green-600 hidden sm:block" />
             <div className="flex-1">
@@ -204,14 +285,12 @@ function HarvesterPerformanceContent() {
                   <SelectValue placeholder="Seleccionar fecha" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">📊 Toda la Temporada</SelectItem>
+                  <SelectItem value="all">
+                    📊 {ciclo === "all" ? "Todas las fechas" : "Todo el ciclo"}
+                  </SelectItem>
                   {uniqueDates.map(date => (
                     <SelectItem key={date} value={date}>
-                      {new Date(date).toLocaleDateString('es-MX', { 
-                        year: 'numeric', 
-                        month: 'long', 
-                        day: 'numeric' 
-                      })}
+                      {diaEnPalabras(date, { year: 'numeric', month: 'long', day: 'numeric' })}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -227,12 +306,16 @@ function HarvesterPerformanceContent() {
         <div className="mb-4 md:mb-6 rounded-2xl bg-white p-4 md:p-8 shadow-lg">
           <div className="mb-4 md:mb-6 text-center">
             <h2 className="mb-2 text-xl md:text-3xl font-bold text-green-900">
-              🏆 Ranking de Rendimiento - Temporada 2024/2025
+              🏆 Ranking de Rendimiento · {nombreDelPeriodo}
             </h2>
             <p className="text-lg text-green-700">
-              {selectedDate === "all" 
-                ? "Desempeño Total de la Temporada"
-                : `Desempeño del ${new Date(selectedDate).toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' })}`}
+              {selectedDate !== "all"
+                ? `Desempeño del ${diaEnPalabras(selectedDate, { year: 'numeric', month: 'long', day: 'numeric' })}`
+                : cicloActual
+                  ? `Desempeño total del ciclo · ${diaEnPalabras(cicloActual.desde)} a ${diaEnPalabras(cicloActual.hasta)}`
+                  : ciclo === "sin"
+                    ? "Cajas con fecha fuera de todo ciclo registrado"
+                    : "Desempeño de toda la historia"}
             </p>
           </div>
           {chartData.length > 0 ? (
@@ -332,7 +415,7 @@ function HarvesterPerformanceContent() {
                 </div>
               </div>
               <p className="mt-4 text-center text-sm text-gray-600">
-                Mostrando {rangeStats.length} cortadoras del {new Date(startDate).toLocaleDateString('es-MX')} al {new Date(endDate).toLocaleDateString('es-MX')}
+                Mostrando {rangeStats.length} cortadoras del {diaEnPalabras(startDate)} al {diaEnPalabras(endDate)}
               </p>
             </>
           ) : (
@@ -458,9 +541,11 @@ function HarvesterPerformanceContent() {
             <BarChart3 className="mx-auto mb-4 h-16 w-16 text-green-300" />
             <h3 className="mb-2 text-xl font-semibold text-green-900">No hay datos disponibles</h3>
             <p className="text-green-600">
-              {selectedDate === "all" 
-                ? "No hay registros de cortadoras en la temporada"
-                : "No hay registros para la fecha seleccionada"}
+              {selectedDate !== "all"
+                ? "No hay registros para la fecha seleccionada"
+                : ciclo === "all"
+                  ? "No hay registros de cortadoras todavía"
+                  : "Este ciclo todavía no tiene cajas de cortadoras registradas"}
             </p>
           </GlassCard>
         )}
