@@ -2621,6 +2621,12 @@ function AIApiSection() {
       <p className="mb-4 text-sm text-purple-700">
         Conecta una API de IA para obtener análisis agronómicos automatizados basados en los indices espectrales de cada parcela.
       </p>
+      {config?.modelo && (
+        <p className="mb-4 -mt-2 text-xs text-purple-600">
+          Modelo: <span className="font-mono font-medium">{config.modelo}</span>
+          {config.respaldo && <> · si falla, respaldo con <span className="font-mono">{config.respaldo}</span></>}
+        </p>
+      )}
 
       <div className="rounded-lg bg-purple-50 p-3 mb-4 text-sm text-purple-800">
         <strong>📋 Cómo obtener la API Key:</strong>

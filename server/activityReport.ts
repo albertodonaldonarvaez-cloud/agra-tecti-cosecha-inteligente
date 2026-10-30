@@ -9,6 +9,8 @@ import {
   fieldActivityWorkSessions,
   parcels,
 } from "../drizzle/schema";
+import { pedirADeepSeek } from "./deepseek";
+import { textoIAPlano } from "../shared/textoIA";
 
 // ============================================================
 // Reporte de actividades de campo
@@ -19,11 +21,10 @@ import {
 // informe y no como un volcado de la base de datos.
 // ============================================================
 
-const AI_MODEL = "deepseek-v4-flash";
 // El prompt lleva el detalle de todas las labores del periodo y el modelo
-// razona antes de responder: con 4000 la respuesta salía cortada a media frase
-// y el JSON llegaba roto.
-const AI_MAX_TOKENS = 8000;
+// razona antes de responder: con poco espacio la respuesta salía cortada a
+// media frase y el JSON llegaba roto. Solo se cobra lo que se usa.
+const AI_MAX_TOKENS = 24000;
 
 export const ACTIVITY_LABELS: Record<string, string> = {
   riego: "Riego",
@@ -453,43 +454,6 @@ function repararJsonCortado(texto: string): string {
   return reparado;
 }
 
-/**
- * Clave de DeepSeek guardada en Ajustes.
- *
- * Devuelve también el motivo cuando no se puede usar. Antes cualquier tropiezo
- * terminaba en "null" y la pantalla decía que faltaba configurar la clave,
- * aunque la clave estuviera guardada y el problema fuera otro: por ejemplo que
- * se cifró con un JWT_SECRET distinto al actual y ya no se puede descifrar.
- */
-async function getDeepSeekKey(): Promise<{ key: string | null; motivo?: string }> {
-  let guardada: string | null = null;
-  try {
-    const { getGlobalSetting } = await import("./globalSettings");
-    guardada = await getGlobalSetting("deepseekApiKey");
-  } catch (error: any) {
-    return { key: null, motivo: `No se pudo leer la configuración: ${error?.message || error}` };
-  }
-
-  if (!guardada || guardada.trim() === "") {
-    return { key: null, motivo: "No hay clave de DeepSeek guardada en Ajustes" };
-  }
-
-  try {
-    const { decryptSecret, isEncrypted } = await import("./encryption");
-    if (isEncrypted(guardada)) {
-      // Si esto truena, mandar el texto cifrado como clave solo produce un 401
-      // incomprensible: es mejor decirlo aquí.
-      return { key: decryptSecret(guardada) };
-    }
-    return { key: guardada };
-  } catch (error: any) {
-    return {
-      key: null,
-      motivo: "La clave guardada no se pudo descifrar (¿cambió JWT_SECRET?). Vuelve a guardarla en Ajustes.",
-    };
-  }
-}
-
 // El resumen de un mismo periodo no cambia entre una vista previa y el envío
 // por correo: se guarda un rato para no pagar dos veces la misma consulta.
 const aiCache = new Map<string, { at: number; value: ActivityAiSummary }>();
@@ -520,12 +484,6 @@ export async function buildAiSummary(
     if (hit && Date.now() - hit.at < AI_CACHE_TTL_MS) return { summary: hit.value, status: "ok" };
   }
 
-  const { key: apiKey, motivo } = await getDeepSeekKey();
-  if (!apiKey) {
-    console.log(`[ReporteActividades] Sin resumen con IA: ${motivo}`);
-    return { summary: null, status: "sin_clave", detalle: motivo };
-  }
-
   // Se manda el detalle completo, no solo los totales: la IA tiene que poder
   // nombrar parcelas, productos y responsables concretos.
   const lineas = activities.map((a) => {
@@ -553,7 +511,8 @@ export async function buildAiSummary(
     .map((p) => `${p.name}: ${p.total > 0 ? `${p.total} ${p.unit}` : "sin cantidad registrada"} en ${p.times} aplicación(es)`)
     .join("\n");
 
-  const prompt = `Redacta el resumen de la libreta de campo del periodo ${period.from} a ${period.to}.
+  const hoy = new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
+  const prompt = `Redacta el resumen de la libreta de campo del periodo ${period.from} a ${period.to}. Hoy es ${hoy}.
 
 TOTALES
 ${summary.total} labores (${summary.completed} completadas, ${summary.inProgress} en proceso, ${summary.planned} planificadas, ${summary.cancelled} canceladas), ${summary.hours} horas de trabajo, ${summary.parcelsWorked} parcelas atendidas, ${summary.peopleCount} personas distintas.
@@ -567,96 +526,76 @@ ${insumosLinea || "ninguno registrado"}
 DETALLE DE CADA LABOR
 ${lineas.join("\n")}
 
-Responde ÚNICAMENTE con un objeto JSON, sin texto alrededor y sin bloques de código, con esta forma exacta:
+Responde ÚNICAMENTE con un objeto JSON con esta forma exacta:
 {
   "resumen": "2 a 4 frases: qué se trabajó en el periodo, dónde y con qué resultado. Concreto, con nombres de parcelas y cifras reales.",
   "porLabor": [{"labor": "Nombre del tipo de labor", "texto": "1 o 2 frases sobre cómo se ejecutó esa labor: dónde, cuánto, con qué insumos"}],
   "insumos": "2 o 3 frases sobre los productos aplicados y su dosificación. null si no hubo.",
   "pendientes": "1 o 2 frases sobre lo planificado que no se completó o quedó en proceso. null si todo se completó.",
-  "recomendaciones": ["2 a 4 recomendaciones accionables para los próximos días"]
+  "recomendaciones": ["2 a 4 recomendaciones accionables para los próximos días, cada una de una o dos frases"]
 }
 
-Escribe en español de México, con tono de ingeniero agrónomo: directo, sin adornos, sin saludos. No inventes datos que no estén arriba; si algo no se registró, dilo con naturalidad.`;
+Reglas:
+- Los valores son texto plano: sin Markdown, sin asteriscos, sin viñetas dentro del texto y sin emojis. Este texto se imprime en un PDF, un correo y un mensaje de Telegram.
+- Antes de escribir una cifra, comprueba que sale de los datos de arriba (o de sumarlos). Si algo no se registró, dilo con naturalidad en lugar de suponerlo.
+- Una labor planificada con fecha posterior a hoy no está atrasada: está programada.
+- Tono de ingeniero agrónomo: directo, sin adornos ni saludos.`;
 
-  try {
-    const response = await fetch("https://api.deepseek.com/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: AI_MODEL,
-        messages: [
-          {
-            role: "system",
-            content: "Eres un ingeniero agrónomo senior que redacta informes de campo. Respondes solo con JSON válido, en español.",
-          },
-          { role: "user", content: prompt },
-        ],
-        // Modelo de razonamiento: lo que "piensa" también gasta presupuesto.
-        // Con poco espacio devuelve vacío en vez de fallar.
-        max_tokens: AI_MAX_TOKENS,
-        temperature: 0.3,
-      }),
-      signal: AbortSignal.timeout(120000),
-    });
+  const respuesta = await pedirADeepSeek({
+    etiqueta: "[ReporteActividades]",
+    prompt,
+    json: true,
+    maxTokens: AI_MAX_TOKENS,
+  });
 
-    if (!response.ok) {
-      // El cuerpo dice si es la clave, el modelo o el saldo; sin él, cualquier
-      // fallo se ve igual desde la pantalla
-      let detalle = "";
-      try { detalle = (await response.text()).replace(/\s+/g, " ").trim().slice(0, 200); } catch { /* respuesta ilegible */ }
-      console.error(`[ReporteActividades] DeepSeek respondió ${response.status}: ${detalle}`);
-      return {
-        summary: null,
-        status: "error",
-        detalle: response.status === 401
-          ? "DeepSeek rechazó la clave (401). Vuelve a guardarla en Ajustes."
-          : `DeepSeek respondió ${response.status}. ${detalle}`,
-      };
-    }
-
-    const result = await response.json();
-    const text = result.choices?.[0]?.message?.content?.trim();
-    if (!text) {
-      const razon = result.choices?.[0]?.finish_reason;
-      console.error("[ReporteActividades] DeepSeek devolvió texto vacío:", razon);
-      return {
-        summary: null,
-        status: "error",
-        detalle: `DeepSeek no devolvió texto (${razon || "sin motivo"}). Suele ser presupuesto de tokens agotado.`,
-      };
-    }
-
-    const parsed = extractJson(text);
-    const value: ActivityAiSummary = parsed
-      ? {
-          resumen: String(parsed.resumen || "").trim(),
-          porLabor: Array.isArray(parsed.porLabor)
-            ? parsed.porLabor
-                .filter((x: any) => x && (x.labor || x.texto))
-                .map((x: any) => ({ labor: String(x.labor || "").trim(), texto: String(x.texto || "").trim() }))
-            : [],
-          insumos: parsed.insumos ? String(parsed.insumos).trim() : null,
-          pendientes: parsed.pendientes ? String(parsed.pendientes).trim() : null,
-          recomendaciones: Array.isArray(parsed.recomendaciones)
-            ? parsed.recomendaciones.map((r: any) => String(r).trim()).filter(Boolean)
-            : [],
-        }
-      : // Si no vino JSON, al menos se aprovecha el texto tal cual
-        { resumen: text, porLabor: [], insumos: null, pendientes: null, recomendaciones: [] };
-
-    if (!value.resumen) {
-      return { summary: null, status: "error", detalle: "DeepSeek respondió sin un resumen utilizable" };
-    }
-
-    aiCache.set(cacheKey, { at: Date.now(), value });
-    return { summary: value, status: "ok" };
-  } catch (error: any) {
-    const detalle = error?.name === "TimeoutError"
-      ? "DeepSeek tardó demasiado en responder"
-      : String(error?.message || error).slice(0, 200);
-    console.error("[ReporteActividades] Error al generar el resumen con IA:", detalle);
-    return { summary: null, status: "error", detalle };
+  if (!respuesta.ok) {
+    return { summary: null, status: respuesta.sinClave ? "sin_clave" : "error", detalle: respuesta.detalle };
   }
+
+  const value = resumenDesdeRespuesta(respuesta.texto);
+  if (!value.resumen) {
+    return { summary: null, status: "error", detalle: "DeepSeek respondió sin un resumen utilizable" };
+  }
+
+  aiCache.set(cacheKey, { at: Date.now(), value });
+  return { summary: value, status: "ok" };
+}
+
+/**
+ * La respuesta de la IA convertida al resumen que pintan el reporte, el correo
+ * y Telegram.
+ *
+ * Cada campo pasa por `textoIAPlano` aunque se le pidió texto plano: si el
+ * modelo cuela unas negritas, en el PDF y en el correo se verían los
+ * asteriscos tal cual.
+ */
+export function resumenDesdeRespuesta(texto: string): ActivityAiSummary {
+  const plano = (v: unknown) => {
+    const t = textoIAPlano(String(v ?? "")).trim();
+    // Una recomendación que el modelo escribió como "- Revisar…" ya se dibuja
+    // dentro de una lista: la viñeta propia saldría doble
+    return t.includes("\n") ? t : t.replace(/^(?:•|\d+\.)\s+/, "");
+  };
+  const parsed = extractJson(texto);
+
+  if (!parsed) {
+    // Si no vino JSON, al menos se aprovecha el texto tal cual
+    return { resumen: plano(texto), porLabor: [], insumos: null, pendientes: null, recomendaciones: [] };
+  }
+
+  return {
+    resumen: plano(parsed.resumen),
+    porLabor: Array.isArray(parsed.porLabor)
+      ? parsed.porLabor
+          .filter((x: any) => x && (x.labor || x.texto))
+          .map((x: any) => ({ labor: plano(x.labor), texto: plano(x.texto) }))
+      : [],
+    insumos: parsed.insumos ? plano(parsed.insumos) || null : null,
+    pendientes: parsed.pendientes ? plano(parsed.pendientes) || null : null,
+    recomendaciones: Array.isArray(parsed.recomendaciones)
+      ? parsed.recomendaciones.map(plano).filter(Boolean)
+      : [],
+  };
 }
 
 /** Todo junto: detalle, agregados y resumen de IA */

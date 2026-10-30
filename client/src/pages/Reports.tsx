@@ -11,13 +11,14 @@ import {
 } from "lucide-react";
 import { getReportCss, printHintHtml } from "@/lib/reportTheme";
 import { buildActivityReportHtml } from "@/lib/activityReportDoc";
+import { TextoIA } from "@/components/TextoIA";
+import { textoIAComoHtml } from "@shared/textoIA";
 
 
 // ── Helpers ──
 function fmtDate(ds: string) { if (!ds) return "-"; const s = ds.length===10?ds+"T12:00:00":ds; return new Date(s).toLocaleDateString("es-MX",{day:"2-digit",month:"short",year:"numeric",timeZone:"America/Mexico_City"}); }
 function fmtDateShort(ds: string) { if (!ds) return "-"; const s = ds.length===10?ds+"T12:00:00":ds; return new Date(s).toLocaleDateString("es-MX",{day:"2-digit",month:"short",timeZone:"America/Mexico_City"}); }
 function calcSlaHours(c: string|Date, r: string|Date|null): number|null { if(!r)return null; return Math.round((new Date(r).getTime()-new Date(c).getTime())/3600000*10)/10; }
-function stripMd(t: string) { return t.replace(/\*+/g, "").replace(/#+\s/g, "").replace(/_+/g, "").trim(); }
 
 const sevLabels: Record<string,string> = {baja:"Baja",media:"Media",alta:"Alta",critica:"Critica"};
 const catLabels: Record<string,string> = {
@@ -262,13 +263,12 @@ export default function Reports() {
     </div>`;
   }
   function buildAiCard(text: string): string {
-    const clean = stripMd(text);
-    // Don't use safe() here — AI text is in Spanish and needs accents/ñ
-    const escaped = clean.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // textoIAComoHtml escapa el texto y conserva títulos y viñetas; no se usa
+    // safe() porque el análisis va en español y necesita acentos y ñ
     return `<div class="ia-card">
       <div class="ia-card-bar"></div>
       <div class="ia-card-header">${svgBrain()}<span class="ia-title">IA AGRA TEC-TI</span><span class="ia-sub">Análisis Semanal</span></div>
-      <div class="ia-card-body">${escaped}</div>
+      <div class="ia-card-body texto-ia">${textoIAComoHtml(text)}</div>
     </div>`;
   }
 
@@ -1152,9 +1152,15 @@ ${html}
                   </div>
                 </div>
                 <div className="rounded-2xl bg-gradient-to-br from-green-50 to-emerald-50 p-4 md:p-5">
-                  <p className="text-sm text-green-800 leading-relaxed whitespace-pre-wrap">{stripMd(aiText)}</p>
+                  <TextoIA texto={aiText} className="text-sm text-green-900" />
                 </div>
               </GlassCard>
+            )}
+            {/* Sin análisis: decir por qué en vez de esconder la tarjeta */}
+            {!aiText && isGeneral && (generalData as any)?.aiDetalle && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                El reporte se generó sin análisis de IA: {(generalData as any).aiDetalle}
+              </div>
             )}
 
             {/* Weather Summary */}

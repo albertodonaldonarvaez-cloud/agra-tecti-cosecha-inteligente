@@ -9,7 +9,7 @@
  *  3. Las horas salen de las jornadas, no del calendario.
  */
 import { describe, it, expect } from "vitest";
-import { summarizeActivities, extractJson, separarPersonas } from "./activityReport";
+import { summarizeActivities, extractJson, separarPersonas, resumenDesdeRespuesta } from "./activityReport";
 
 function labor(over: Partial<any> = {}): any {
   return {
@@ -185,5 +185,25 @@ describe("respuesta de la IA", () => {
 
   it("devuelve null cuando no hay nada que rescatar", () => {
     expect(extractJson("lo siento, no puedo responder")).toBeNull();
+  });
+});
+
+describe("resumenDesdeRespuesta", () => {
+  it("quita el Markdown que se cuele en los campos", () => {
+    const r = resumenDesdeRespuesta(JSON.stringify({
+      resumen: "Se regó **Micaela** 4 h.",
+      porLabor: [{ labor: "**Riego**", texto: "En *Micaela*." }],
+      insumos: null,
+      pendientes: "Falta la poda de Lupita.",
+      recomendaciones: ["- Revisar emisores", "**Podar** antes de la lluvia"],
+    }));
+    expect(r.resumen).toBe("Se regó Micaela 4 h.");
+    expect(r.porLabor).toEqual([{ labor: "Riego", texto: "En Micaela." }]);
+    expect(r.insumos).toBeNull();
+    expect(r.recomendaciones).toEqual(["Revisar emisores", "Podar antes de la lluvia"]);
+  });
+
+  it("si no vino JSON aprovecha el texto como resumen", () => {
+    expect(resumenDesdeRespuesta("### Resumen\nTodo bien").resumen).toBe("Resumen\n\nTodo bien");
   });
 });

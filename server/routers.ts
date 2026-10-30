@@ -178,7 +178,9 @@ export const appRouter = router({
     // DeepSeek AI config
     getDeepSeekConfig: adminProcedure.query(async () => {
       const config = await db.getApiConfig();
-      return { hasKey: !!(config as any)?.deepseekApiKey };
+      const { MODELO_IA, MODELO_RESPALDO } = await import("./deepseek");
+      // El modelo va a la vista para que se sepa con qué se redactan los análisis
+      return { hasKey: !!(config as any)?.deepseekApiKey, modelo: MODELO_IA, respaldo: MODELO_RESPALDO };
     }),
 
     saveDeepSeekConfig: adminProcedure
@@ -2846,7 +2848,7 @@ export const appRouter = router({
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
             message: detail
-              ? `${detail}. Intenta de nuevo en unos minutos.`
+              ? `${detail.replace(/[.\s]+$/, "")}. Intenta de nuevo en unos minutos.`
               : "No se pudo generar el resumen (falla temporal de la IA o de red). Intenta de nuevo en unos minutos.",
           });
         }
@@ -5829,30 +5831,29 @@ export const appRouter = router({
 
         // IA: Análisis semanal general
         let aiAnalysis: string | null = null;
+        // Por qué no hubo análisis, para que la pantalla lo diga en vez de
+        // esconder la tarjeta sin explicación
+        let aiDetalle: string | null = null;
         try {
-          const { getGlobalSetting } = await import("./globalSettings");
-          let apiKey = await getGlobalSetting("deepseekApiKey");
-          if (apiKey) {
-            // Decrypt if needed
-            try {
-              const { decryptSecret, isEncrypted } = await import("./encryption");
-              if (isEncrypted(apiKey)) apiKey = decryptSecret(apiKey);
-            } catch (e) { /* use as-is */ }
-            const summaryLines = parcelSummaries.map((p: any) =>
-              `${p.name}: ${p.weekTotal}kg cosechados, ${p.weekBoxes} cajas, NDVI prom ${p.ndviAvg || 'N/D'}, ${p.notesCount} notas (${p.notesOpen} abiertas)`
-            ).join('\n');
-            const weatherLine = weatherData.length > 0
-              ? `Clima: Temp max prom ${(weatherData.reduce((s: any, d: any) => s + (d.temperatureMax || 0), 0) / weatherData.length).toFixed(1)}°C, min prom ${(weatherData.reduce((s: any, d: any) => s + (d.temperatureMin || 0), 0) / weatherData.length).toFixed(1)}°C, lluvia acum ${weatherData.reduce((s: any, d: any) => s + (d.precipitation || 0), 0).toFixed(1)}mm`
-              : '';
-            // Trabajo de campo del periodo (qué se hizo y en qué parcelas)
-            const activityLines = activitiesReport.length > 0
-              ? activitiesReport.slice(0, 40).map(a =>
-                  `- ${a.date}: ${a.typeLabel}${a.subtype ? ` (${a.subtype})` : ""}` +
-                  `${a.parcelNames.length ? ` en ${a.parcelNames.join(", ")}` : ""}` +
-                  `${a.hours ? ` [${a.hours}h]` : ""} — ${a.description ?? ""} (${a.performedBy || "sin responsable"}, ${a.status})`
-                ).join('\n')
-              : "- Sin actividades registradas en el periodo";
-            const prompt = `Analiza el estado semanal de esta operación agrícola (${input.fromDate} a ${input.toDate}):
+          const { pedirADeepSeek, FORMATO_TEXTO } = await import("./deepseek");
+          const { resumirCuadrilla } = await import("./activityReport");
+          const summaryLines = parcelSummaries.map((p: any) =>
+            `${p.name}: ${p.weekTotal}kg cosechados, ${p.weekBoxes} cajas, NDVI prom ${p.ndviAvg || 'N/D'}, ${p.notesCount} notas (${p.notesOpen} abiertas)`
+          ).join('\n');
+          const weatherLine = weatherData.length > 0
+            ? `Clima: Temp max prom ${(weatherData.reduce((s: any, d: any) => s + (d.temperatureMax || 0), 0) / weatherData.length).toFixed(1)}°C, min prom ${(weatherData.reduce((s: any, d: any) => s + (d.temperatureMin || 0), 0) / weatherData.length).toFixed(1)}°C, lluvia acum ${weatherData.reduce((s: any, d: any) => s + (d.precipitation || 0), 0).toFixed(1)}mm`
+            : '';
+          // Trabajo de campo del periodo (qué se hizo y en qué parcelas). La
+          // cuadrilla completa son cientos de caracteres por labor y no aporta
+          // al análisis: basta con quién encabeza y cuántos fueron.
+          const activityLines = activitiesReport.length > 0
+            ? activitiesReport.slice(0, 40).map(a =>
+                `- ${a.date}: ${a.typeLabel}${a.subtype ? ` (${a.subtype})` : ""}` +
+                `${a.parcelNames.length ? ` en ${a.parcelNames.join(", ")}` : ""}` +
+                `${a.hours ? ` [${a.hours}h]` : ""} — ${a.description ?? ""} (${a.performedBy ? resumirCuadrilla(a.performedBy) : "sin responsable"}, ${a.status})`
+              ).join('\n')
+            : "- Sin actividades registradas en el periodo";
+          const prompt = `Analiza el estado de esta operación agrícola de higo en el periodo del ${input.fromDate} al ${input.toDate}. Hoy es ${todayMx()}.
 
 Resumen por parcela:
 ${summaryLines}
@@ -5863,35 +5864,31 @@ ${activityLines}
 Totales: ${totalHarvest.toFixed(1)}kg cosechados, ${totalBoxes} cajas, ${totalNotes} notas de campo (${totalNotesOpen} abiertas), ${activityTotals.total} actividades (${activityTotals.completed} completadas, ${activityTotals.hours}h de trabajo)
 ${weatherLine}
 
-Da un análisis ejecutivo de 6-8 líneas máximo: estado general de la operación, qué labores se ejecutaron y en qué parcelas, parcelas que requieren atención (bajo NDVI, notas abiertas o sin labores), impacto del clima, y 1-2 recomendaciones. Tono profesional de ingeniero agrónomo. Responde en español.`;
+ESTRUCTURA (usa exactamente estos títulos, en este orden):
+### Estado general
+2 o 3 frases sobre cómo va la operación en el periodo, con las cifras de cosecha.
+### Trabajo de campo
+Qué labores se ejecutaron y en qué parcelas.
+### Parcelas que requieren atención
+Viñetas con la parcela y el motivo (NDVI bajo, notas abiertas, sin labores, caída de cosecha). Si ninguna lo requiere, dilo.
+### Recomendaciones
+1 o 2 viñetas accionables, considerando el clima del periodo.
 
-            const response = await fetch("https://api.deepseek.com/chat/completions", {
-              method: "POST",
-              headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
-              body: JSON.stringify({
-                model: "deepseek-v4-flash",
-                messages: [{ role: "system", content: "Eres un ingeniero agrónomo senior. Respondes de forma concisa y profesional en español." }, { role: "user", content: prompt }],
-                // Presupuesto amplio: el modelo razona antes de responder y ese
-                // consumo cuenta aquí (con poco espacio devolvía texto vacío)
-                max_tokens: 4000,
-                temperature: 0.4,
-              }),
-            });
-            if (response.ok) {
-              const result = await response.json();
-              const text = result.choices?.[0]?.message?.content?.trim();
-              aiAnalysis = text || null;
-              if (!text) {
-                console.error("[Reports] IA devolvió respuesta vacía:", result.choices?.[0]?.finish_reason);
-              }
-            } else {
-              console.error("[Reports] IA HTTP", response.status);
-            }
-          }
-        } catch (e) { console.error("[Reports] Error generating AI analysis:", e); }
+Extensión total: entre 8 y 14 renglones.
+
+${FORMATO_TEXTO}`;
+
+          const respuesta = await pedirADeepSeek({ etiqueta: "[Reports]", prompt });
+          if (respuesta.ok) aiAnalysis = respuesta.texto;
+          else aiDetalle = respuesta.detalle;
+        } catch (e: any) {
+          console.error("[Reports] Error generating AI analysis:", e);
+          aiDetalle = String(e?.message || e).slice(0, 200);
+        }
 
         return {
           aiAnalysis,
+          aiDetalle,
           parcels: parcelSummaries,
           totals: {
             harvest: Math.round(totalHarvest * 100) / 100,

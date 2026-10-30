@@ -35,6 +35,7 @@ import { fromLonLat, transformExtent, toLonLat } from "ol/proj";
 import { Style, Fill, Stroke, Text as OlText, Circle as CircleStyle, Icon } from "ol/style";
 import { boundingExtent } from "ol/extent";
 import "ol/ol.css";
+import { TextoIA } from "@/components/TextoIA";
 
 export default function ParcelAnalysis() {
   return (
@@ -2581,7 +2582,7 @@ function AIAnalysisCard({ parcelId, parcelName, ndviStats, ndreStats, ndmiStats 
         <div className="rounded-xl bg-white/80 border border-purple-100/50 p-4">
           <div className="flex items-start gap-2">
             <Sparkles className="w-4 h-4 text-purple-400 mt-0.5 flex-shrink-0" />
-            <div className="text-[13px] text-gray-800 leading-relaxed whitespace-pre-line">{analysis}</div>
+            <TextoIA texto={analysis} className="min-w-0 flex-1 text-[13px] text-gray-800" />
           </div>
         </div>
       )}

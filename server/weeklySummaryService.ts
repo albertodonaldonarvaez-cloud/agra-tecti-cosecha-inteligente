@@ -19,19 +19,9 @@ import {
   parcels, weeklySummaries, fieldNotes,
 } from "../drizzle/schema";
 import { eq, desc, asc, and, gte, lte, inArray, isNull, sql } from "drizzle-orm";
+import { FORMATO_TEXTO, claveDeDeepSeek, pedirADeepSeek } from "./deepseek";
 
 const TAG = "[WeeklySummary]";
-
-/**
- * Modelo de IA y presupuesto de tokens.
- *
- * El modelo razona antes de responder y esos tokens de razonamiento cuentan
- * dentro de max_tokens. Un presupuesto corto (900) se consumía por completo
- * pensando y devolvía contenido vacío; con 4000 el razonamiento usa ~400 y
- * queda espacio de sobra para el texto final.
- */
-const AI_MODEL = "deepseek-v4-flash";
-const AI_MAX_TOKENS = 4000;
 
 function todayMx(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
@@ -119,17 +109,11 @@ export async function generateWeeklySummary(options?: { force?: boolean }): Prom
   if (existing && !options?.force) return existing;
 
   // ── API key de DeepSeek ──
-  let apiKey: string | null = null;
-  try {
-    const { getGlobalSetting } = await import("./globalSettings");
-    apiKey = await getGlobalSetting("deepseekApiKey");
-    if (apiKey) {
-      const { decryptSecret, isEncrypted } = await import("./encryption");
-      if (isEncrypted(apiKey)) apiKey = decryptSecret(apiKey);
-    }
-  } catch { /* sin key */ }
-  if (!apiKey) {
-    console.log(`${TAG} Sin API key de DeepSeek configurada, omitiendo generación`);
+  // Sin clave no vale la pena juntar todo el contexto de la semana
+  const { key, motivo } = await claveDeDeepSeek();
+  if (!key) {
+    console.log(`${TAG} Sin resumen: ${motivo}`);
+    lastError = motivo ?? "No hay clave de DeepSeek configurada";
     return null;
   }
 
@@ -483,14 +467,24 @@ ${parcelsWithActivityNames.size > 0 ? Array.from(parcelsWithActivityNames).join(
 COSECHA:
 ${harvestLine}
 
-Escribe un panorama ejecutivo en español de 8-12 líneas para el productor:
+Escribe el panorama ejecutivo de la semana para el productor. Lo que tiene que cubrir:
 1) Cómo va el cultivo según la etapa fenológica del higo (considera los días desde la poda y la época del año).
 2) Qué se logró la semana pasada y qué quedó pendiente o atrasado (menciona parcelas por nombre). Recuerda: una parcela sin poda en este ciclo NO está atrasada, apenas va a comenzar.
 3) Cómo influyó el clima de la semana pasada en las labores realizadas (por ejemplo, si llovió el día de una aplicación).
-4) **Cruza el pronóstico con las actividades planeadas**: di explícitamente qué días convienen o NO convienen para cada labor programada (no aplicar fitosanitarios ni foliares antes de lluvia o con viento fuerte, ajustar riego si viene lluvia, aprovechar días secos para poda, etc.).
-5) **Diagnóstico satelital concreto**: para cada parcela con datos di CÓMO se ve y sobre todo DÓNDE. Nombra la zona débil tal como viene ("el noreste de Micaela está seco, NDVI 0.18, contra 0.55 del resto") y cruza esa zona con las labores: si ahí se regó hace poco puede ser falla de riego; si está recién podada, el vigor bajo es normal y NO es un problema. Si el reparto muestra buena parte del terreno bajo 0.2, dilo claro. Si el vigor es parejo, dilo también en vez de inventar problemas. Atiende además las notas de campo abiertas que sigan sin resolver.
-6) 2-3 recomendaciones concretas y accionables para los próximos días.
-Tono profesional de ingeniero agrónomo, directo y útil. Sin saludos ni despedidas. Usa párrafos cortos o viñetas.`;
+4) Cruza el pronóstico con las actividades planeadas: di explícitamente qué días convienen o NO convienen para cada labor programada (no aplicar fitosanitarios ni foliares antes de lluvia o con viento fuerte, ajustar riego si viene lluvia, aprovechar días secos para poda, etc.).
+5) Diagnóstico satelital concreto: para cada parcela con datos di CÓMO se ve y sobre todo DÓNDE. Nombra la zona débil tal como viene ("el noreste de Micaela está seco, NDVI 0.18, contra 0.55 del resto") y cruza esa zona con las labores: si ahí se regó hace poco puede ser falla de riego; si está recién podada, el vigor bajo es normal y NO es un problema. Si el reparto muestra buena parte del terreno bajo 0.2, dilo claro. Si el vigor es parejo, dilo también en vez de inventar problemas. Atiende además las notas de campo abiertas que sigan sin resolver.
+6) 2 o 3 recomendaciones concretas y accionables para los próximos días.
+
+ESTRUCTURA (usa exactamente estos títulos, en este orden; si una sección no tiene nada que decir, dilo en una frase):
+### Etapa del cultivo
+### La semana pasada
+### Clima y labores programadas
+### Estado de las parcelas
+### Recomendaciones
+
+Extensión total: entre 12 y 22 renglones. Cada sección breve; prefiere viñetas cuando enumeres parcelas o días.
+
+${FORMATO_TEXTO}`;
 
   console.log(
     `${TAG} Contexto enviado a la IA (ciclo ${activeCycle?.name ?? "sin ciclo"}): ${done.length} labores realizadas, ${planned.length} planificadas de la semana, ` +
@@ -500,48 +494,15 @@ Tono profesional de ingeniero agrónomo, directo y útil. Sin saludos ni despedi
   );
 
   try {
-    const response = await fetch("https://api.deepseek.com/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: AI_MODEL,
-        messages: [
-          { role: "system", content: "Eres un ingeniero agrónomo senior especializado en higo. Respondes de forma concisa, profesional y accionable, en español." },
-          { role: "user", content: prompt },
-        ],
-        // IMPORTANTE: es un modelo de razonamiento — primero "piensa" y esos
-        // tokens también cuentan. Con un presupuesto corto se gasta todo
-        // razonando y la respuesta llega VACÍA (esa era la falla del resumen).
-        max_tokens: AI_MAX_TOKENS,
-        temperature: 0.4,
-      }),
-    });
-    // Con force=true el admin pidió regenerar: si la IA falla hay que avisar
-    // (devolver el resumen viejo daría un "éxito" engañoso)
-    const failResult = () => (options?.force ? null : existing ?? null);
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => "");
-      console.error(`${TAG} IA HTTP ${response.status}: ${errText.slice(0, 300)}`);
-      lastError = `La IA respondió con error ${response.status}`;
-      return failResult();
+    const respuesta = await pedirADeepSeek({ etiqueta: TAG, prompt });
+    if (!respuesta.ok) {
+      lastError = respuesta.detalle;
+      // Con force=true el admin pidió regenerar: si la IA falla hay que avisar
+      // (devolver el resumen viejo daría un "éxito" engañoso)
+      return options?.force ? null : existing ?? null;
     }
-    const result = await response.json();
-    const choice = result.choices?.[0];
-    const content: string = choice?.message?.content?.trim() ?? "";
-
-    if (!content) {
-      // Sin texto: casi siempre porque el razonamiento agotó el presupuesto
-      const reasoningTokens = result.usage?.completion_tokens_details?.reasoning_tokens;
-      if (choice?.finish_reason === "length") {
-        lastError = "La IA se quedó sin espacio para responder (razonamiento demasiado largo)";
-        console.error(`${TAG} Respuesta vacía por límite de tokens (razonamiento: ${reasoningTokens})`);
-      } else {
-        lastError = "La IA devolvió una respuesta vacía";
-        console.error(`${TAG} Respuesta vacía (finish_reason: ${choice?.finish_reason})`);
-      }
-      return failResult();
-    }
+    const content = respuesta.texto;
+    const modelo = respuesta.modelo;
 
     const statsJson = JSON.stringify({
       cycleName: activeCycle?.name ?? null,
@@ -564,7 +525,7 @@ Tono profesional de ingeniero agrónomo, directo y útil. Sin saludos ni despedi
     if (existing && options?.force) {
       await drizzle.update(weeklySummaries).set({
         content,
-        model: result.model || "deepseek-v4-flash",
+        model: modelo,
         cycleId: activeCycle?.id ?? null,
         cyclePhase,
         statsJson,
@@ -580,14 +541,14 @@ Tono profesional de ingeniero agrónomo, directo y útil. Sin saludos ni despedi
       weekStart,
       weekEnd,
       content,
-      model: result.model || "deepseek-v4-flash",
+      model: modelo,
       cycleId: activeCycle?.id ?? null,
       cyclePhase,
       statsJson,
     }).onDuplicateKeyUpdate({
       set: {
         content,
-        model: result.model || "deepseek-v4-flash",
+        model: modelo,
         cycleId: activeCycle?.id ?? null,
         cyclePhase,
         statsJson,
@@ -600,7 +561,8 @@ Tono profesional de ingeniero agrónomo, directo y útil. Sin saludos ni despedi
     return created;
   } catch (e: any) {
     console.error(`${TAG} Error generando resumen:`, e);
-    lastError = `No se pudo contactar a la IA (${e?.message ?? "error de red"})`;
+    // pedirADeepSeek no lanza: lo que llegue aquí es de la base de datos
+    lastError = `No se pudo guardar el resumen (${e?.message ?? "error desconocido"})`;
     return options?.force ? null : existing ?? null;
   }
 }

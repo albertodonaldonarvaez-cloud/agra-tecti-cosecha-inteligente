@@ -18,10 +18,9 @@ import {
   fieldActivityWorkSessions, fieldNotes,
 } from "../drizzle/schema";
 import { eq, and, desc, asc, gte, lte, inArray, sql } from "drizzle-orm";
+import { FORMATO_TEXTO, MODELO_IA, claveDeDeepSeek, pedirADeepSeek } from "./deepseek";
 
 const TAG = "[IA Parcela]";
-const AI_MODEL = "deepseek-v4-flash";
-const AI_MAX_TOKENS = 4000;
 
 const ACTIVITY_LABELS: Record<string, string> = {
   riego: "Riego", fertilizacion: "Fertilización", nutricion: "Nutrición", poda: "Poda",
@@ -432,20 +431,16 @@ export async function generateParcelAnalysis(
     const mismoSatelite = (previo.lastCaptureDate ?? null) === (capture ?? null);
     const mismaLibreta = (previo.lastNotebookStamp ?? "") === stamp;
     if (mismoSatelite && mismaLibreta) {
-      return { analysis: previo.analysis, model: previo.model ?? AI_MODEL, cached: true };
+      return { analysis: previo.analysis, model: previo.model ?? MODELO_IA, cached: true };
     }
   }
 
-  const { getGlobalSetting } = await import("./globalSettings");
-  let apiKey = await getGlobalSetting("deepseekApiKey");
-  if (!apiKey) {
-    console.log(`${TAG} Sin API key configurada, se omite`);
+  // Sin clave no vale la pena juntar todo el contexto de la parcela
+  const { key, motivo } = await claveDeDeepSeek();
+  if (!key) {
+    console.log(`${TAG} Sin análisis: ${motivo}`);
     return null;
   }
-  try {
-    const { decryptSecret, isEncrypted } = await import("./encryption");
-    if (isEncrypted(apiKey)) apiKey = decryptSecret(apiKey);
-  } catch { /* key en claro */ }
 
   const contexto = await buildParcelContext(parcelId);
   if (contexto === null) return null;
@@ -454,7 +449,7 @@ export async function generateParcelAnalysis(
   const ndre = options.ndreData?.length ? options.ndreData : await getCachedSeries(parcelId, "NDRE");
   const ndmi = options.ndmiData?.length ? options.ndmiData : await getCachedSeries(parcelId, "NDMI");
 
-  const prompt = `Eres un ingeniero agrónomo experto en agricultura de precisión y teledetección, especializado en higo. Analiza la parcela "${parcelName}" con TODA la información siguiente y da un diagnóstico concreto y accionable.
+  const prompt = `Analiza la parcela "${parcelName}" con TODA la información siguiente y da un diagnóstico concreto y accionable. Hoy es ${todayMx()}.
 
 ${contexto}
 
@@ -469,49 +464,37 @@ Guía de lectura del NDVI en higo: menos de 0.2 es suelo desnudo o planta seca;
 0.2-0.4 vigor bajo (estrés, poda reciente o brotación incipiente); 0.4-0.6
 desarrollo medio; más de 0.6 follaje denso y sano.
 
-INSTRUCCIONES:
+QUÉ TIENES QUE HACER:
 1) Di cómo está la parcela HOY y, sobre todo, DÓNDE: nombra la zona débil tal como viene ("el noreste está seco, NDVI 0.18, contra 0.55 del resto"). Si el vigor es parejo, dilo en lugar de inventar problemas.
-2) **Cruza el estado satelital con la libreta de campo de esta parcela**: si una zona está débil y ahí se regó hace poco, sospecha falla de riego; si la parcela está recién podada, el vigor bajo es NORMAL y no es una alarma; si se aplicó fertilizante y el NDVI no subió, señálalo.
+2) Cruza el estado satelital con la libreta de campo de esta parcela: si una zona está débil y ahí se regó hace poco, sospecha falla de riego; si la parcela está recién podada, el vigor bajo es NORMAL y no es una alarma; si se aplicó fertilizante y el NDVI no subió, señálalo.
 3) Toma en cuenta los productos aplicados y las cantidades: si se usó menos de lo planeado, puede explicar una respuesta pobre.
 4) Atiende las notas de campo sin resolver de esta parcela.
 5) Relaciona el vigor con la cosecha real de la parcela cuando haya datos.
-6) Cierra con 2-3 acciones concretas para los próximos días, considerando el pronóstico (no aplicar foliares ni fitosanitarios antes de lluvia o con viento, ajustar riego si viene agua).
+6) Cierra con 2 o 3 acciones concretas para los próximos días, considerando el pronóstico (no aplicar foliares ni fitosanitarios antes de lluvia o con viento, ajustar riego si viene agua).
 
-Máximo 10 líneas. Tono de ingeniero agrónomo: directo, específico y sin rodeos. Sin saludos ni despedidas. Responde en español.`;
+ESTRUCTURA (usa exactamente estos tres títulos, en este orden):
+### Estado actual
+2 o 3 frases: cómo está y dónde.
+### Qué lo explica
+2 a 4 frases o viñetas que crucen el satélite con la libreta, los productos, las notas y la cosecha.
+### Acciones para los próximos días
+2 o 3 viñetas, cada una con qué hacer, dónde y cuándo.
+
+Extensión total: entre 8 y 14 renglones.
+
+${FORMATO_TEXTO}`;
 
   console.log(`${TAG} Analizando "${parcelName}" (captura ${capture ?? "sin datos"})`);
 
   try {
-    const response = await fetch("https://api.deepseek.com/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: AI_MODEL,
-        messages: [
-          { role: "system", content: "Eres un ingeniero agrónomo senior especializado en agricultura de precisión, teledetección satelital y manejo del higo. Respondes de forma concisa, específica y accionable, en español." },
-          { role: "user", content: prompt },
-        ],
-        // El modelo razona antes de responder y ese consumo cuenta aquí
-        max_tokens: AI_MAX_TOKENS,
-        temperature: 0.4,
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => "");
-      console.error(`${TAG} IA HTTP ${response.status}: ${errText.slice(0, 200)}`);
-      throw new Error(`La IA respondió con error ${response.status}`);
+    const respuesta = await pedirADeepSeek({ etiqueta: TAG, prompt });
+    if (!respuesta.ok) {
+      // El motivo llega tal cual a la pantalla: "sin saldo", "clave rechazada"…
+      throw new Error(respuesta.detalle);
     }
 
-    const result = await response.json();
-    const choice = result.choices?.[0];
-    const analysis: string = choice?.message?.content?.trim() ?? "";
-    if (!analysis) {
-      console.error(`${TAG} Respuesta vacía (finish_reason: ${choice?.finish_reason})`);
-      throw new Error("La IA no devolvió análisis (se quedó sin espacio para responder)");
-    }
-
-    const model = result.model || AI_MODEL;
+    const analysis = respuesta.texto;
+    const model = respuesta.modelo;
     const today = todayMx();
     let cycleId: number | null = null;
     try {

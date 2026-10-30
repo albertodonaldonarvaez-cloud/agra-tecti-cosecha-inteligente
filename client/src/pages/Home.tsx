@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { useLocation } from "wouter";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { getActivityTypeInfo, getStatusInfo } from "@/config/fieldNotebook";
+import { TextoIA } from "@/components/TextoIA";
 
 // Fecha local de México "YYYY-MM-DD"
 function todayMx(): string {
@@ -1235,8 +1236,8 @@ function WeeklySummaryCard({ summary, isAdmin, onGenerate, generating, generateE
 
       {summary ? (
         <>
-          <div className={`mt-3 whitespace-pre-line text-sm leading-relaxed text-gray-700 ${expanded ? "" : "max-h-40 overflow-hidden"}`}>
-            {summary.content}
+          <div className={`mt-3 text-sm text-gray-700 ${expanded ? "" : "max-h-40 overflow-hidden"}`}>
+            <TextoIA texto={summary.content} />
           </div>
           <button
             onClick={() => setExpanded(!expanded)}

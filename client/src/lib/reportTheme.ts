@@ -274,6 +274,19 @@ export function getReportCss(): string {
       white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word;
       text-align: justify;
     }
+    /* Análisis de la IA ya en bloques (títulos, párrafos, viñetas): el HTML
+       trae su propia estructura y el pre-wrap solo agregaría huecos */
+    .ia-card-body.texto-ia { white-space: normal; text-align: left; }
+    .texto-ia h4 {
+      font-size: 9px; font-weight: 800; color: var(--verde);
+      text-transform: uppercase; letter-spacing: 0.6px;
+      margin: 8px 0 3px 0; break-after: avoid;
+    }
+    .texto-ia h4:first-child { margin-top: 0; }
+    .texto-ia p { margin: 0 0 5px 0; }
+    .texto-ia ul, .texto-ia ol { margin: 0 0 5px 0; padding-left: 15px; }
+    .texto-ia li { margin-bottom: 2px; }
+    .texto-ia strong { font-weight: 700; color: var(--verde); }
 
     /* Párrafos de cuerpo, para texto redactado */
     .prose { font-size: 9.5px; line-height: 1.62; color: var(--tinta); text-align: justify; }
